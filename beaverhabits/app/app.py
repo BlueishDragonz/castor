@@ -5,6 +5,7 @@ from beaverhabits.configs import settings
 from .dependencies import current_admin_user
 from .schemas import UserCreate, UserRead, UserUpdate
 from .users import auth_backend, fastapi_users
+from .webauthn_routes import router as webauthn_router
 
 
 def init_auth_routes(app: FastAPI) -> None:
@@ -35,3 +36,6 @@ def init_auth_routes(app: FastAPI) -> None:
         prefix="/users",
         tags=["users"],
     )
+    
+    # WebAuthn / Passkey routes
+    app.include_router(webauthn_router, tags=["auth"])

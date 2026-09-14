@@ -43,6 +43,9 @@ class User(TimestampMixin, SQLAlchemyBaseUserTableUUID, Base):
     note_images: Mapped["UserNoteImageModel"] = relationship(
         back_populates="user", uselist=True, cascade="all, delete-orphan"
     )
+    webauthn_credentials: Mapped[list["WebAuthnCredential"]] = relationship(
+        back_populates="user", uselist=True, cascade="all, delete-orphan"
+    )
 
 
 class HabitListModel(TimestampMixin, Base):
@@ -102,6 +105,28 @@ class UserApiTokenModel(TimestampMixin, Base):
     user_id = mapped_column(GUID, ForeignKey("user.id"), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(default=None)
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class WebAuthnCredential(TimestampMixin, Base):
+    """WebAuthn / Passkey credential storage."""
+
+    __tablename__ = "webauthn_credential"
+
+    id: Mapped[bytes] = mapped_column(primary_key=True)  # credential_id (raw bytes)
+    user_id = mapped_column(GUID, ForeignKey("user.id"), index=True)
+    user = relationship("User", back_populates="webauthn_credentials")
+
+    public_key: Mapped[bytes] = mapped_column(nullable=False)
+    sign_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    transports: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+    # Resident key / passkey fields
+    aaguid: Mapped[bytes | None] = mapped_column(nullable=True)
+    backup_eligible: Mapped[bool] = mapped_column(default=False)
+    backup_state: Mapped[bool] = mapped_column(default=False)
+
+    # Optional: human-readable name for the credential
+    name: Mapped[str | None] = mapped_column(nullable=True)
 
 
 # SSL Mode: https://www.postgresql.org/docs/9.0/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
