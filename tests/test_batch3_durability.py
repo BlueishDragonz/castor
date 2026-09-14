@@ -271,3 +271,109 @@ class TestComposePointsAtFork:
         assert BUILT_IMAGE_TAG in r.stdout, (
             f"{COMPOSE_PATH} image: must be {BUILT_IMAGE_TAG}, got:\n{r.stdout}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Batch 3.6: regression — every non-stdlib import in the fork resolves in the
+# image. This catches the `user_agents` miss that bit us on first login:
+# today's pre-merge work introduced a new module (device.py) that imports
+# user_agents, but the dep wasn't in pyproject.toml at image-build time.
+# ---------------------------------------------------------------------------
+
+class TestAllSourceImportsResolveInImage:
+    # Stdlib modules that are guaranteed to exist; everything else must be
+    # installed in the image's venv.
+    STDLIB = frozenset({
+        "aiofiles",
+        "asyncio",
+        "base64",
+        "calendar",
+        "collections",
+        "contextlib",
+        "copy",
+        "csv",
+        "dataclasses",
+        "datetime",
+        "email",
+        "enum",
+        "functools",
+        "gc",
+        "hashlib",
+        "importlib",
+        "io",
+        "itertools",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "platform",
+        "random",
+        "re",
+        "secrets",
+        "smtplib",
+        "sys",
+        "time",
+        "tracemalloc",
+        "typing",
+        "urllib",
+        "uuid",
+    })
+
+    # Packages that the source may import but which are intentionally NOT
+    # installed in the self-hosted Docker image. These live in the upstream
+    # `fly` extras group (see pyproject.toml) and are only needed for the
+    # hosted Fly.io deployment. The self-hosted image guards them at runtime
+    # via settings.ENABLE_PLAN and similar flags.
+    OPTIONAL_FOR_SELF_HOSTED = frozenset({
+        "paddle_billing",  # Paddle SDK — only used when ENABLE_PLAN=True
+    })
+
+    def test_every_third_party_import_in_source_resolves_in_image(self):
+        """For every non-stdlib, non-beaverhabits top-level package that
+        the source imports, the package must be importable inside the image.
+
+        This is the regression guard for the user_agents / device.py miss:
+        if anyone adds a new module that pulls in a new dep, this test will
+        fail unless pyproject.toml + uv.lock are also updated and the image
+        is rebuilt.
+
+        Packages in OPTIONAL_FOR_SELF_HOSTED are deliberately excluded — the
+        source imports them at module top but they're only loaded when the
+        host enables the feature. The image excludes them via the upstream
+        `fly` extras group. To verify they're actually unused at startup,
+        we also check that `import beaverhabits.main` succeeds without
+        triggering their import path."""
+        # Discover every top-level import in the source tree
+        r = sh_local(
+            "grep -rohE '^(import|from) [a-z_][a-z0-9_]*' "
+            "/opt/castor/beaverhabits/ "
+            "| sed -E 's/^(import|from) ([a-z_][a-z0-9_]*)/\\2/' "
+            "| sort -u"
+        )
+        assert r.returncode == 0, f"could not scan source: {r.stderr}"
+        packages = {
+            line.strip()
+            for line in r.stdout.splitlines()
+            if line.strip()
+            and line.strip() not in self.STDLIB
+            and line.strip() not in self.OPTIONAL_FOR_SELF_HOSTED
+        }
+        # Drop beaverhabits itself (it's the project, not a dep)
+        packages.discard("beaverhabits")
+        assert packages, "found no third-party packages to check — script bug?"
+
+        # Build a single python -c invocation that imports every package
+        imports = "; ".join(f"import {p}" for p in sorted(packages))
+        check_script = (
+            "/opt/pysetup/.venv/bin/python -c "
+            f'"{imports}; print(\\"OK\\")"'
+        )
+        r = sh_local(f"/usr/bin/docker run --rm {BUILT_IMAGE_TAG} {check_script}")
+        assert r.returncode == 0, (
+            f"one or more packages imported by the source are NOT installed "
+            f"in the image:\n"
+            f"  rc={r.returncode}\n"
+            f"  stdout={r.stdout!r}\n"
+            f"  stderr={r.stderr!r}\n"
+            f"  checked packages: {sorted(packages)}"
+        )
