@@ -1,4 +1,4 @@
-import calendar
+import datetime
 import logging
 from enum import Enum
 
@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     TIME_ZONE: str = ""
 
     # Customization
-    FIRST_DAY_OF_WEEK: int = calendar.MONDAY
+    FIRST_DAY_OF_WEEK: int = 0  # calendar.MONDAY
     # Set to 0-6 to align today to specific day of week, e.g., 0 for Monday
     ALIGN_TODAY_TO_DAY_OF_WEEK: int | None = None
     ENABLE_IOS_STANDALONE: bool = True
@@ -105,6 +105,12 @@ class Settings(BaseSettings):
     GOOGLE_ONE_TAP_CLIENT_ID: str = ""
     GOOGLE_ONE_TAP_ENABLED: bool = False
     GOOGLE_ONE_TAP_CALLBACK_URL: str = ""
+
+    # WebAuthn / Passkeys
+    WEBAUTHN_RP_ID: str = "localhost"
+    WEBAUTHN_RP_NAME: str = "Beaver Habits"
+    WEBAUTHN_ORIGIN: str = "http://localhost:8080"
+    WEBAUTHN_TIMEOUT: int = 60000  # 60 seconds
 
     def is_dev(self):
         return self.ENV == "dev"

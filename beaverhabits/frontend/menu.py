@@ -13,7 +13,7 @@ STATS_END_DATE = "stats_end_date"
 
 
 def add_menu():
-    add = menu_icon_item("Add", lambda: redirect("add"))
+    add = menu_icon_item("Add", lambda: redirect("add"), icon="sym_o_add")
     add.props('aria-label="Add habit"')
 
 

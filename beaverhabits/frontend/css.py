@@ -79,6 +79,22 @@ TEXTAREA_CSS = """
 }
 """
 
+# Self-hosted Inter (variable, latin). Replaces Quasar's default Roboto
+# (which also phones home to Google Fonts) across every page.
+FONT_CSS = """
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('/statics/fonts/inter-latin.woff2') format('woff2');
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+"""
+
 
 WHITE_FLASH_PREVENT = """\
 :root {

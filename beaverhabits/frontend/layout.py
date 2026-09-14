@@ -34,10 +34,10 @@ def pwa_headers():
     ui.add_head_html(
         """
         <link rel="apple-touch-icon" href="/statics/images/apple-touch-icon-v4.png">
-        
+
         <meta name="apple-mobile-web-app-title" content="Beaver">
         <meta name="application-name" content="Beaver">
-        
+
         <meta name="theme-color" content="#F9F9F9" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
         """
@@ -63,7 +63,7 @@ def custom_headers():
         <meta name="author" content="daya0576">
         <meta name="robots" content="index, follow">
         <link rel="canonical" href="{page_url}">
-        
+
         <!-- Open Graph / Facebook -->
         <meta property="og:type" content="website">
         <meta property="og:url" content="{page_url}">
@@ -71,14 +71,14 @@ def custom_headers():
         <meta property="og:description" content="A minimal habit tracking app without Goals. Track your daily habits with privacy and simplicity.">
         <meta property="og:image" content="https://beaverhabits.com/statics/images/apple-touch-icon-v4.png">
         <meta property="og:site_name" content="Beaver Habit Tracker">
-        
+
         <!-- Twitter -->
         <meta name="twitter:card" content="summary_large_image">
         <meta name="twitter:url" content="{page_url}">
         <meta name="twitter:title" content="Beaver Habit Tracker">
         <meta name="twitter:description" content="A minimal habit tracking app without Goals. Track your daily habits with privacy and simplicity.">
         <meta name="twitter:image" content="https://beaverhabits.com/statics/images/apple-touch-icon-v4.png">
-        
+
         <!-- Structured Data (JSON-LD) -->
         <script type="application/ld+json">
         {{
@@ -116,6 +116,8 @@ def custom_headers():
     # Prevent white flash on page load
     ui.add_css(css.WHITE_FLASH_PREVENT)
     ui.add_css(css.TEXTAREA_CSS)
+    # Self-hosted Inter font (added in Batch 2, replaces Quasar's default Roboto)
+    ui.add_css(css.FONT_CSS)
 
     # prevent context menu
     ui.add_body_html(f"<script>{PREVENT_CONTEXT_MENU}</script>")
@@ -155,34 +157,38 @@ def menu_component():
         add_menu()
         separator()
 
-        with menu_icon_item("Tools", auto_close=False).classes("pr-1"):
+        with menu_icon_item("Tools", auto_close=False, icon="sym_o_construction").classes("pr-1"):
             with ui.item_section().props("side").classes("pl-[1px]"):
                 ui.icon(icons.CHEVRON_RIGHT)
             with ui.menu().props('anchor="top end" self="top start" auto-close'):
                 # Stats for all habtis
-                menu_icon_item("Reorder", lambda: redirect("order"))
+                menu_icon_item("Reorder", lambda: redirect("order"), icon="sym_o_swap_vert")
                 separator()
 
                 # Export & import
-                menu_icon_item("Export", lambda: redirect("export"))
+                menu_icon_item("Export", lambda: redirect("export"), icon="sym_o_download")
                 separator()
-                imp = menu_icon_item("Import", lambda: redirect("import"))
+                imp = menu_icon_item("Import", lambda: redirect("import"), icon="sym_o_upload")
                 if is_page_demo():
                     imp.classes("disabled")
                 separator()
 
                 # Stats for all habtis
-                menu_icon_item("Stats", lambda: redirect("stats"))
+                menu_icon_item("Stats", lambda: redirect("stats"), icon="sym_o_bar_chart")
                 separator()
 
         separator()
 
+        # Security (passkey management, password change)
+        menu_icon_item("Security", lambda: redirect("security"), icon="sym_o_shield")
+        separator()
+
         # About page
-        menu_icon_item("Help", show_help_dialog)
+        menu_icon_item("Help", show_help_dialog, icon="sym_o_help")
         separator()
 
         # Login & Logout
-        menu_icon_item("Logout", lambda: user_logout() and ui.navigate.to("/login"))
+        menu_icon_item("Logout", lambda: user_logout() and ui.navigate.to("/login"), icon="sym_o_logout")
 
 
 @contextmanager
@@ -196,8 +202,20 @@ def layout(
     custom_headers()
     pwa_headers()
 
+    # Detect phone-class UA; gate mobile-only chrome on this.
+    # `context.client.request` is populated for HTTP requests, including
+    # the initial page load before the WS handshake.
+    # These imports are lazy to break the layout<->bottom_nav circular import:
+    # bottom_nav.py imports `redirect` from layout (line 7), so layout must
+    # not import bottom_nav at module level.
+    from nicegui import context
+    from beaverhabits.frontend.device import is_mobile
+    _ua = context.client.request.headers.get("user-agent", "") if context.client.request else ""
+    mobile = is_mobile(_ua)
+
     # Center the content on small screens
-    with ui.column().classes("mx-auto mx-0"):
+    extra_pad = "pb-20" if mobile else ""
+    with ui.column().classes(f"mx-auto mx-0 {extra_pad}"):
 
         # Layout wrapper
         with ui.row().classes("w-full gap-x-1"):
@@ -216,7 +234,17 @@ def layout(
                 with menu_icon_button("sym_o_expand_content", tooltip="Date"):
                     stats_date_pick_menu()
 
-            with menu_icon_button("sym_o_menu"):
-                menu_component()
+            # Mobile users see a single Reorder icon in the top-right (where the
+            # hamburger used to sit). Desktop/tablet keep the hamburger (full menu:
+            # Add, Tools, Security, Help, Logout).
+            if mobile:
+                menu_icon_button("sym_o_swap_vert", click=lambda: redirect("order"), tooltip="Reorder habits")
+            else:
+                with menu_icon_button("sym_o_menu"):
+                    menu_component()
 
         yield
+
+        if mobile:
+            from beaverhabits.frontend.bottom_nav import bottom_nav
+            bottom_nav()

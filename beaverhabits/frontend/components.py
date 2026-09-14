@@ -2,6 +2,7 @@ import asyncio
 import calendar
 import datetime
 import os
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Optional, Self
@@ -31,7 +32,6 @@ from beaverhabits.storage.storage import (
     HabitFrequency,
     HabitList,
     HabitStatus,
-    habits_by_tags as _habits_by_tags,
 )
 from beaverhabits.utils import (
     PERIOD_TYPE,
@@ -108,8 +108,18 @@ def menu_icon_button(
     return button
 
 
-def menu_icon_item(*args, **kwargs):
-    menu_item = ui.menu_item(*args, **kwargs).classes("items-center")
+def menu_icon_item(*args, icon: str | None = None, **kwargs):
+    # Pass args through untouched: callers pass the action positionally
+    # (e.g. menu_icon_item("Security", lambda: redirect(...))).
+    with ui.menu_item(*args, **kwargs).classes("items-center") as menu_item:
+        if icon:
+            # MenuItem renders its label at construction, so the avatar must
+            # be moved ahead of it: icon + label (+ chevron/submenu after).
+            with ui.item_section().props("avatar").style(
+                "min-width:28px;padding-right:8px;"
+            ) as avatar:
+                ui.icon(icon)
+            avatar.move(menu_item, 0)
     # Accessibility
     return menu_item.props('dense role="menuitem"')
 
@@ -1118,7 +1128,21 @@ def filter_habits_with_tags(active_habits: list[Habit]) -> list[Habit]:
 
 
 def habits_by_tags(active_habits: list[Habit]) -> dict[str, list[Habit]]:
-    return _habits_by_tags(active_habits)
+    all_tags = get_all_tags(active_habits)
+    if not all_tags:
+        return {"": active_habits}
+
+    all_tags.append("Others")
+
+    habits = OrderedDict()
+    # with tags
+    for habit in active_habits:
+        for tag in habit.tags:
+            habits.setdefault(tag, []).append(habit)
+    # without tags
+    habits["Others"] = [h for h in active_habits if not h.tags]
+
+    return habits
 
 
 class TagChip(ui.chip):
@@ -1313,9 +1337,19 @@ def habit_edit_dialog(habit: Habit) -> ui.dialog:
     return dialog
 
 
-def auth_header(text: str):
-    with ui.row():
-        ui.label(text).classes("text-3xl font-bold")
+def auth_header(text: str, on_back=None):
+    """Centered title row. With on_back, a back arrow pins to the panel's
+    left edge (hidden until the page shows it). Returns the button or None."""
+    with ui.row().classes("w-full justify-center items-center relative"):
+        back_btn = None
+        if on_back is not None:
+            back_btn = ui.button(icon="arrow_back", on_click=on_back).props(
+                "flat round dense"
+            )
+            back_btn.style("position:absolute;left:0;")
+            back_btn.set_visibility(False)
+        ui.label(text).classes("text-3xl font-bold text-center")
+    return back_btn
 
 
 def auth_redirect(text: str, target: str):
@@ -1356,12 +1390,32 @@ def auth_password(title: str = "Password", value: str | None = None):
 
 
 @contextmanager
-def auth_card(title: str, func: Callable):
-    with ui.card().classes("absolute-center shadow-none w-80 sm:w-96"):
-        with ui.column().classes("w-full gap-4"):
-            auth_header(title)
-            yield
-            ui.button("Continue", on_click=func).props("dense").classes("w-full")
+def auth_card(title: str, func: Callable, card_classes: str = "", logo: bool = False,
+               on_back=None, show_continue: bool = True):
+    with ui.column().classes("absolute-center items-center w-80 sm:w-96").style("gap:0;"):
+        if logo:
+            with ui.row().classes("w-full justify-center"):
+                with ui.element("div").style(
+                    "width:72px;height:72px;border-radius:8px;background:#ffffff;"
+                    "display:flex;align-items:center;justify-content:center;"
+                    "border:1px solid #e5e5e5;overflow:hidden;"
+                ):
+                    ui.image("/statics/images/apple-touch-icon.png").style(
+                        "height:42px;width:42px;"
+                    )
+            ui.label("dam good habits").classes("w-full text-center").style(
+                "font-family:Inter,sans-serif;font-weight:500;font-size:11px;"
+                "letter-spacing:3px;color:#6b7280;"
+                "margin:14px 0 0 0;"
+            )
+            ui.element("div").style("height:26px;")
+        with ui.card().classes(f"shadow-none w-full {card_classes}"):
+            with ui.column().classes("w-full gap-4"):
+                back_btn = auth_header(title, on_back=on_back)
+                slot = {"back": back_btn, "continue": None}
+                yield slot
+                if show_continue:
+                    slot["continue"] = ui.button("Continue", on_click=func).props("dense").classes("w-full")
 
 
 def habit_name_menu(
@@ -1406,3 +1460,225 @@ def habit_name_menu(
     name.on("contextmenu", menu.open)
 
     return name
+import json
+import os
+from typing import Optional
+from nicegui import ui, app
+from beaverhabits.configs import settings
+
+
+def webauthn_register_button(user_email: str):
+    """Button to register a new passkey."""
+    with ui.row().classes("w-full justify-center"):
+        with ui.button("Add Passkey", icon="fingerprint", color="primary").props("flat dense") as btn:
+            btn.tooltip("Register a passkey (hardware key, phone, or password manager)")
+            btn.on("click", lambda: ui.run_javascript(f'''
+                registerWebAuthnCredential("{user_email}")
+            '''))
+
+
+def webauthn_login_button(user_email: str):
+    """Button to login with a passkey."""
+    with ui.row().classes("w-full justify-center"):
+        with ui.button("Login with Passkey", icon="fingerprint", color="secondary").props("flat dense") as btn:
+            btn.tooltip("Sign in with a registered passkey")
+            btn.on("click", lambda: ui.run_javascript(f'''
+                authenticateWithWebAuthn("{user_email}")
+            '''))
+
+
+def add_webauthn_javascript():
+    """Add WebAuthn JavaScript helpers to the page."""
+    ui.add_head_html(f'''
+    <script>
+    // Base64URL encoding/decoding helpers
+    function base64urlToBuffer(str) {{
+        return Uint8Array.from(atob(str.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+    }}
+    
+    function bufferToBase64url(buf) {{
+        return btoa(String.fromCharCode(...new Uint8Array(buf)))
+            .replace(/\\+/g, '-')
+            .replace(/\\//g, '_')
+            .replace(/=/g, '');
+    }}
+    
+    // Register a new WebAuthn credential
+    async function registerWebAuthnCredential(email, name, stay) {{
+        if (!email) {{
+            notifyUser("Please enter your email first", "warning");
+            return;
+        }}
+        
+        try {{
+            const response = await fetch("/auth/webauthn/register/begin", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ username: email }})
+            }});
+            
+            if (!response.ok) {{
+                const error = await response.json();
+                notifyUser("Failed to start registration: " + (error.detail || "Unknown error"), "negative");
+                return;
+            }}
+            
+            const data = await response.json();
+            const options = data.publicKey;
+            
+            // Convert challenge and user.id to ArrayBuffer
+            options.challenge = base64urlToBuffer(options.challenge);
+            options.user.id = base64urlToBuffer(options.user.id);
+            
+            if (options.excludeCredentials) {{
+                options.excludeCredentials = options.excludeCredentials.map(c => ({{
+                    ...c,
+                    id: base64urlToBuffer(c.id)
+                }}));
+            }}
+            
+            // Call navigator.credentials.create
+            const credential = await navigator.credentials.create({{ publicKey: options }});
+            
+            if (!credential) {{
+                notifyUser("Registration cancelled", "warning");
+                return;
+            }}
+            
+            // Send attestation to server
+            const attestation = {{
+                username: email,
+                name: name || "",
+                id: credential.id,
+                rawId: bufferToBase64url(credential.rawId),
+                type: credential.type,
+                response: {{
+                    attestationObject: bufferToBase64url(credential.response.attestationObject),
+                    clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+                    transports: credential.response.getTransports ? credential.response.getTransports() : []
+                }}
+            }};
+            
+            const completeResponse = await fetch("/auth/webauthn/register/complete", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify(attestation)
+            }});
+            
+            const result = await completeResponse.json().catch(() => null);
+            
+            if (!result) {{
+                notifyUser("Registration failed: server error " + completeResponse.status, "negative");
+                return;
+            }}
+            
+            if (result.access_token) {{
+                notifyUser("Passkey registered successfully!", "positive");
+                if (stay) {{
+                    const refresher = document.getElementById("bh-pk-refresh");
+                    if (refresher) refresher.click();
+                    return;
+                }}
+                // Store token and redirect
+                localStorage.setItem("auth_token", result.access_token);
+                window.location.href = "/gui";
+            }} else {{
+                notifyUser("Registration failed: " + (result.detail || "Unknown error"), "negative");
+            }}
+        }} catch (error) {{
+            console.error("Registration error:", error);
+            notifyUser("Registration error: " + error.message, "negative");
+        }}
+    }}
+    
+    // Authenticate with WebAuthn
+    async function authenticateWithWebAuthn(email) {{
+        if (!email) {{
+            notifyUser("Please enter your email first", "warning");
+            return;
+        }}
+        
+        try {{
+            const response = await fetch("/auth/webauthn/login/begin", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ username: email }})
+            }});
+            
+            if (!response.ok) {{
+                const error = await response.json();
+                notifyUser("Failed to start login: " + (error.detail || "Unknown error"), "negative");
+                return;
+            }}
+            
+            const data = await response.json();
+            const options = data.publicKey;
+            
+            // Convert challenge to ArrayBuffer
+            options.challenge = base64urlToBuffer(options.challenge);
+            
+            if (options.allowCredentials) {{
+                options.allowCredentials = options.allowCredentials.map(c => ({{
+                    ...c,
+                    id: base64urlToBuffer(c.id)
+                }}));
+            }}
+            
+            // Call navigator.credentials.get
+            const credential = await navigator.credentials.get({{ publicKey: options }});
+            
+            if (!credential) {{
+                notifyUser("Login cancelled", "warning");
+                return;
+            }}
+            
+            // Send assertion to server
+            const assertion = {{
+                username: email,
+                id: credential.id,
+                rawId: bufferToBase64url(credential.rawId),
+                type: credential.type,
+                response: {{
+                    authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+                    clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+                    signature: bufferToBase64url(credential.response.signature),
+                    userHandle: credential.response.userHandle ? bufferToBase64url(credential.response.userHandle) : null
+                }}
+            }};
+            
+            const completeResponse = await fetch("/auth/webauthn/login/complete", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify(assertion)
+            }});
+            
+            const result = await completeResponse.json().catch(() => null);
+            
+            if (!result) {{
+                notifyUser("Login failed: server error " + completeResponse.status, "negative");
+                return;
+            }}
+            
+            if (result.access_token) {{
+                localStorage.setItem("auth_token", result.access_token);
+                window.location.href = "/gui";
+            }} else {{
+                notifyUser("Login failed: " + (result.detail || "Unknown error"), "negative");
+            }}
+        }} catch (error) {{
+            console.error("Login error:", error);
+            notifyUser("Login error: " + error.message, "negative");
+        }}
+    }}
+    
+    // Notification helper
+    function notifyUser(message, type) {{
+        // Try to use NiceGUI's notify if available
+        if (typeof notify === "function") {{
+            notify(message, {{ type: type }});
+        }} else {{
+            alert(message);
+        }}
+    }}
+    </script>
+    ''')
