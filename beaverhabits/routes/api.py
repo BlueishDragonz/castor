@@ -377,7 +377,7 @@ async def _apply_push_habit_list(user: User, msg: dict) -> None:
 
         try:
             habit_list.order_by = _HO(msg["order_by"])
-        except ValueError, KeyError:
+        except (ValueError, KeyError):
             pass
 
 
