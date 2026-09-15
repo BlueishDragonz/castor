@@ -21,11 +21,7 @@ def init_auth_routes(app: FastAPI) -> None:
         tags=["auth"],
         dependencies=register_deps,
     )
-    app.include_router(
-        fastapi_users.get_reset_password_router(),
-        prefix="/auth",
-        tags=["auth"],
-    )
+    # Reset password router removed - replaced with 12-digit code flow in reset_routes.py
     app.include_router(
         fastapi_users.get_verify_router(UserRead),
         prefix="/auth",

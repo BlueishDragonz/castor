@@ -129,6 +129,20 @@ class WebAuthnCredential(TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(nullable=True)
 
 
+class PasswordResetCode(TimestampMixin, Base):
+    """12-digit reset code with SHA-256 hash, 10-minute TTL, single-use."""
+
+    __tablename__ = "password_reset_code"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    email: Mapped[str] = mapped_column(index=True, nullable=False)
+    code_hash: Mapped[str] = mapped_column(nullable=False)  # SHA-256(code)
+    expires_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    used: Mapped[bool] = mapped_column(default=False)
+
+
 # SSL Mode: https://www.postgresql.org/docs/9.0/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
 # p.s. asyncpg us ssl instead of sslmode: https://github.com/tortoise/aerich/issues/310
 connect_args = {}
