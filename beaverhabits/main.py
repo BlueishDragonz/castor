@@ -3,6 +3,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 
 from beaverhabits.app.app import init_auth_routes
 from beaverhabits.app.db import create_db_and_tables
@@ -52,6 +53,12 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/health", response_class=PlainTextResponse, include_in_schema=False)
+async def health_check():
+    """Always-available health check endpoint for container health checks."""
+    return "OK"
 
 
 # auth

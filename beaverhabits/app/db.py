@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 from typing import AsyncGenerator
 from uuid import UUID
@@ -162,6 +163,9 @@ async def create_db_and_tables():
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_maker() as session:
         yield session
+
+
+get_async_session_context = contextlib.asynccontextmanager(get_async_session)
 
 
 async def get_user_db(session: AsyncSession = Depends(get_async_session)):

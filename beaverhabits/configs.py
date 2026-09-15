@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 from enum import Enum
 
 import dotenv
@@ -8,9 +9,11 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 logging.getLogger("niceGUI").setLevel(logging.INFO)
-dotenv.load_dotenv()
 
 USER_DATA_FOLDER = ".user"
+# Load secrets from .user/.secrets.env explicitly (container mounts volume at /app/.user)
+dotenv.load_dotenv(os.path.join(os.getcwd(), USER_DATA_FOLDER, ".secrets.env"))
+dotenv.load_dotenv()  # also load .env from cwd for any overrides
 
 
 class StorageType(Enum):

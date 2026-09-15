@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from beaverhabits.app.db import (
     PasswordResetCode,
     User,
-    get_async_session,
+    get_async_session_context,
     get_user_db,
 )
 from beaverhabits.app.users import get_user_manager, UserManager
@@ -91,7 +91,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
     await _rate_limit_check(f"forgot_email:{req.email}", limit=1, window=900)
 
     # Check if user exists (but don't reveal)
-    async with get_async_session() as session:
+    async with get_async_session_context() as session:
         result = await session.execute(select(User).where(User.email == req.email))
         user = result.scalar_one_or_none()
 
@@ -100,7 +100,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
         code_hash = _hash_code(code)
         expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
 
-        async with get_async_session() as session:
+        async with get_async_session_context() as session:
             session.add(
                 PasswordResetCode(
                     email=req.email, code_hash=code_hash, expires_at=expires_at
@@ -143,7 +143,7 @@ async def reset_password(req: ResetPasswordRequest, request: Request):
 
     code_hash = _hash_code(req.code)
 
-    async with get_async_session() as session:
+    async with get_async_session_context() as session:
         result = await session.execute(
             select(PasswordResetCode).where(
                 PasswordResetCode.email == req.email,
