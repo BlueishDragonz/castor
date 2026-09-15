@@ -1,4 +1,6 @@
 import contextlib
+import hashlib
+import secrets
 import uuid
 from typing import Sequence
 from uuid import UUID
@@ -18,6 +20,11 @@ from .db import (
 )
 
 get_async_session_context = contextlib.asynccontextmanager(get_async_session)
+
+
+def _hash_token(token: str) -> str:
+    """Hash API token with SHA-256 for storage."""
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 async def update_user_habit_list(user: User, data: dict) -> None:
@@ -227,16 +234,17 @@ async def get_user_api_token(user: User) -> str | None:
         result = await session.execute(stmt)
         token_model = result.scalar()
         if token_model:
-            return token_model.token
+            # Token is stored hashed; we can't return the original
+            # This function is used for display purposes - return masked version
+            return token_model.token[:8] + "..." + token_model.token[-4:] if len(token_model.token) > 12 else "****"
         return None
 
 
 async def create_user_api_token(user: User) -> str:
-    import secrets
-
     token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(token)
     async with get_async_session_context() as session:
-        token_model = UserApiTokenModel(token=token, user_id=user.id)
+        token_model = UserApiTokenModel(token=token_hash, user_id=user.id)
         session.add(token_model)
         await session.commit()
         logger.info(f"[CRUD] User {user.id} API token created")
@@ -244,19 +252,18 @@ async def create_user_api_token(user: User) -> str:
 
 
 async def reset_user_api_token(user: User) -> str:
-    import secrets
-
     new_token = secrets.token_urlsafe(32)
+    new_token_hash = _hash_token(new_token)
     async with get_async_session_context() as session:
         stmt = select(UserApiTokenModel).where(UserApiTokenModel.user_id == user.id)
         result = await session.execute(stmt)
         token_model = result.scalar()
         if token_model:
-            token_model.token = new_token
+            token_model.token = new_token_hash
             await session.commit()
             logger.info(f"[CRUD] User {user.id} API token reset")
         else:
-            token_model = UserApiTokenModel(token=new_token, user_id=user.id)
+            token_model = UserApiTokenModel(token=new_token_hash, user_id=user.id)
             session.add(token_model)
             await session.commit()
             logger.info(f"[CRUD] User {user.id} API token created (via reset)")
@@ -275,8 +282,9 @@ async def delete_user_api_token(user: User) -> None:
 
 
 async def get_user_by_api_token(token: str) -> User | None:
+    token_hash = _hash_token(token)
     async with get_async_session_context() as session:
-        stmt = select(UserApiTokenModel).where(UserApiTokenModel.token == token)
+        stmt = select(UserApiTokenModel).where(UserApiTokenModel.token == token_hash)
         result = await session.execute(stmt)
         token_model = result.scalar()
         if token_model:
@@ -284,4 +292,3 @@ async def get_user_by_api_token(token: str) -> User | None:
             user_result = await session.execute(user_stmt)
             return user_result.scalar()
         return None
-        return user_image

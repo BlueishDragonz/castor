@@ -77,6 +77,10 @@ class WebAuthnLoginCompleteResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class VerifyPasswordRequest(BaseModel):
+    password: str
+
+
 def _build_registration_options_dict(options, challenge_b64):
     """Convert webauthn registration options to JSON-serializable dict."""
     return {
@@ -146,7 +150,7 @@ async def webauthn_register_begin(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Get existing credentials for this user
     existing_credentials = await user_manager.get_webauthn_credentials(user)
     exclude_credentials = [
@@ -157,14 +161,14 @@ async def webauthn_register_begin(
         )
         for cred in existing_credentials
     ]
-    
+
     # Generate registration options
     challenge = secrets.token_bytes(32)
     challenge_b64 = bytes_to_base64url(challenge)
-    
+
     # Store challenge for verification
     challenge_store[f"register:{user.id}"] = challenge_b64
-    
+
     options = webauthn.generate_registration_options(
         rp_id=settings.WEBAUTHN_RP_ID,
         rp_name=settings.WEBAUTHN_RP_NAME,
@@ -181,7 +185,7 @@ async def webauthn_register_begin(
         ),
         supported_pub_key_algs=[-7, -257],  # ES256, RS256
     )
-    
+
     return WebAuthnRegisterBeginResponse(publicKey=_build_registration_options_dict(options, challenge_b64))
 
 
@@ -197,7 +201,7 @@ async def webauthn_register_complete(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Retrieve challenge
     challenge_key = f"register:{user.id}"
     challenge_b64 = challenge_store.pop(challenge_key, None)
@@ -206,9 +210,9 @@ async def webauthn_register_complete(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Challenge expired or not found"
         )
-    
+
     challenge = base64url_to_bytes(challenge_b64)
-    
+
     # Verify registration (py_webauthn parses a raw dict internally)
     try:
         verification = webauthn.verify_registration_response(
@@ -229,7 +233,7 @@ async def webauthn_register_complete(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Registration verification failed: {str(e)}"
         )
-    
+
     # Store credential (field names per installed py_webauthn 3.x API)
     try:
         aaguid_bytes = UUID(verification.aaguid).bytes if verification.aaguid else None
@@ -251,22 +255,23 @@ async def webauthn_register_complete(
         backup_state=verification.credential_backed_up,
         name=cred_name,
     )
-    
+
     # Generate JWT token
-    from beaverhabits.app.users import get_jwt_strategy
+    from beaverhabits.app.users import get_jwt_strategy, get_cookie_settings
     strategy = get_jwt_strategy()
     token = await strategy.write_token(user)
-    
+
     logger.info(f"WebAuthn credential registered for user {user.email}")
 
+    # Set auth cookie with Strict + Secure in production
+    cookie_settings = get_cookie_settings()
     response = JSONResponse(
         content={"access_token": token, "token_type": "bearer"}
     )
     response.set_cookie(
         "beaver_auth",
         token,
-        httponly=True,
-        samesite="lax",
+        **cookie_settings,
         path="/",
         max_age=settings.JWT_LIFETIME_SECONDS or 30 * 24 * 3600,
     )
@@ -285,7 +290,7 @@ async def webauthn_login_begin(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Get existing credentials for this user
     credentials = await user_manager.get_webauthn_credentials(user)
     if not credentials:
@@ -293,14 +298,14 @@ async def webauthn_login_begin(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No passkeys registered for this user"
         )
-    
+
     # Generate authentication options
     challenge = secrets.token_bytes(32)
     challenge_b64 = bytes_to_base64url(challenge)
-    
+
     # Store challenge for verification
     challenge_store[f"login:{user.id}"] = challenge_b64
-    
+
     allow_credentials = [
         PublicKeyCredentialDescriptor(
             id=base64url_to_bytes(bytes_to_base64url(cred.id)),
@@ -309,7 +314,7 @@ async def webauthn_login_begin(
         )
         for cred in credentials
     ]
-    
+
     options = webauthn.generate_authentication_options(
         rp_id=settings.WEBAUTHN_RP_ID,
         challenge=challenge,
@@ -317,7 +322,7 @@ async def webauthn_login_begin(
         allow_credentials=allow_credentials,
         user_verification=UserVerificationRequirement.PREFERRED,
     )
-    
+
     return WebAuthnLoginBeginResponse(publicKey=_build_authentication_options_dict(options, challenge_b64))
 
 
@@ -333,7 +338,7 @@ async def webauthn_login_complete(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Get credential from database
     credentials = await user_manager.get_webauthn_credentials(user)
     cred_db = None
@@ -341,13 +346,13 @@ async def webauthn_login_complete(
         if bytes_to_base64url(cred.id) == request.id:
             cred_db = cred
             break
-    
+
     if not cred_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found"
         )
-    
+
     # Retrieve challenge
     challenge_key = f"login:{user.id}"
     challenge_b64 = challenge_store.pop(challenge_key, None)
@@ -356,9 +361,9 @@ async def webauthn_login_complete(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Challenge expired or not found"
         )
-    
+
     challenge = base64url_to_bytes(challenge_b64)
-    
+
     # Verify authentication (py_webauthn parses a raw dict internally)
     try:
         verification = webauthn.verify_authentication_response(
@@ -381,36 +386,33 @@ async def webauthn_login_complete(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Authentication verification failed: {str(e)}"
         )
-    
+
     # Update sign count
     from beaverhabits.app.auth import get_async_session_context
     async with get_async_session_context() as session:
         cred_db.sign_count = verification.new_sign_count
         await session.commit()
-    
+
     # Generate JWT token
-    from beaverhabits.app.users import get_jwt_strategy
+    from beaverhabits.app.users import get_jwt_strategy, get_cookie_settings
     strategy = get_jwt_strategy()
     token = await strategy.write_token(user)
-    
+
     logger.info(f"WebAuthn login successful for user {user.email}")
 
+    # Set auth cookie with Strict + Secure in production
+    cookie_settings = get_cookie_settings()
     response = JSONResponse(
         content={"access_token": token, "token_type": "bearer"}
     )
     response.set_cookie(
         "beaver_auth",
         token,
-        httponly=True,
-        samesite="lax",
+        **cookie_settings,
         path="/",
         max_age=settings.JWT_LIFETIME_SECONDS or 30 * 24 * 3600,
     )
     return response
-
-
-class VerifyPasswordRequest(BaseModel):
-    password: str
 
 
 @router.post("/verify-password")

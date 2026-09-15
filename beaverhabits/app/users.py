@@ -107,6 +107,15 @@ def get_jwt_strategy() -> JWTStrategy:
     return jwt_strategy
 
 
+def get_cookie_settings() -> dict:
+    """Cookie settings for auth - Strict + Secure in production."""
+    return {
+        "httponly": True,
+        "samesite": "strict",
+        "secure": not settings.is_dev(),
+    }
+
+
 auth_backend = AuthenticationBackend(
     name="jwt",
     transport=bearer_transport,

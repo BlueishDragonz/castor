@@ -94,6 +94,16 @@ async def post_habits(
         user, views.dummy_empty_habit_list()
     )
 
+    # Enforce MAX_HABIT_COUNT server-side
+    active_habits = [
+        h for h in habit_list.habits if h.status == HabitStatus.ACTIVE
+    ]
+    if len(active_habits) >= settings.MAX_HABIT_COUNT > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Maximum habit count ({settings.MAX_HABIT_COUNT}) reached",
+        )
+
     id = await habit_list.add(habit.name)
     logger.info(f"Created new habit {id} for user {user.email}")
 
@@ -258,8 +268,11 @@ async def get_habit_completions(
         raise HTTPException(status_code=400, detail="Invalid sort value")
     ticked_days = sorted(ticked_days, reverse=sort == "desc")
 
-    if limit:
-        ticked_days = ticked_days[:limit]
+    # Cap limit to prevent DoS via unbounded queries
+    MAX_LIMIT = 10000
+    if limit is None or limit > MAX_LIMIT:
+        limit = MAX_LIMIT
+    ticked_days = ticked_days[:limit]
 
     return [x.strftime(date_fmt) for x in ticked_days]
 
