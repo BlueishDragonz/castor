@@ -254,14 +254,30 @@ def timeit(threshold: float):
     return decorator
 
 
-def send_email(subject: str, body: str, recipients: list[str]):
+def send_email(subject: str, body: str, recipients: list[str], html_body: str | None = None):
+    """Send email with optional HTML body for branding."""
     sender = settings.SMTP_EMAIL_USERNAME
     password = settings.SMTP_EMAIL_PASSWORD
 
-    msg = MIMEText(body or subject)
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = ", ".join(recipients)
+    if html_body:
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = sender
+        msg["To"] = ", ".join(recipients)
+
+        # Plain text fallback
+        msg.attach(MIMEText(body or subject, "plain"))
+        # HTML version
+        msg.attach(MIMEText(html_body, "html"))
+    else:
+        from email.mime.text import MIMEText
+        msg = MIMEText(body or subject)
+        msg["Subject"] = subject
+        msg["From"] = sender
+        msg["To"] = ", ".join(recipients)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp_server:
         smtp_server.login(sender, password)
