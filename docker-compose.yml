@@ -10,7 +10,7 @@ services:
       - WEBAUTHN_RP_ID=localhost
       - WEBAUTHN_ORIGIN=http://localhost:8080
     volumes:
-      - beaver_data:/app/.user/
+      - beaverhabits_beaver_data:/app/.user/
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python healthcheck.py"]
@@ -19,4 +19,5 @@ services:
       retries: 3
 
 volumes:
-  beaver_data:
+  beaverhabits_beaver_data:
+    external: true
