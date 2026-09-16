@@ -543,8 +543,16 @@ async def login_page(client: Client) -> Optional[RedirectResponse]:
             )
             state["email_locked"] = True
             state["show_password"] = False
+            # Capture password BEFORE render() recreates the field
+            pw_value = refs["password"].value if refs.get("password") else None
+            confirm_value = refs["confirm"].value if refs.get("confirm") else None
             render()
             user = state["user"]
+            # Restore values to new fields
+            if pw_value and refs.get("password"):
+                refs["password"].value = pw_value
+            if confirm_value and refs.get("confirm"):
+                refs["confirm"].value = confirm_value
 
         pw_el = refs["password"]
         if user is not None:
