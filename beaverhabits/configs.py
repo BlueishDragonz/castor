@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     TAG_SELECTION_MODE: TagSelectionMode = TagSelectionMode.MULTI
     ENABLE_TAG_FILTERS: bool = True
 
+    # TLS termination (reverse proxy with HTTPS) - set True when behind nginx/Caddy with HTTPS
+    # When False (direct HTTP), CSP allows ws: for WebSocket; when True, only wss: allowed
+    TLS_TERMINATED: bool = False
+
     INDEX_SHOW_HABIT_COUNT: bool = False
     INDEX_SHOW_HABIT_STREAK: bool = False
     INDEX_HABIT_NAME_COLUMNS: int = 5

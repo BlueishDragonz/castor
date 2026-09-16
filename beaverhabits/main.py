@@ -114,19 +114,37 @@ async def security_headers(request: Request, call_next):
     if not settings.is_dev():
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     
-    # CSP - restrictive but allows Google One Tap and Paddle
-    csp = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://accounts.google.com https://cdn.paddle.com; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https:; "
-        "font-src 'self' data:; "
-        "connect-src 'self' https://accounts.google.com https://api.telegram.org wss:; "
-        "frame-src https://accounts.google.com; "
-        "form-action 'self'; "
-        "base-uri 'self'; "
-        "frame-ancestors 'none'"
-    )
+    # CSP - allow ws: for WebSocket on HTTP connections, and allow eval/blob for module loading
+    # Check if we're likely behind HTTP (no TLS) - allow ws: for NiceGUI WebSocket
+    # In production with TLS termination, HSTS will enforce HTTPS and wss: is sufficient
+    if settings.is_dev() or not getattr(settings, 'TLS_TERMINATED', False):
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://cdn.paddle.com; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' data:; "
+            "connect-src 'self' https://accounts.google.com https://api.telegram.org ws: wss:; "
+            "frame-src https://accounts.google.com; "
+            "form-action 'self'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'; "
+            "worker-src 'self' blob:"
+        )
+    else:
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://cdn.paddle.com; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' data:; "
+            "connect-src 'self' https://accounts.google.com https://api.telegram.org wss:; "
+            "frame-src https://accounts.google.com; "
+            "form-action 'self'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'; "
+            "worker-src 'self' blob:"
+        )
     response.headers["Content-Security-Policy"] = csp
     
     # Other security headers
