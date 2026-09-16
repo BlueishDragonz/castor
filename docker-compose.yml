@@ -1,0 +1,22 @@
+services:
+  beaverhabits:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: beaverhabits
+    network_mode: "container:wg-easy"
+    environment:
+      - HABITS_STORAGE=DATABASE
+      - WEBAUTHN_RP_ID=localhost
+      - WEBAUTHN_ORIGIN=http://localhost:8080
+    volumes:
+      - beaver_data:/app/.user/
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  beaver_data:
