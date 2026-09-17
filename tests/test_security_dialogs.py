@@ -9,7 +9,6 @@ import importlib
 import inspect
 import json
 import unittest
-from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,22 +19,16 @@ from nicegui.page import page as Page
 import beaverhabits.main  # preserve the app's circular-import ordering
 
 security = importlib.import_module("beaverhabits.frontend.security_page")
+from beaverhabits.app import security_actions
 
 
 class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.client = Client(Page('/security-test'))
-        self.user = SimpleNamespace(email='fixture+"quoted"@example.com', id='fixture')
+        self.user = SimpleNamespace(email='fixture+"quoted"@example.com', id='fixture', token_version=7)
         self.load = AsyncMock(return_value=[])
-        self.auth = AsyncMock(return_value=self.user)
-        self.manager = SimpleNamespace(
-            update=AsyncMock(), get_webauthn_credentials=AsyncMock(return_value=[]),
-            delete_webauthn_credential=AsyncMock(return_value=True),
-        )
-
-        @asynccontextmanager
-        async def session(*args):
-            yield self.manager
+        self.change = AsyncMock(return_value=self.user)
+        self.remove = AsyncMock(return_value=True)
 
         self.js = AsyncMock(return_value={"status": "success"})
         self.logout = MagicMock()
@@ -44,11 +37,9 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
             patch.object(security, 'custom_headers', lambda: None),
             patch.object(security, 'layout', lambda **kwargs: ui.column()),
             patch.object(security, 'add_security_passkey_javascript', lambda: None, create=True),
-            patch.object(security, 'user_authenticate', self.auth),
+            patch.object(security_actions, 'change_password', self.change),
+            patch.object(security_actions, 'remove_passkey', self.remove),
             patch.object(security, 'user_logout', self.logout, create=True),
-            patch.object(security, 'get_async_session_context', session),
-            patch.object(security, 'get_user_db_context', session),
-            patch.object(security, 'get_user_manager_context', session),
             patch.object(ui, 'run_javascript', self.js),
             patch.object(self.client, 'run_javascript', MagicMock()),
             patch.object(ui.navigate, 'to'),
@@ -183,6 +174,9 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
         self.assert_inline('could not confirm')
         self.assertNotIn('Passkey added', self.text())
         self.assertEqual(self.load.await_count, 1)
+        self.assertFalse(self.named(ui.button, 'Register passkey').enabled)
+        await self.click('Register passkey')
+        self.assertEqual(self.js.await_count, 1)
 
     async def test_js_timeout_is_uncertain_without_backend_details(self):
         self.js.side_effect = TimeoutError('private detail')
@@ -238,34 +232,124 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
         self.set_passwords(confirm='different')
         await self.click('Save password')
         self.assert_inline('do not match')
-        self.auth.assert_not_awaited()
+        self.change.assert_not_awaited()
 
     async def test_wrong_current_password_keeps_form(self):
-        self.auth.return_value = None
+        self.change.side_effect = security_actions.AuthorizationError()
         await self.open_password()
         self.set_passwords()
         await self.click('Save password')
-        self.assert_inline('Current password is incorrect')
-        self.manager.update.assert_not_awaited()
+        self.assert_inline(security_actions.AuthorizationError.message)
+        self.change.assert_awaited_once()
         self.assertEqual(self.named(ui.input, 'New password').value, 'a-new-password-12')
         self.logout.assert_not_called()
 
-    async def test_password_backend_failure_is_inline_and_not_logged_out(self):
-        self.manager.update.side_effect = RuntimeError('sensitive backend detail')
+    async def test_password_backend_failure_is_uncertain_and_not_replayable(self):
+        await self.assert_interrupted('password', RuntimeError('sensitive backend detail'))
+
+    async def assert_interrupted(self, action, error):
+        service = self.change if action == 'password' else self.remove
+        service.side_effect = error
+        if action == 'password':
+            await self.open_password()
+            self.set_passwords()
+            submit = self.named(ui.button, 'Save password')
+        else:
+            await self.open_delete()
+            self.named(ui.input, 'Current password').value = 'fixture-password'
+            submit = self.named(ui.button, 'Remove')
+        fields = self.elements(ui.input)
+        listener = next(e for e in submit._event_listeners.values() if e.type == 'click')
+        queued = inspect.getclosurevars(listener.handler).nonlocals.get('callback', listener.handler)
+        await self.invoke(submit, 'click')
+        self.assertTrue(all(not f.value for f in fields))
+        self.assertEqual(self.elements(ui.input), [])
+        self.assertNotIn('sensitive backend detail', self.text())
+        self.assertNotIn('Password changed', self.text())
+        if isinstance(error, security_actions.StaleAuthorizationError):
+            self.assert_inline('sign in again')
+        else:
+            self.assert_inline('could not confirm')
+        self.named(ui.button, 'Sign in')
+        self.assertFalse(self.named(ui.button, 'Change password').enabled)
+        self.assertFalse(self.named(ui.button, 'Add passkey').enabled)
+        with self.client:
+            await queued()  # even a queued Enter/click cannot replay
+        service.assert_awaited_once()
+        await self.click('Forgot password?')
+        self.assertIn('Recover your password', self.text())
+        self.assertIn('cannot access this email', self.text())
+        self.named(ui.button, 'Continue to sign in')
+        self.assertFalse(self.named(ui.button, 'Cancel').enabled)
+
+    async def test_password_unavailable_is_uncertain(self):
+        await self.assert_interrupted('password', security_actions.SecurityActionUnavailable())
+
+    async def test_password_stale_session_erases_fields_and_keeps_recovery(self):
+        await self.assert_interrupted('password', security_actions.StaleAuthorizationError())
+
+    async def test_delete_unavailable_is_uncertain(self):
+        await self.assert_interrupted('delete', security_actions.SecurityActionUnavailable())
+
+    async def test_delete_unexpected_error_is_uncertain(self):
+        await self.assert_interrupted('delete', RuntimeError('sensitive backend detail'))
+
+    async def test_delete_stale_session_erases_fields_and_keeps_recovery(self):
+        await self.assert_interrupted('delete', security_actions.StaleAuthorizationError())
+
+    async def test_password_safe_policy_error_keeps_form_retryable(self):
+        self.change.side_effect = security_actions.PasswordPolicyError()
         await self.open_password()
         self.set_passwords()
         await self.click('Save password')
-        self.assert_inline('Could not change your password')
-        self.assertNotIn('sensitive backend detail', self.text())
+        self.assert_inline(security_actions.PasswordPolicyError.message)
+        self.assertTrue(self.named(ui.button, 'Save password').enabled)
+        self.assertEqual(len(self.elements(ui.input)), 3)
         self.logout.assert_not_called()
+
+    async def test_password_safe_rate_limit_does_not_claim_uncertain_success(self):
+        self.change.side_effect = security_actions.RateLimitError()
+        await self.open_password()
+        self.set_passwords()
+        await self.click('Save password')
+        self.assert_inline(security_actions.RateLimitError.message)
+        self.assertNotIn('could not confirm', self.text())
+        self.logout.assert_not_called()
+
+    async def test_page_captures_version_before_later_user_object_changes(self):
+        await self.open_password()
+        self.user.token_version = 99
+        self.set_passwords()
+        await self.click('Save password')
+        self.change.assert_awaited_once_with(self.user.id, 7, 'current-secret', 'a-new-password-12')
+
+    async def open_delete(self):
+        self.load.return_value = [SimpleNamespace(id=b'one', name='Office key', created_at=None)]
+        await self.render()
+        await self.click('Remove passkey')
+
+    async def test_delete_recovery_erases_password_and_does_not_send_email(self):
+        await self.open_delete()
+        field = self.named(ui.input, 'Current password')
+        field.value = 'fixture-password'
+        with patch.object(security.views, 'forgot_password', AsyncMock()) as mail:
+            await self.click('Forgot password?')
+            self.assertFalse(field.value)
+            self.assertIn('establish a password', self.text())
+            self.assertIn('cannot access this email', self.text())
+            self.assertIn('cannot bypass', self.text())
+            self.assertIn(self.user.email, self.text())
+            self.logout.assert_not_called()
+            mail.assert_not_awaited()
+            self.remove.assert_not_awaited()
 
     async def test_password_success_erases_secrets_logs_out_without_redirect(self):
         await self.open_password()
         self.set_passwords()
         fields = self.elements(ui.input)
         await self.click('Save password')
-        self.manager.update.assert_awaited_once()
-        self.assertTrue(self.manager.update.call_args.kwargs['safe'])
+        self.change.assert_awaited_once()
+        self.change.assert_awaited_once_with(self.user.id, 7, 'current-secret', 'a-new-password-12')
         self.logout.assert_called_once_with()
         self.assertTrue(all(not f.value for f in fields))
         self.assertIn('Password changed', self.text())
@@ -288,16 +372,15 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_requires_fresh_password_and_never_deletes_on_failure(self):
         self.load.return_value = [SimpleNamespace(id=b'one', name='Office key', created_at=None, transports=[])]
-        self.auth.return_value = None
+        self.remove.side_effect = security_actions.AuthorizationError()
         await self.render()
         await self.click('Remove passkey')
         await self.click('Remove')
-        self.manager.delete_webauthn_credential.assert_not_awaited()
+        self.remove.assert_not_awaited()
         self.named(ui.input, 'Current password').value = 'incorrect'
         await self.click('Remove')
-        self.auth.assert_awaited_once()
-        self.manager.delete_webauthn_credential.assert_not_awaited()
-        self.assert_inline('Current password is incorrect')
+        self.remove.assert_awaited_once()
+        self.assert_inline(security_actions.AuthorizationError.message)
 
     async def test_confirmed_registration_cannot_resubmit_during_list_refresh(self):
         started, finish = asyncio.Event(), asyncio.Event()
@@ -323,7 +406,7 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
         async def update(*args, **kwargs):
             started.set()
             await finish.wait()
-        self.manager.update.side_effect = update
+        self.change.side_effect = update
         await self.open_password()
         self.set_passwords()
         task = asyncio.create_task(self.click('Save password'))
@@ -333,7 +416,7 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(self.named(ui.button, 'Cancel').enabled)
             self.assertTrue(self.elements(ui.dialog)[0]._props.get('persistent'))
             await self.click('Save password')
-            self.manager.update.assert_awaited_once()
+            self.change.assert_awaited_once()
         finally:
             finish.set()
             await task
@@ -341,21 +424,21 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
     async def test_delete_only_owned_credential_after_verified_password(self):
         cred = SimpleNamespace(id=b'one', name='Office key', created_at=None)
         self.load.return_value = [cred]
-        self.manager.get_webauthn_credentials.return_value = [cred]
         await self.render()
         await self.click('Remove passkey')
         self.named(ui.input, 'Current password').value = 'current-secret'
         await self.click('Remove')
-        self.manager.delete_webauthn_credential.assert_awaited_once_with(self.user, b'one')
+        self.remove.assert_awaited_once_with(self.user.id, 7, 'current-secret', b'one')
         self.assertEqual(self.load.await_count, 2)
 
     async def test_delete_rechecks_ownership(self):
+        self.remove.side_effect = security_actions.CredentialNotFoundError()
         self.load.return_value = [SimpleNamespace(id=b'one', name='Office key', created_at=None)]
         await self.render()
         await self.click('Remove passkey')
         self.named(ui.input, 'Current password').value = 'current-secret'
         await self.click('Remove')
-        self.manager.delete_webauthn_credential.assert_not_awaited()
+        self.remove.assert_awaited_once()
         self.assert_inline('Passkey not found')
 
     async def test_recovery_opens_existing_login_flow_without_sending_mail(self):
@@ -397,7 +480,7 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
         second = Client(Page('/second-security-test'))
         try:
             with second:
-                await security.security_page(SimpleNamespace(id='second', email='second@example.com'))
+                await security.security_page(SimpleNamespace(id='second', email='second@example.com', token_version=0))
             self.assertFalse(any(isinstance(e, ui.input) for e in second.elements.values()))
             self.assertEqual(self.named(ui.input, 'Current password').value, 'current-secret')
         finally:

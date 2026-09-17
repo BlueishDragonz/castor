@@ -1,23 +1,19 @@
+import asyncio
 import datetime
 import hashlib
 import secrets
-from contextlib import asynccontextmanager
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi_users.exceptions import InvalidPasswordException
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
 
 from beaverhabits.app.db import (
     PasswordResetCode,
     User,
     get_async_session_context,
-    get_user_db,
 )
-from beaverhabits.app.users import get_user_manager, UserManager
-from beaverhabits.configs import settings
+from beaverhabits.app.users import UserManager
+from beaverhabits.app.rate_limits import consume, retry_after
 from beaverhabits.logger import logger
 from beaverhabits.utils import send_email
 
@@ -42,38 +38,30 @@ def _generate_code() -> str:
     return f"{secrets.randbelow(10**12):012d}"
 
 
-# Simple in-memory rate limiter per key (IP or IP:email)
-# Recreated on worker restart - acceptable for this use
-_rate_limit_cache: dict[str, list[float]] = {}
+# Kept only for older isolated fixtures that clear it; admission never reads it.
+_rate_limit_cache: dict = {}
 
 
 async def _rate_limit_check(key: str, limit: int, window: int) -> None:
-    """Check rate limit for a key."""
-    from cachetools import TTLCache
+    """Preserve recovery-specific budgets using the existing persistent store.
 
-    global _rate_limit_cache
-    current_time = datetime.datetime.now(datetime.timezone.utc).timestamp()
-
-    if key not in _rate_limit_cache:
-        _rate_limit_cache[key] = [current_time]
-    else:
-        _rate_limit_cache[key].append(current_time)
-
-    # Prune old entries
-    _rate_limit_cache[key] = [t for t in _rate_limit_cache[key] if t >= current_time - window]
-
-    if len(_rate_limit_cache[key]) > limit:
-        logger.warning(f"Rate limit exceeded for {key}")
+    The outer IPRateLimitMiddleware already enforces the overall auth-IP budget.
+    This replaces, rather than layers onto, the old process-local limiter.
+    """
+    try:
+        allowed = await consume("recovery", key, limit, window)
+    except Exception:
+        raise HTTPException(503, "Rate-limit store unavailable") from None
+    if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests. Try again later.",
+            headers={"Retry-After": retry_after(window)},
         )
 
 
 def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # Proxy trust belongs to the ASGI server, not client-supplied headers here.
     return request.client.host if request.client else "unknown"
 
 
@@ -85,7 +73,6 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
     Rate limited: 3 requests per minute per IP, 1 per 15 minutes per email.
     """
     client_ip = _get_client_ip(request)
-    logger.info(f"forgot_password called for email={req.email}, ip={client_ip}")
 
     # Rate limit by IP
     await _rate_limit_check(f"forgot_ip:{client_ip}", limit=3, window=60)
@@ -97,9 +84,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
         result = await session.execute(select(User).where(User.email == req.email))
         user = result.scalar_one_or_none()
 
-    logger.info(f"User exists: {user is not None}")
-
-    if user:
+    if user and user.is_active:
         code = _generate_code()
         code_hash = _hash_code(code)
         expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
@@ -107,7 +92,8 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
         async with get_async_session_context() as session:
             session.add(
                 PasswordResetCode(
-                    email=req.email, code_hash=code_hash, expires_at=expires_at
+                    email=req.email, code_hash=code_hash, expires_at=expires_at,
+                    user_id=user.id, token_version=user.token_version,
                 )
             )
             await session.commit()
@@ -152,20 +138,19 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
 </body>
 </html>
 """
-            await send_email(
+            await asyncio.to_thread(
+                send_email,
                 "Your Beaver Habits reset code",
                 f"Your 12-digit reset code: {code}\nExpires in 10 minutes.",
                 [req.email],
                 html_body=code_html,
             )
-            logger.info(f"Reset code sent to {req.email}")
-        except Exception as e:
-            logger.exception(f"Failed to send reset email to {req.email}: {e}")
+        except Exception:
+            # SMTP exceptions may contain recipients, credentials or message bodies.
+            logger.warning("Recovery email delivery failed")
             # Don't reveal email existence via error
 
-    response = {"message": "If the email exists, a reset code has been sent."}
-    logger.info(f"Returning response: {response}")
-    return response
+    return {"message": "If the email exists, a reset code has been sent."}
 
 
 @router.post("/reset-password")
@@ -179,45 +164,72 @@ async def reset_password(req: ResetPasswordRequest, request: Request):
     await _rate_limit_check(f"reset_ip:{client_ip}", limit=5, window=60)
     await _rate_limit_check(f"reset_email:{req.email}", limit=3, window=900)
 
-    # Shared policy: reject before consuming a reset code.
+    # Shared policy: reject before hashing or consuming a reset code.
+    manager = UserManager(None)
     try:
-        await UserManager(None).validate_password(req.new_password, None)
+        await manager.validate_password(req.new_password, None)
     except InvalidPasswordException as exc:
         raise HTTPException(status_code=400, detail=exc.reason) from exc
 
+    def invalid_code():
+        return HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired code")
+
     code_hash = _hash_code(req.code)
 
-    async with get_async_session_context() as session:
-        result = await session.execute(
-            select(PasswordResetCode).where(
-                PasswordResetCode.email == req.email,
-                PasswordResetCode.code_hash == code_hash,
-                PasswordResetCode.used == False,
-                PasswordResetCode.expires_at > datetime.datetime.now(datetime.timezone.utc),
-            )
+    def eligible_code():
+        return (
+            PasswordResetCode.email == req.email,
+            PasswordResetCode.code_hash == code_hash,
+            PasswordResetCode.used.is_(False),
+            PasswordResetCode.expires_at > datetime.datetime.now(datetime.timezone.utc),
+            PasswordResetCode.user_id.is_not(None),
+            PasswordResetCode.token_version.is_not(None),
         )
-        reset_code = result.scalar_one_or_none()
 
-        if not reset_code:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired code",
+    # Preflight only: do not hold a read transaction while performing slow hashing.
+    # Both mutable account state and code eligibility are checked again at writes.
+    async with get_async_session_context() as session:
+        candidate = (await session.execute(
+            select(PasswordResetCode.id, PasswordResetCode.user_id, PasswordResetCode.token_version)
+            .join(User, User.id == PasswordResetCode.user_id)
+            .where(*eligible_code(), User.email == req.email, User.is_active.is_(True),
+                   User.token_version == PasswordResetCode.token_version)
+            .order_by(PasswordResetCode.id).limit(1)
+        )).first()
+    if candidate is None:
+        raise invalid_code()
+
+    hashed_password = await asyncio.to_thread(manager.password_helper.hash, req.new_password)
+    async with get_async_session_context() as session:
+        async with session.begin():
+            # Compare-and-swap the account first: sibling codes share an issuance
+            # version, so only one concurrent reset can change this account.
+            changed = await session.execute(
+                update(User).where(
+                    User.id == candidate.user_id,
+                    User.email == req.email,
+                    User.is_active.is_(True),
+                    User.token_version == candidate.token_version,
+                ).values(hashed_password=hashed_password, token_version=User.token_version + 1)
+                .execution_options(synchronize_session=False)
             )
-
-        reset_code.used = True
-
-        # Get user and update password via user_manager (handles hashing)
-        user_result = await session.execute(select(User).where(User.email == req.email))
-        user = user_result.scalar_one()
-
-        # Update password via user_manager
-        user_db = await anext(get_user_db(session))
-        user_manager = await anext(get_user_manager(user_db))
-        await user_manager._update(user, {"password": req.new_password})
-
-
-        await session.commit()
+            if changed.rowcount != 1:
+                raise invalid_code()
+            consumed = await session.execute(
+                update(PasswordResetCode).where(
+                    PasswordResetCode.id == candidate.id,
+                    PasswordResetCode.user_id == candidate.user_id,
+                    PasswordResetCode.token_version == candidate.token_version,
+                    *eligible_code(),
+                ).values(used=True).execution_options(synchronize_session=False)
+            )
+            if consumed.rowcount != 1:
+                # Raising rolls back the password/version too, including expiry
+                # during hashing and races with another consumer.
+                raise invalid_code()
+            # The context commits ONCE. SQLAlchemyUserDatabase.update must not be
+            # used here: it commits independently, splitting the security boundary.
 
     from beaverhabits.app.audit import record
-    await record("password_reset", user_id=user.id)
+    await record("password_reset", user_id=candidate.user_id)
     return {"message": "Password reset successful. Please log in."}

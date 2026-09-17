@@ -138,6 +138,10 @@ class PasswordResetCode(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     email: Mapped[str] = mapped_column(index=True, nullable=False)
+    # Nullable for legacy rows only. Unbound codes are never accepted or backfilled.
+    # No FK: account deletion must not be blocked by expiring recovery rows.
+    user_id: Mapped[UUID | None] = mapped_column(GUID, nullable=True)
+    token_version: Mapped[int | None] = mapped_column(nullable=True)
     code_hash: Mapped[str] = mapped_column(nullable=False)  # SHA-256(code)
     expires_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -165,6 +169,20 @@ async def create_db_and_tables():
         columns = await conn.run_sync(lambda sync: {c["name"] for c in inspect(sync).get_columns("user")})
         if "token_version" not in columns:
             await conn.execute(text('ALTER TABLE "user" ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0'))
+        reset_columns = await conn.run_sync(
+            lambda sync: {c["name"] for c in inspect(sync).get_columns("password_reset_code")}
+        )
+        if "user_id" not in reset_columns:
+            # Match GUID's native PostgreSQL UUID / portable CHAR(36) storage.
+            guid_type = GUID().compile(dialect=conn.dialect)
+            await conn.execute(text(f'ALTER TABLE password_reset_code ADD COLUMN user_id {guid_type} NULL'))
+        if "token_version" not in reset_columns:
+            await conn.execute(text('ALTER TABLE password_reset_code ADD COLUMN token_version INTEGER NULL'))
+        # Never infer identity/version from today's account for an old code.
+        await conn.execute(text(
+            'UPDATE password_reset_code SET used = TRUE '
+            'WHERE user_id IS NULL OR token_version IS NULL'
+        ))
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:

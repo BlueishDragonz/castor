@@ -1,7 +1,7 @@
 """Autofill configuration and actual dialog element regression tests."""
 import unittest
-from beaverhabits.frontend.security_page import EMPTY_PASSWORD_PROPS, EMPTY_NICKNAME_PROPS
 from tests.test_security_dialogs import SecurityDialogTests
+from beaverhabits.frontend.security_page import EMPTY_PASSWORD_PROPS, EMPTY_NICKNAME_PROPS
 
 class AutofillSuppressionTests(unittest.TestCase):
     def test_password_hints(self):

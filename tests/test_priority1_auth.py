@@ -72,14 +72,14 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_change_rejects_short_password_without_revoking(self):
         token = await self.login()
-        r = await self.client.patch('/users/me', headers={'Authorization': f'Bearer {token}'}, json={'password': 'short'})
+        r = await self.client.post('/auth/webauthn/change-password', headers={'Authorization': f'Bearer {token}'}, json={'current_password': PASSWORD, 'new_password': 'short'})
         self.assertEqual(r.status_code, 400, r.text)
         self.assertEqual((await self.client.get('/users/me', headers={'Authorization': f'Bearer {token}'})).status_code, 200)
         await self.login()
 
     async def test_change_revokes_old_token_and_new_login_works(self):
         token = await self.login()
-        r = await self.client.patch('/users/me', headers={'Authorization': f'Bearer {token}'}, json={'password': NEW_PASSWORD})
+        r = await self.client.post('/auth/webauthn/change-password', headers={'Authorization': f'Bearer {token}'}, json={'current_password': PASSWORD, 'new_password': NEW_PASSWORD})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual((await self.client.get('/users/me', headers={'Authorization': f'Bearer {token}'})).status_code, 401)
         self.assertIsNone(await auth.user_from_token(token))
@@ -88,6 +88,18 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(await auth.user_from_token(fresh))
         old = await self.client.post('/auth/login', data={'username': self.user.email, 'password': PASSWORD})
         self.assertEqual(old.status_code, 400)
+
+    async def test_sensitive_endpoints_require_current_password(self):
+        token = await self.login()
+        headers = {'Authorization': f'Bearer {token}'}
+        response = await self.client.post('/auth/webauthn/change-password', headers=headers,
+                                          json={'new_password': NEW_PASSWORD})
+        self.assertEqual(response.status_code, 422)
+        response = await self.client.request('DELETE', '/auth/webauthn/credentials/Zml4dHVyZQ', headers=headers)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual((await self.client.patch('/users/me', headers=headers,
+                          json={'email': 'replacement@example.com'})).status_code, 422)
+        await self.login()
 
     async def test_direct_gui_change_uses_policy(self):
         with self.assertRaises(exceptions.InvalidPasswordException):
@@ -124,7 +136,7 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
 
     async def make_reset(self):
         code = '123456789012'
-        self.session.add(db.PasswordResetCode(email=self.user.email, code_hash=reset_routes._hash_code(code), expires_at=datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=5)))
+        self.session.add(db.PasswordResetCode(email=self.user.email, user_id=self.user.id, token_version=self.user.token_version, code_hash=reset_routes._hash_code(code), expires_at=datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=5)))
         await self.session.commit()
         return code
 

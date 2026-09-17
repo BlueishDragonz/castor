@@ -2,18 +2,18 @@
 
 Fresh password verification gates both password changes and credential deletion.
 Registration is successful only after the server accepts it; password changes
-revoke sessions through UserManager and leave a signed-out outcome on screen.
+revoke sessions through the shared security-actions service and leave a signed-out outcome on screen.
 """
 import json
 
 from nicegui import ui
 
 from beaverhabits import views
+from beaverhabits.app import security_actions
 from beaverhabits.app.auth import (
     get_async_session_context,
     get_user_db_context,
     get_user_manager_context,
-    user_authenticate,
     user_logout,
 )
 from beaverhabits.app.db import User
@@ -70,13 +70,15 @@ async def _load_credentials(user: User):
 
 
 async def security_page(user: User):
+    # Capture the validated page session, never a refreshed database version.
+    session_version = user.token_version
     custom_headers()
     add_security_passkey_javascript()
     ui.add_css(SECURITY_CSS)
     state = {
         'active': None, 'pending': False, 'signed_out': False,
         'success': False, 'credential': None, 'credentials': [],
-        'list_error': '', 'recovery_pending': False,
+        'list_error': '', 'recovery_pending': False, 'reconcile_passkey': False,
     }
     refs = {'dialog': None, 'fields': [], 'opener': None, 'focus': None}
 
@@ -139,7 +141,7 @@ async def security_page(user: User):
         refs['dialog'].close()
 
     def start_dialog(kind, opener, credential=None):
-        if state['signed_out'] or state['pending']:
+        if state['pending'] or (state['signed_out'] and kind != 'recovery'):
             return False
         erase_fields()
         state.update(active=kind, success=False, credential=credential)
@@ -227,7 +229,7 @@ async def security_page(user: User):
         return not state['list_error']
 
     async def register_passkey():
-        if state['pending'] or state['signed_out'] or state['success']:
+        if state['pending'] or state['signed_out'] or state['success'] or state['reconcile_passkey']:
             return
         nickname = (refs['nickname'].value or '').strip()
         if not nickname:
@@ -266,9 +268,15 @@ async def security_page(user: User):
         elif status == 'error':
             refs['error'].text = result.get('message') or 'Could not add your passkey. Please try again.'
         else:
+            state['reconcile_passkey'] = True
+            refs['submit'].disable()
             refs['error'].text = 'We could not confirm whether your passkey was saved. Close this dialog and reload the list before trying again.'
 
-    def open_passkey():
+    async def open_passkey():
+        if state['reconcile_passkey']:
+            if not await reload_credentials():
+                return
+            state['reconcile_passkey'] = False
         if not start_dialog('passkey', refs['add']):
             return
         dialog_shell('Add a passkey', 'Choose a name you will recognise. Your browser will help you save the passkey.', 'fingerprint')
@@ -279,6 +287,35 @@ async def security_page(user: User):
             refs['focus'] = refs['nickname']
             actions('Register passkey', register_passkey)
         refs['dialog'].open()
+
+    def end_local_session():
+        state['signed_out'] = True
+        erase_fields()
+        refs['add'].disable()
+        refs['change'].disable()
+        user_logout()
+        refs['dialog'].props('persistent')
+        ui.context.client.run_javascript("try { localStorage.removeItem('auth_token'); } catch (_) {}")
+
+    def show_interrupted(action, *, stale=False):
+        # A commit/response error cannot prove rollback. Retire this page rather
+        # than leave Enter, a queued click, or reopening able to replay a write.
+        end_local_session()
+        refs['fields'] = []
+        refs['body'].clear()
+        with refs['body']:
+            title = heading('Sign in again' if stale else 'Outcome not confirmed')
+            refs['dialog'].props(f'aria-labelledby=c{title.id}')
+            if stale:
+                message(security_actions.StaleAuthorizationError.message, error=True)
+            elif action == 'password':
+                message('We could not confirm whether your password changed. Do not repeat this change. Sign in with your new password first; if it does not work, use password recovery.', error=True)
+            else:
+                message('We could not confirm whether your passkey was removed. Do not repeat this removal. Sign in again and check your passkey list first.', error=True)
+            message('This device is signed out. You can recover access by email if needed.')
+            refs['focus'] = ui.button('Sign in', on_click=lambda: ui.navigate.to('/login')).classes('w-full').props('unelevated no-caps autofocus')
+            ui.button('Forgot password?', on_click=recover_password).props('flat no-caps dense')
+        focus_dialog()
 
     async def change_password():
         if state['pending'] or state['signed_out'] or state['success']:
@@ -292,36 +329,28 @@ async def security_page(user: User):
             return
         set_pending(True)
         refs['status'].text = 'Updating your password…'
+        interrupted = None
         try:
-            authed = await user_authenticate(email=user.email, password=current)
-            if authed is None or authed.id != user.id:
-                refs['error'].text = 'Current password is incorrect'
-                return
-            from beaverhabits.app.schemas import UserUpdate
-            async with get_async_session_context() as session:
-                async with get_user_db_context(session) as user_db:
-                    async with get_user_manager_context(user_db) as user_manager:
-                        await user_manager.update(UserUpdate(password=new), authed, safe=True)
-        except Exception:
-            refs['error'].text = 'Could not change your password. Please try again, or use password recovery if your session has expired.'
+            await security_actions.change_password(user.id, session_version, current, new)
+        except security_actions.StaleAuthorizationError:
+            interrupted = 'stale'
+        except security_actions.SecurityActionUnavailable:
+            interrupted = 'uncertain'
+        except security_actions.SecurityActionError as exc:
+            refs['error'].text = exc.message
             return
+        except Exception:
+            interrupted = 'uncertain'
         finally:
             # Do not retain passwords in per-page state, event closures, or UI.
             current = new = confirm = ''
             set_pending(False)
             refs['status'].text = ''
-        state['signed_out'] = True
-        erase_fields()
-        refs['add'].disable()
-        refs['change'].disable()
-        refs['recovery'].disable()
-        # user_logout clears NiceGUI user storage and flags the HttpOnly cookie
-        # for removal on the next HTTP response; it does NOT navigate. Existing
-        # tokens are already revoked by UserManager. Keep this success visible.
-        user_logout()
-        refs['dialog'].props('persistent')
-        # Legacy WebAuthn callers used localStorage, unlike GUI auth storage.
-        ui.context.client.run_javascript("try { localStorage.removeItem('auth_token'); } catch (_) {}")
+        if interrupted:
+            show_interrupted('password', stale=interrupted == 'stale')
+            return
+        # The service committed revocation; do not silently mint a new session.
+        end_local_session()
         show_success('Password changed', 'You are signed out everywhere, including this device. Sign in again with your new password.', signed_out=True)
 
     def password_input(label, handler):
@@ -344,7 +373,7 @@ async def security_page(user: User):
         refs['dialog'].open()
 
     async def remove_passkey():
-        if state['pending'] or state['signed_out']:
+        if state['pending'] or state['signed_out'] or state['success']:
             return
         password = refs['fields'][0].value or ''
         if not password:
@@ -352,34 +381,33 @@ async def security_page(user: User):
             return
         set_pending(True)
         refs['error'].text = ''
+        interrupted = None
         try:
-            authed = await user_authenticate(email=user.email, password=password)
-            if authed is None or authed.id != user.id:
-                refs['error'].text = 'Current password is incorrect'
-                return
-            # Fresh successful authentication PROVES another usable sign-in
-            # method remains. Never infer this from a random OAuth password hash.
-            cred_id = bytes(state['credential'].id)
-            async with get_async_session_context() as session:
-                async with get_user_db_context(session) as user_db:
-                    async with get_user_manager_context(user_db) as user_manager:
-                        creds = await user_manager.get_webauthn_credentials(authed)
-                        if not any(bytes(c.id) == cred_id for c in creds):
-                            refs['error'].text = 'Passkey not found. Close this dialog and reload the list.'
-                            return
-                        ok = await user_manager.delete_webauthn_credential(authed, cred_id)
-            if not ok:
-                refs['error'].text = 'Passkey not found. Close this dialog and reload the list.'
-                return
-        except Exception:
-            refs['error'].text = 'Could not remove your passkey. Please try again.'
+            await security_actions.remove_passkey(
+                user.id, session_version, password, bytes(state['credential'].id),
+            )
+            state['success'] = True
+        except security_actions.StaleAuthorizationError:
+            interrupted = 'stale'
+        except security_actions.SecurityActionUnavailable:
+            interrupted = 'uncertain'
+        except security_actions.SecurityActionError as exc:
+            refs['error'].text = exc.message
+            set_pending(False)
             return
+        except Exception:
+            interrupted = 'uncertain'
         finally:
             password = ''
+        if interrupted:
             set_pending(False)
+            show_interrupted('delete', stale=interrupted == 'stale')
+            return
         erase_fields()
-        refs['dialog'].close()
+        # Keep pending/success guards until the confirmed write's refresh ends.
         await reload_credentials()
+        set_pending(False)
+        refs['dialog'].close()
         ui.notify('Passkey removed', color='positive')
 
     def open_delete(credential, opener):
@@ -388,6 +416,7 @@ async def security_page(user: User):
         dialog_shell('Remove passkey', f'Remove “{credential.name or "Passkey"}”? Confirm with your current password. This cannot be undone.', 'delete_outline')
         with refs['body']:
             refs['focus'] = password_input('Current password', remove_passkey).props('autofocus')
+            ui.button('Forgot password?', on_click=recover_password).props('flat no-caps dense').classes('self-start')
             actions('Remove', remove_passkey)
             refs['submit'].props('color=negative')
         refs['dialog'].open()
@@ -406,8 +435,16 @@ async def security_page(user: User):
                      'mail_outline')
         with refs['body']:
             ui.label(user.email).classes('bh-security-wrap select-text')
+            message('If you do not have a password you know, use email recovery to establish a password first, then sign in again before changing security settings.')
+            message('If you cannot access this email or recovery email delivery is unavailable, stop here. Restore access to the mailbox or ask your administrator about email delivery. This page cannot bypass password verification or guarantee account recovery.')
             actions('Continue to sign in', recovery_sign_out)
-            refs['focus'] = refs['cancel']
+            if state['signed_out']:
+                # A retired page cannot resume its old settings form.
+                refs['cancel'].disable()
+                refs['dialog'].props('persistent')
+                refs['focus'] = refs['submit']
+            else:
+                refs['focus'] = refs['cancel']
         refs['dialog'].open()
 
     with layout(title='Security'):

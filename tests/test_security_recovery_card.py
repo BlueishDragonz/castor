@@ -10,7 +10,7 @@ page = importlib.import_module('beaverhabits.frontend.security_page')
 
 class RecoveryCardTests(unittest.IsolatedAsyncioTestCase):
     async def test_password_card_shows_recovery_recipient_without_inputs(self):
-        fixture = SimpleNamespace(email='recovery-fixture@example.invalid')
+        fixture = SimpleNamespace(email='recovery-fixture@example.invalid', token_version=0)
         with ui.column() as root:
             with patch.object(page, '_load_credentials', AsyncMock(return_value=[])), patch.object(page, 'layout', lambda **kwargs: ui.column()), patch.object(page, 'custom_headers', lambda: None):
                 await page.security_page(fixture)

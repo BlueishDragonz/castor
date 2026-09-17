@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from fastapi import HTTPException
-from nicegui import app, run, ui
+from nicegui import app, ui
 
 from beaverhabits.app import crud
 from beaverhabits.app.auth import (
@@ -29,7 +29,7 @@ from beaverhabits.storage import get_user_dict_storage, session_storage
 from beaverhabits.storage.dict import DAY_MASK, DictHabitList
 from beaverhabits.storage.meta import GUI_ROOT_PATH
 from beaverhabits.storage.storage import Habit, HabitList, HabitListBuilder, HabitStatus
-from beaverhabits.utils import generate_short_hash, ratelimiter, send_email
+from beaverhabits.utils import generate_short_hash, send_email
 
 user_storage = get_user_dict_storage()
 
@@ -216,38 +216,53 @@ async def backup_all_users():
             logger.info(f"Successfully backed up habit list for user {user.email}")
 
 
-@ratelimiter(limit=3, window=1)
 async def forgot_password(email: str) -> None:
-    user = await user_get_by_email(email)
-    if user is None:
-        ui.notify(
-            "Email address not found, please check your email address and try again.",
-            color="negative",
-        )
-        return
+    from beaverhabits.app.rate_limits import consume
 
-    token = user_create_reset_token(user)
-    if token is None:
-        ui.notify(
-            "Failed to create reset password token, please try again later.",
-            color="negative",
-        )
-        return
-
-    logger.debug(f"Reset password token for {user.email}: {token}")
-    async with asyncio.timeout(1):
-        await run.io_bound(
-            send_email,
-            "Reset your password",
-            f"Click the link to reset your password: {settings.APP_URL}/reset-password?token={token}",
-            [user.email],
-        )
-        ui.notify(f"Reset password email sent to {user.email}", color="positive")
-        logger.debug(f"Reset password email sent to {user.email}")
+    # GUI callbacks bypass the HTTP /auth/ limiter. The former decorator had a
+    # per-process cache keyed by raw args; use the persistent recovery budget.
+    email = email.strip().lower()
+    try:
+        if await consume("recovery", f"forgot_email:{email}", 1, 900):
+            user = await user_get_by_email(email)
+            if user is not None and user.is_active:
+                token = user_create_reset_token(user)
+                if token:
+                    # SMTP is synchronous. Await its bounded socket operations;
+                    # cancelling a one-second await cannot cancel the mail thread.
+                    await asyncio.to_thread(
+                        send_email,
+                        "Reset your password",
+                        f"Click the link to reset your password: {settings.APP_URL}/reset-password?token={token}",
+                        [user.email],
+                    )
+    except Exception:
+        # Neither exception text nor recipients/message bodies belong in logs.
+        logger.warning("Recovery request could not be completed")
+    ui.notify(
+        "If the account can be recovered, reset instructions will be emailed. Please check your inbox.",
+        color="positive",
+    )
 
 
 async def reset_password(user: User, password: str) -> None:
-    new_user = await user_reset_password(user, password)
+    from fastapi_users import exceptions
+
+    try:
+        new_user = await user_reset_password(user, password)
+    except (exceptions.InvalidResetPasswordToken, exceptions.UserInactive, exceptions.UserNotExists):
+        ui.notify("This reset link is invalid or expired. Please request a new one.", color="negative")
+        return
+    except exceptions.InvalidPasswordException:
+        ui.notify("Password does not meet the requirements. Use at least 12 characters.", color="negative")
+        return
+    except Exception:
+        logger.warning("Password reset could not be completed")
+        ui.notify("We could not confirm whether your password changed. Sign in with your new password first; if it does not work, request a new recovery link.", color="negative")
+        return
+    if new_user is None:
+        ui.notify("Password could not be reset. Please request a new reset link.", color="negative")
+        return
 
     ui.notify("Password reset successfully", color="positive")
 

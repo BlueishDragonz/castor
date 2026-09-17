@@ -23,7 +23,7 @@ from webauthn.helpers.structs import (
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from beaverhabits.app.auth import user_get_by_email, user_from_token
 from beaverhabits.app.users import get_user_manager, UserManager
@@ -518,26 +518,41 @@ async def webauthn_list_credentials(
     ]
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=4096)
+    new_password: str = Field(min_length=1, max_length=4096)
+
+
+class PasskeyDeleteRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=4096)
+
+
+@router.post("/change-password")
+async def change_account_password(payload: PasswordChangeRequest, user: User = Depends(registration_user)):
+    from beaverhabits.app.security_actions import change_password, SecurityActionError
+    try:
+        await change_password(user.id, user.token_version, payload.current_password, payload.new_password)
+    except SecurityActionError as exc:
+        raise HTTPException(exc.status_code, exc.message) from None
+    return {"message": "Password changed. Sign in again."}
+
+
 @router.delete("/credentials/{credential_id}")
 async def webauthn_delete_credential(
     credential_id: str,
-    user_manager: UserManager = Depends(get_user_manager),
-    current_user=Depends(current_active_user),
+    payload: PasskeyDeleteRequest,
+    current_user: User = Depends(registration_user),
 ):
-    """Delete a WebAuthn credential. Refuses to remove the last sign-in
-    method (anti-stranding: no passkeys left and no password set)."""
-    credentials = await user_manager.get_webauthn_credentials(current_user)
-    cred_id_bytes = base64url_to_bytes(credential_id)
-    remaining = [c for c in credentials if bytes(c.id) != cred_id_bytes]
-    if not remaining and not getattr(current_user, "hashed_password", None):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot remove your last sign-in method: set a password first",
-        )
-    deleted = await user_manager.delete_webauthn_credential(current_user, cred_id_bytes)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Credential not found"
-        )
+    """Fresh-password gated deletion, shared with the GUI."""
+    from beaverhabits.app.security_actions import remove_passkey, SecurityActionError
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,1366}", credential_id):
+        raise HTTPException(400, "Invalid credential identifier")
+    try:
+        decoded = base64url_to_bytes(credential_id)
+    except Exception:
+        raise HTTPException(400, "Invalid credential identifier") from None
+    try:
+        await remove_passkey(current_user.id, current_user.token_version, payload.current_password, decoded)
+    except SecurityActionError as exc:
+        raise HTTPException(exc.status_code, exc.message) from None
     return {"success": True}

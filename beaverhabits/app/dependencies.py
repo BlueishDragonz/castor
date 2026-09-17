@@ -99,4 +99,9 @@ async def get_reset_user(request: Request) -> User:
             detail="Token not found",
         )
 
-    return await user_from_reset_token(token)
+    from fastapi_users import exceptions
+    try:
+        return await user_from_reset_token(token)
+    except (exceptions.InvalidResetPasswordToken, exceptions.UserInactive, exceptions.UserNotExists):
+        raise HTTPException(303, detail="Reset link invalid or expired",
+                            headers={"Location": "/login?recovery=expired"}) from None

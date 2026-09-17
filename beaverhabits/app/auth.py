@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import datetime
 import secrets
@@ -11,10 +12,11 @@ from fastapi_users.exceptions import UserAlreadyExists
 from fastapi_users.jwt import decode_jwt, generate_jwt
 from fastapi_users.manager import RESET_PASSWORD_TOKEN_AUDIENCE
 from nicegui import app
+from sqlalchemy import update
 
 from beaverhabits.app.db import User, get_async_session, get_user_db
 from beaverhabits.app.schemas import UserCreate
-from beaverhabits.app.users import get_jwt_strategy, get_user_manager
+from beaverhabits.app.users import UserManager, get_jwt_strategy, get_user_manager
 from beaverhabits.configs import settings
 from beaverhabits.logger import logger
 
@@ -141,7 +143,7 @@ def user_create_reset_token(user: User) -> str:
     token = generate_jwt(
         token_data,
         settings.RESET_PASSWORD_TOKEN_SECRET,
-        settings.RESET_PASSWORD_TOKEN_LIFETIME_SECONDS,
+        settings.RESET_PASSWORD_TOKEN_LIFETIME_SECONDS if settings.RESET_PASSWORD_TOKEN_LIFETIME_SECONDS > 0 else 3600,
     )
 
     return token
@@ -159,27 +161,62 @@ async def user_from_reset_token(token: str) -> User:
         raise exceptions.InvalidResetPasswordToken()
 
     try:
-        user_id = data["sub"]
-    except KeyError:
-        raise exceptions.InvalidResetPasswordToken()
-
-    user = await user_get_by_id(UUID(user_id))
+        user_id = UUID(data["sub"])
+        # Reject historic immortal links as well as newly expired links.
+        if type(data.get("exp")) not in (int, float):
+            raise ValueError()
+        user = await user_get_by_id(user_id)
+    except (KeyError, ValueError, TypeError, AttributeError, exceptions.UserNotExists):
+        raise exceptions.InvalidResetPasswordToken() from None
     if not user.is_active:
         raise exceptions.UserInactive()
     if type(data.get("ver")) is not int or data["ver"] != user.token_version:
         raise exceptions.InvalidResetPasswordToken()
 
+    # The GUI retains this detached user after page load. Preserve the verified
+    # snapshot, never replace it with a freshly loaded version during submission.
+    user._reset_token_version = data["ver"]
+    user._reset_token_hash = user.hashed_password
+    user._reset_token_expires_at = data["exp"]
     return user
 
 
 async def user_reset_password(user: User, new_password: str) -> User:
+    manager = UserManager(None)
+    await manager.validate_password(new_password, user)
+    expected_version = getattr(user, "_reset_token_version", user.token_version)
+    expected_hash = getattr(user, "_reset_token_hash", user.hashed_password)
+    expires_at = getattr(user, "_reset_token_expires_at", None)
+
+    def check_snapshot():
+        if not user.is_active or type(expected_version) is not int:
+            raise exceptions.InvalidResetPasswordToken()
+        if expires_at is not None and expires_at <= datetime.datetime.now(datetime.timezone.utc).timestamp():
+            raise exceptions.InvalidResetPasswordToken()
+
+    check_snapshot()
+    hashed_password = await asyncio.to_thread(manager.password_helper.hash, new_password)
     async with get_async_session_context() as session:
-        async with get_user_db_context(session) as user_db:
-            async with get_user_manager_context(user_db) as user_manager:
-                updated_user = await user_manager._update(
-                    user, {"password": new_password}
-                )
-                return updated_user
+        async with session.begin():
+            check_snapshot()
+            changed = await session.execute(
+                update(User).where(
+                    User.id == user.id,
+                    User.is_active.is_(True),
+                    User.hashed_password == expected_hash,
+                    User.token_version == expected_version,
+                ).values(hashed_password=hashed_password, token_version=User.token_version + 1)
+                .execution_options(synchronize_session=False)
+            )
+            if changed.rowcount != 1:
+                raise exceptions.InvalidResetPasswordToken()
+            # Also cover expiry while waiting for the database write lock.
+            check_snapshot()
+            updated_user = await session.get(User, user.id)
+        # The transaction committed successfully before returning a login candidate.
+    from beaverhabits.app.audit import record
+    await record("password_reset", user_id=user.id)
+    return updated_user
 
 
 async def user_deletion(user: User) -> None:

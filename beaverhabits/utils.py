@@ -279,7 +279,7 @@ def send_email(subject: str, body: str, recipients: list[str], html_body: str | 
         msg["From"] = sender
         msg["To"] = ", ".join(recipients)
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp_server:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp_server:
         smtp_server.login(sender, password)
         smtp_server.sendmail(sender, recipients, msg.as_string())
 
