@@ -119,8 +119,14 @@ def custom_headers():
     # Self-hosted Inter font (added in Batch 2, replaces Quasar's default Roboto)
     ui.add_css(css.FONT_CSS)
 
-    # prevent context menu
-    ui.add_body_html(f"<script>{PREVENT_CONTEXT_MENU}</script>")
+    # Preserve native desktop/tablet menus; suppress long-press callouts on phones.
+    from nicegui import context
+    from beaverhabits.frontend.device import is_mobile
+
+    request = context.client.request
+    user_agent = request.headers.get("user-agent", "") if request else ""
+    if is_mobile(user_agent):
+        ui.add_body_html(f"<script>{PREVENT_CONTEXT_MENU}</script>")
 
     # custom css styles
     views.apply_theme_style()
