@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi_users.exceptions import InvalidPasswordException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -178,12 +179,11 @@ async def reset_password(req: ResetPasswordRequest, request: Request):
     await _rate_limit_check(f"reset_ip:{client_ip}", limit=5, window=60)
     await _rate_limit_check(f"reset_email:{req.email}", limit=3, window=900)
 
-    # Validate password policy (min 12 chars)
-    if len(req.new_password) < 12:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 12 characters",
-        )
+    # Shared policy: reject before consuming a reset code.
+    try:
+        await UserManager(None).validate_password(req.new_password, None)
+    except InvalidPasswordException as exc:
+        raise HTTPException(status_code=400, detail=exc.reason) from exc
 
     code_hash = _hash_code(req.code)
 
@@ -215,8 +215,6 @@ async def reset_password(req: ResetPasswordRequest, request: Request):
         user_manager = await anext(get_user_manager(user_db))
         await user_manager._update(user, {"password": req.new_password})
 
-        # TODO: Increment token_version when column exists (Lane 2 #14)
-        # user.token_version = (user.token_version or 0) + 1
 
         await session.commit()
 

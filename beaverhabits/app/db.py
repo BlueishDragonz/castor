@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import Depends
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID, SQLAlchemyUserDatabase
 from fastapi_users_db_sqlalchemy.generics import GUID
-from sqlalchemy import JSON, DateTime, ForeignKey, func
+from sqlalchemy import JSON, DateTime, ForeignKey, func, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -34,6 +34,7 @@ class TimestampMixin:
 
 
 class User(TimestampMixin, SQLAlchemyBaseUserTableUUID, Base):
+    token_version: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
 
     habit_list: Mapped["HabitListModel"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -158,6 +159,10 @@ async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 async def create_db_and_tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all does not add columns to existing tables. Run before serving.
+        columns = await conn.run_sync(lambda sync: {c["name"] for c in inspect(sync).get_columns("user")})
+        if "token_version" not in columns:
+            await conn.execute(text('ALTER TABLE "user" ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0'))
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:

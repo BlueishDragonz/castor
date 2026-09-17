@@ -85,7 +85,7 @@ async def user_from_token(token: str | None) -> User | None:
 
 
 async def user_create(
-    email: str, password: str = "", is_superuser: bool = False
+    email: str, password: str | None = None, is_superuser: bool = False
 ) -> User:
     try:
         async with get_async_session_context() as session:
@@ -94,7 +94,7 @@ async def user_create(
                     user = await user_manager.create(
                         UserCreate(
                             email=email,
-                            password=password,
+                            password=secrets.token_urlsafe(48) if password is None else password,
                             is_superuser=is_superuser,
                         )
                     )
@@ -134,6 +134,7 @@ def user_create_reset_token(user: User) -> str:
     token_data = {
         "sub": str(user.id),
         "aud": RESET_PASSWORD_TOKEN_AUDIENCE,
+        "ver": user.token_version,
     }
     assert settings.RESET_PASSWORD_TOKEN_SECRET, "Missing JWT secret"
     token = generate_jwt(
@@ -164,6 +165,8 @@ async def user_from_reset_token(token: str) -> User:
     user = await user_get_by_id(UUID(user_id))
     if not user.is_active:
         raise exceptions.UserInactive()
+    if type(data.get("ver")) is not int or data["ver"] != user.token_version:
+        raise exceptions.InvalidResetPasswordToken()
 
     return user
 

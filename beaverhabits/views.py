@@ -160,7 +160,7 @@ async def login_user(user: User) -> None:
     await cache_user_configs(user)
 
 
-async def register_user(email: str, password: str = "") -> User:
+async def register_user(email: str, password: str | None = None) -> User:
     logger.info(f"Registering user {email}...")
     user = await user_create(email=email, password=password)
     # Create a dummy habit list for the new users
