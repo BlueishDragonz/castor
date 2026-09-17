@@ -218,5 +218,6 @@ async def reset_password(req: ResetPasswordRequest, request: Request):
 
         await session.commit()
 
-    logger.info(f"Password reset successful for {req.email}")
+    from beaverhabits.app.audit import record
+    await record("password_reset", user_id=user.id)
     return {"message": "Password reset successful. Please log in."}

@@ -717,13 +717,25 @@ def init_gui_routes(fastapi_app: FastAPI):
     @app.middleware("http")
     async def AuthMiddleware(request: Request, call_next):
         logger.debug(f"AuthMiddleware: {request.url.path}")
-        token = app.storage.user.get("auth_token") or request.cookies.get("beaver_auth")
+        clearing = app.storage.user.pop("clear_auth_cookie", False)
+        token = None if clearing else (app.storage.user.get("auth_token") or request.cookies.get("beaver_auth"))
         if token:
             request.scope["headers"] = [e for e in request.scope["headers"] if e[0] != b"authorization"]
             request.scope["headers"].append((b"authorization", f"Bearer {token}".encode()))
         response = await call_next(request)
         if response.status_code == 401:
-            return RedirectResponse("/login")
+            response = RedirectResponse("/login")
+        from beaverhabits.app.auth import user_from_token
+        from beaverhabits.app.users import get_cookie_settings
+        from beaverhabits.app.webauthn_routes import BROWSER_COOKIE, _browser_cookie
+        import secrets
+        if clearing:
+            response.delete_cookie("beaver_auth", path="/")
+        elif token and request.cookies.get("beaver_auth") != token and await user_from_token(token):
+            response.set_cookie("beaver_auth", token, path="/", **get_cookie_settings())
+        if request.method == "GET" and not _browser_cookie(request):
+            response.set_cookie(BROWSER_COOKIE, secrets.token_urlsafe(32),
+                                path="/", **get_cookie_settings())
         return response
 
     @app.middleware("http")

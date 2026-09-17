@@ -282,9 +282,7 @@ async def cache_user_configs(user: User) -> None:
     )
 
 
-def sanitize_css(css: str) -> str:
-    """Strip any HTML tags from user-supplied CSS to prevent XSS via </style> injection."""
-    return re.sub(r"<[^>]*>", "", css)
+from beaverhabits.css_sanitizer import sanitize_css
 
 
 async def update_custom_css(user: User, css: str) -> None:

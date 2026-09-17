@@ -20,6 +20,7 @@ from beaverhabits.configs import settings
 from beaverhabits.logger import logger
 
 from .db import User, WebAuthnCredential, get_user_db
+from .audit import record
 
 JWT_SECRET = settings.JWT_SECRET
 JWT_LIFETIME_SECONDS = settings.JWT_LIFETIME_SECONDS
@@ -40,22 +41,30 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         changes.pop("token_version", None)
         if changes.get("password") is not None:
             changes["token_version"] = User.token_version + 1
-        return await super()._update(user, changes)
+        updated = await super()._update(user, changes)
+        if changes.get("password") is not None:
+            await record("password_change", user_id=updated.id)
+        if changes.get("is_active") is False:
+            await record("account_delete", user_id=updated.id)
+        return updated
+
+    async def authenticate(self, credentials):
+        user = await super().authenticate(credentials)
+        await record("login", "success" if user and user.is_active else "failure", user.id if user else None)
+        return user
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
-        logger.info(f"User has registered: {user.email}({user.id})")
+        await record("register", user_id=user.id)
 
     async def on_after_forgot_password(
         self, user: User, token: str, request: Optional[Request] = None
     ):
-        logger.info(f"User {user.id} has forgot their password. Reset token: {token}")
+        await record("password_reset_request", user_id=user.id)
 
     async def on_after_request_verify(
         self, user: User, token: str, request: Optional[Request] = None
     ):
-        logger.info(
-            f"Verification requested for user {user.id}. Verification token: {token}"
-        )
+        logger.info("Verification requested for account {}", user.id)
 
     async def add_webauthn_credential(
         self,
@@ -87,6 +96,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         session.add(cred)
         await session.commit()
         await session.refresh(cred)
+        await record("passkey_register", user_id=user.id)
         return cred
 
     async def get_webauthn_credentials(self, user: User) -> list[WebAuthnCredential]:
@@ -109,6 +119,8 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             )
         )
         await session.commit()
+        if result.rowcount > 0:
+            await record("passkey_delete", user_id=user.id)
         return result.rowcount > 0
 
 
@@ -116,7 +128,7 @@ async def get_user_manager(user_db: SQLAlchemyUserDatabase = Depends(get_user_db
     yield UserManager(user_db)
 
 
-bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
+bearer_transport = BearerTransport(tokenUrl="auth/login")
 class VersionedJWTStrategy(JWTStrategy):
     async def write_token(self, user: User) -> str:
         return generate_jwt(
@@ -154,7 +166,7 @@ def get_cookie_settings() -> dict:
     return {
         "httponly": True,
         "samesite": "strict",
-        "secure": not settings.is_dev(),
+        "secure": settings.TLS_TERMINATED or settings.APP_URL.startswith("https://"),
     }
 
 

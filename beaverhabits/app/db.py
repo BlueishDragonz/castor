@@ -157,6 +157,8 @@ async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
 
 async def create_db_and_tables():
+    # Register auxiliary models before create_all, including isolated test apps.
+    from beaverhabits.app import rate_limits, audit, challenges
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # create_all does not add columns to existing tables. Run before serving.

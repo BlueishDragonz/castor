@@ -248,6 +248,8 @@ async def create_user_api_token(user: User) -> str:
         session.add(token_model)
         await session.commit()
         logger.info(f"[CRUD] User {user.id} API token created")
+        from beaverhabits.app.audit import record
+        await record("token_create", user_id=user.id)
         return token
 
 
@@ -267,6 +269,9 @@ async def reset_user_api_token(user: User) -> str:
             session.add(token_model)
             await session.commit()
             logger.info(f"[CRUD] User {user.id} API token created (via reset)")
+        from beaverhabits.app.audit import record
+        await record("token_revoke", user_id=user.id)
+        await record("token_create", user_id=user.id)
         return new_token
 
 
@@ -278,7 +283,8 @@ async def delete_user_api_token(user: User) -> None:
         if token_model:
             await session.delete(token_model)
             await session.commit()
-            logger.info(f"[CRUD] User {user.id} API token deleted")
+            from beaverhabits.app.audit import record
+            await record("token_revoke", user_id=user.id)
 
 
 async def get_user_by_api_token(token: str) -> User | None:

@@ -5,7 +5,7 @@ from enum import Enum
 
 import dotenv
 import pytz
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 logging.getLogger("niceGUI").setLevel(logging.INFO)
@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     MAX_USER_COUNT: int = -1
     JWT_SECRET: str = "SECRET"
     JWT_LIFETIME_SECONDS: int = 0
+
+    # Lane 2 security (per-minute fixed windows; native clients need no CSRF token).
+    CSRF_ALLOWED_ORIGINS: list[str] = []
+    API_RATE_USER_PER_MINUTE: int = Field(default=120, ge=1, le=10000)
+    API_RATE_IP_PER_MINUTE: int = Field(default=300, ge=1, le=10000)
+    AUTH_RATE_IP_PER_MINUTE: int = Field(default=60, ge=1, le=10000)
 
     # Auth
     TRUSTED_EMAIL_HEADER: str = ""

@@ -34,7 +34,10 @@ from beaverhabits.storage.storage import (
     habits_in_group_order,
 )
 
-api_router = APIRouter()
+from beaverhabits.app.rate_limits import api_user_limit, consume
+from beaverhabits.configs import settings
+
+api_router = APIRouter(dependencies=[Depends(api_user_limit)])
 
 
 @api_router.delete("/account", status_code=204, tags=["account"])
@@ -396,6 +399,10 @@ async def _apply_push_habit_list(user: User, msg: dict) -> None:
 
 @api_router.websocket("/sync/ws")
 async def sync_ws(websocket: WebSocket, token: str | None = Query(default=None)):
+    ip = websocket.client.host if websocket.client else "unknown"
+    if not await consume("api-ip", ip, settings.API_RATE_IP_PER_MINUTE, 60):
+        await websocket.close(code=1008)
+        return
     user = await _authenticate_ws(token)
     if user is None:
         await websocket.close(code=1008)  # policy violation
@@ -406,6 +413,9 @@ async def sync_ws(websocket: WebSocket, token: str | None = Query(default=None))
     try:
         while True:
             msg = await websocket.receive_json()
+            if not await consume("api-user", user.id, settings.API_RATE_USER_PER_MINUTE, 60):
+                await websocket.close(code=1008)
+                break
             msg_type = msg.get("type")
 
             if msg_type == "push_tick":

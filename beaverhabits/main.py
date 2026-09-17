@@ -44,12 +44,18 @@ async def lifespan(_: FastAPI):
     # Create new database and tables if they don't exist
     await create_db_and_tables()
 
-    # Start scheduler
+    from beaverhabits.integrity import daily_integrity_task
+    from beaverhabits.app.audit import audit_retention_task
+    tasks = [asyncio.create_task(daily_integrity_task()),
+             asyncio.create_task(audit_retention_task())]
     if settings.ENABLE_DAILY_BACKUP:
-        loop = asyncio.get_event_loop()
-        loop.create_task(daily_backup_task())
-
-    yield
+        tasks.append(asyncio.create_task(daily_backup_task()))
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -84,6 +90,11 @@ if settings.ENABLE_PLAN:
     init_paddle_routes(app)
 
 init_gui_routes(app)
+
+from beaverhabits.app.http_security import BrowserOriginMiddleware
+from beaverhabits.app.rate_limits import IPRateLimitMiddleware
+app.add_middleware(IPRateLimitMiddleware)
+app.add_middleware(BrowserOriginMiddleware, allowed_origins=settings.CSRF_ALLOWED_ORIGINS)
 
 
 if settings.SENTRY_DSN:

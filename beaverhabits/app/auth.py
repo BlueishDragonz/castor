@@ -123,6 +123,7 @@ async def user_get_by_id(user_id: UUID) -> User:
 
 def user_logout() -> bool:
     app.storage.user.clear()
+    app.storage.user["clear_auth_cookie"] = True
     return True
 
 
