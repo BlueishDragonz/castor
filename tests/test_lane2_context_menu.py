@@ -31,7 +31,7 @@ class ContextMenuTests(unittest.TestCase):
             "ui": ui,
             "page_path": lambda: "/",
             "settings": SimpleNamespace(UMAMI_ANALYTICS_ID=""),
-            "css": SimpleNamespace(WHITE_FLASH_PREVENT="", TEXTAREA_CSS="", FONT_CSS=""),
+            "css": SimpleNamespace(WHITE_FLASH_PREVENT="", TEXTAREA_CSS="", FONT_CSS="", BH_DESIGN_CSS=""),
             "views": MagicMock(),
             "PREVENT_CONTEXT_MENU": javascript.PREVENT_CONTEXT_MENU,
             "prevent_context_menu": javascript.prevent_context_menu,

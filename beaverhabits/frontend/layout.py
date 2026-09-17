@@ -8,7 +8,7 @@ from beaverhabits.app.auth import user_logout
 from beaverhabits.configs import settings
 from beaverhabits.frontend import css, icons
 from beaverhabits.frontend.components import (
-    compat_card,
+    bh_card,
     habit_edit_dialog,
     menu_header,
     menu_icon_button,
@@ -118,6 +118,8 @@ def custom_headers():
     ui.add_css(css.TEXTAREA_CSS)
     # Self-hosted Inter font (added in Batch 2, replaces Quasar's default Roboto)
     ui.add_css(css.FONT_CSS)
+    # Beaver Habits Design System (promoted from security page)
+    ui.add_css(css.BH_DESIGN_CSS)
 
     # Preserve native desktop/tablet menus; suppress long-press callouts on phones.
     from nicegui import context
@@ -135,7 +137,7 @@ def custom_headers():
 def show_help_dialog():
     with ui.context.client.content:
         with ui.dialog() as dialog:
-            with compat_card().classes("w-[360px]"):
+            with bh_card(variant="dialog").classes("w-[360px]"):
                 title = IDENTITY.replace("/", " ")
                 title = title.split("@")[0] if "@" in title else title
                 ui.label(title).classes("text-lg font-bold")

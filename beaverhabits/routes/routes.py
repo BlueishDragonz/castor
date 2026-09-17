@@ -265,7 +265,7 @@ async def login_page(client: Client) -> Optional[RedirectResponse]:
     )
 
     # Animated dot-grid background (Vanta.js, vendored locally), palette-matched
-    # to the app theme: light #f9f9f9 bg + #1976d2 dots, dark #121212 + #6796cf.
+    # to the app theme using Quasar CSS custom properties.
     ui.add_head_html(
         '<script src="/statics/libs/three.r134.min.js"></script>'
         '<script src="/statics/libs/vanta.dots.min.js"></script>'
@@ -328,11 +328,24 @@ async def login_page(client: Client) -> Optional[RedirectResponse]:
         <script>
         (function () {
             if (window._vantaBg) { window._vantaBg.destroy(); window._vantaBg = null; }
+            function cssVar(name) {
+                return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+            }
+            function hexToInt(hex) {
+                // Accept #rrggbb or rrggbb
+                var h = hex.replace(/^#/, '');
+                if (h.length === 3) h = h.split('').map(function(c){return c+c;}).join('');
+                return parseInt(h, 16);
+            }
             function initVanta() {
                 if (typeof VANTA === "undefined" || !VANTA.DOTS) return;
+                var primary = cssVar('--q-primary') || '#1976d2';
+                var bg = cssVar('--q-page-bg') || cssVar('--q-dark-page') || '#f9f9f9';
                 var dark = document.body.classList.contains("q-dark")
                     || document.body.classList.contains("body--dark")
                     || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+                var bgColor = dark ? hexToInt(bg) : hexToInt(cssVar('--q-page-bg') || '#f9f9f9');
+                var dotColor = hexToInt(primary);
                 window._vantaBg = VANTA.DOTS({
                     el: "#vanta-bg",
                     mouseControls: true,
@@ -343,14 +356,25 @@ async def login_page(client: Client) -> Optional[RedirectResponse]:
                     scale: 1.00,
                     scaleMobile: 1.00,
                     showLines: false,
-                    backgroundColor: dark ? 0x121212 : 0xf9f9f9,
-                    color: dark ? 0x6796cf : 0x1976d2,
+                    backgroundColor: bgColor,
+                    color: dotColor,
                     size: 2.5,
                     spacing: 30.0
                 });
             }
             if (document.readyState === "complete") initVanta();
             else window.addEventListener("load", initVanta);
+            // Re-init on theme change
+            var observer = new MutationObserver(function(mutations) {
+                for (var m of mutations) {
+                    if (m.attributeName === 'class' && (m.target.classList.contains('q-dark') || m.target.classList.contains('body--dark'))) {
+                        if (window._vantaBg) { window._vantaBg.destroy(); window._vantaBg = null; }
+                        initVanta();
+                        break;
+                    }
+                }
+            });
+            observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
         })();
         </script>
         """

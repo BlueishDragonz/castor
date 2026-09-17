@@ -67,8 +67,16 @@ def link(text: str, target: str, color: str = "text-white") -> ui.link:
     )
 
 
-def compat_card():
-    return ui.card().classes("no-shadow")
+def bh_card(*, variant: str = "default") -> ui.card:
+    """Beaver-styled card. variant: 'default' | 'dialog' | 'panel'"""
+    classes = "bh-card"
+    if variant in ("dialog", "panel"):
+        classes += " bh-dialog-panel"
+    return ui.card().classes(classes)
+
+
+def compat_card():  # DEPRECATED — kept for any stray imports; delegates to bh_card()
+    return bh_card()
 
 
 @contextmanager
@@ -150,37 +158,36 @@ async def habit_tick_dialog(habit: Habit, day: datetime.date):
     else:
         label = f"{(today - day).days} days ago"
 
-    with ui.dialog() as dialog, ui.card().props("flat") as card:
+    with ui.dialog() as dialog:
         dialog.props('backdrop-filter="blur(4px)"')
-        card.classes("w-[640px]")
+        with bh_card(variant="dialog").classes("w-[640px]"):
+            with ui.column().classes("gap-0 w-full bh-stage"):
+                t = Textarea(
+                    label=f"Note ({label})" if label else "Note",
+                    value=record.text if record else "",
+                    validation={
+                        "Too long!": lambda value: len(value)
+                        < settings.DAILY_NOTE_MAX_LENGTH
+                    },
+                )
+                t.classes("w-full bh-wrap")
+                t.style("font-size: 14px;")
 
-        with ui.column().classes("gap-0 w-full"):
-            t = Textarea(
-                label=f"Note ({label})" if label else "Note",
-                value=record.text if record else "",
-                validation={
-                    "Too long!": lambda value: len(value)
-                    < settings.DAILY_NOTE_MAX_LENGTH
-                },
-            )
-            t.classes("w-full")
-            t.style("font-size: 14px;")
+                with ui.row().classes("w-full justify-end gap-2 flex-wrap"):
+                    # default options: yes, no
+                    # custom options: skip, mark, star, #hex_color, ...
+                    # Fall back to user's default chips if habit has no custom chips
+                    chips = habit.chips
+                    if not chips:
+                        chips = views.get_default_chips()
+                    for chip in chips:
+                        display = value = chip
+                        if ":" in chip:
+                            display, value = chip.split(":", 1)
 
-            with ui.row():
-                # default options: yes, no
-                # custom options: skip, mark, star, #hex_color, ...
-                # Fall back to user's default chips if habit has no custom chips
-                chips = habit.chips
-                if not chips:
-                    chips = views.get_default_chips()
-                for chip in chips:
-                    display = value = chip
-                    if ":" in chip:
-                        display, value = chip.split(":", 1)
-
-                    ui.button(
-                        display, on_click=lambda c=value: dialog.submit((c, t.value))
-                    ).props("flat")
+                        ui.button(
+                            display, on_click=lambda c=value: dialog.submit((c, t.value))
+                        ).props("unelevated no-caps dense bh-btn")
 
     # Realtime saving
     async def t_value_change(e: events.ValueChangeEventArguments):
@@ -1297,42 +1304,45 @@ def habit_edit_dialog(habit: Habit) -> ui.dialog:
         target_count.value = str(EVERY_DAY.target_count)
         chips.value = views.get_default_chips()
 
-    with ui.dialog() as dialog, ui.card().props("flat") as card:
+    with ui.dialog() as dialog:
         dialog.props('backdrop-filter="blur(4px)"')
-        card.classes("w-5/6 max-w-96")
+        with bh_card(variant="dialog").classes("w-5/6 max-w-96"):
+            with ui.column().classes("w-full bh-stage"):
+                ui.label("Edit Habit").classes("text-lg font-semibold bh-copy bh-wrap")
+                habit_name_input = HabitNameInput(habit, label="Name")
+                habit_name_input.classes("w-full bh-wrap")
 
-        with ui.column().classes("w-full"):
-            habit_name_input = HabitNameInput(habit, label="Name")
-            habit_name_input.classes("w-full")
+                # Habit Frequency
+                with ui.row().classes("items-center bh-wrap"):
+                    target_count = number_input(p.target_count, label="Times").classes("bh-wrap")
+                    target_count.props("dense")
 
-            # Habit Frequency
-            with ui.row().classes("items-center"):
-                target_count = number_input(p.target_count, label="Times")
+                    ui.label("/").classes("dark:text-gray-300 bh-copy")
 
-                ui.label("/").classes("dark:text-gray-300")
+                    period_count = number_input(value=p.period_count, label="Every").classes("bh-wrap")
+                    period_count.props("dense")
 
-                period_count = number_input(value=p.period_count, label="Every")
-                period_type = ui.select(
-                    PERIOD_TYPES_FOR_HUMAN, value=p.period_type, label=" "
-                ).props("dense")
+                    period_type = ui.select(
+                        PERIOD_TYPES_FOR_HUMAN, value=p.period_type, label=" "
+                    ).props("dense").classes("bh-wrap")
 
-            # Steak status shortcut
-            with ui.row().classes("items-center w-full no-wrap"):
-                chips_value = habit.chips or views.get_default_chips()
-                chips = ui.input_chips(
-                    "Completion Status",
-                    value=chips_value,
-                    new_value_mode="add-unique",
-                ).classes("flex-grow")
-                ui.icon("help_outline", size="xs").classes(
-                    "cursor-pointer opacity-30 hover:opacity-80"
-                ).style("margin-top: 20px").tooltip("Edit default completion status").on(
-                    "click", lambda: redirect("completion-status")
-                )
+                # Streak status shortcut
+                with ui.row().classes("items-center w-full no-wrap bh-wrap"):
+                    chips_value = habit.chips or views.get_default_chips()
+                    chips = ui.input_chips(
+                        "Completion Status",
+                        value=chips_value,
+                        new_value_mode="add-unique",
+                    ).classes("flex-grow bh-wrap")
+                    ui.icon("help_outline", size="xs").classes(
+                        "cursor-pointer opacity-30 hover:opacity-80"
+                    ).style("margin-top: 20px").tooltip("Edit default completion status").on(
+                        "click", lambda: redirect("completion-status")
+                    )
 
-            with ui.row():
-                ui.button("Save", on_click=save).props("flat dense")
-                ui.button("Reset", on_click=reset).props("flat dense")
+                with ui.row().classes("w-full justify-end gap-2"):
+                    ui.button("Reset", on_click=reset).props("flat dense bh-btn")
+                    ui.button("Save", on_click=save).props("unelevated no-caps dense bh-btn")
 
     return dialog
 
@@ -1345,15 +1355,15 @@ def auth_header(text: str, on_back=None):
         if on_back is not None:
             back_btn = ui.button(icon="arrow_back", on_click=on_back).props(
                 "flat round dense"
-            )
+            ).classes("bh-btn")
             back_btn.style("position:absolute;left:0;")
             back_btn.set_visibility(False)
-        ui.label(text).classes("text-3xl font-bold text-center")
+        ui.label(text).classes("text-3xl font-bold text-center bh-wrap")
     return back_btn
 
 
 def auth_redirect(text: str, target: str):
-    return link(text, target).classes("text-xs text-gray-950")
+    return link(text, target).classes("text-xs text-gray-950 bh-copy")
 
 
 def auth_forgot_password(email_input: ui.input, reset: Callable):
@@ -1373,7 +1383,7 @@ def auth_forgot_password(email_input: ui.input, reset: Callable):
 
 
 def auth_email(value: str | None = None):
-    email = ui.input("Email").classes("w-full")
+    email = ui.input("Email").classes("w-full bh-wrap")
     if value:
         email.value = value
     return email
@@ -1381,7 +1391,7 @@ def auth_email(value: str | None = None):
 
 def auth_password(title: str = "Password", value: str | None = None):
     password = ui.input("password", password=True, password_toggle_button=True)
-    password.classes("w-full")
+    password.classes("w-full bh-wrap")
     if value:
         password.value = value
     if title:
@@ -1391,7 +1401,9 @@ def auth_password(title: str = "Password", value: str | None = None):
 
 @contextmanager
 def auth_card(title: str, func: Callable, card_classes: str = "", logo: bool = False,
-               on_back=None, show_continue: bool = True):
+              on_back=None, show_continue: bool = True):
+    """Auth flow card using Beaver design system (bh_card variant='dialog').
+    Preserves beaver logo block exactly as before."""
     with ui.column().classes("absolute-center items-center w-80 sm:w-96").style("gap:0;"):
         if logo:
             with ui.row().classes("w-full justify-center"):
@@ -1409,13 +1421,13 @@ def auth_card(title: str, func: Callable, card_classes: str = "", logo: bool = F
                 "margin:14px 0 0 0;"
             )
             ui.element("div").style("height:26px;")
-        with ui.card().classes(f"shadow-none w-full {card_classes}"):
+        with bh_card(variant="dialog").classes(f"w-full {card_classes}"):
             with ui.column().classes("w-full gap-4"):
                 back_btn = auth_header(title, on_back=on_back)
                 slot = {"back": back_btn, "continue": None}
                 yield slot
                 if show_continue:
-                    slot["continue"] = ui.button("Continue", on_click=func).props("dense").classes("w-full")
+                    slot["continue"] = ui.button("Continue", on_click=func).props("unelevated no-caps dense").classes("w-full bh-btn")
 
 
 def habit_name_menu(

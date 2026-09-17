@@ -16,7 +16,8 @@ from beaverhabits.storage.storage import Habit
 WEEKS_TO_DISPLAY = 53
 
 
-def compat_card():
+def streaks_card():
+    """Calendar heatmap card — wide, compact, no shadow."""
     card = ui.card().classes("p-3 gap-0 no-shadow items-center")
     card.classes("w-[1106px] break-inside-avoid h-fit")
     return card
@@ -27,7 +28,7 @@ def streaks(today: datetime.date, habit: Habit):
     start_date = min(ticked_data.keys()) if ticked_data else today
 
     while today > start_date:
-        with compat_card():
+        with streaks_card():
             ui.label(today.strftime("%Y")).classes("text-lg")
             ui.space().classes("h-1")
             habit_calendar = CalendarHeatmap.build(
@@ -39,13 +40,13 @@ def streaks(today: datetime.date, habit: Habit):
 
 
 def history(today: datetime.date, habit: Habit):
-    with compat_card():
+    with streaks_card():
         ui.label("History").classes("text-lg")
         habit_history(today, habit, total_months=48)
 
 
 def notes(habit: Habit, limit: int = 100):
-    with compat_card():
+    with streaks_card():
         ui.label("Notes").classes("text-lg")
         habit_notes(habit, limit=limit)
 

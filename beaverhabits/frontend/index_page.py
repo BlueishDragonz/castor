@@ -11,6 +11,7 @@ from beaverhabits.frontend.components import (
     HabitCheckBox,
     IndexStreakBadge,
     IndexTotalBadge,
+    bh_card,
     filter_habits_with_tags,
     habit_name_menu,
     habits_by_tags,
@@ -111,7 +112,7 @@ def habit_list_ui(days: list[datetime.date], active_habits: List[Habit]):
                 continue
 
             for habit in habit_list:
-                with ui.card().classes(COMPAT_CLASSES).classes("theme-card-shadow"):
+                with bh_card():
                     with grid(columns, 1):
                         habit_row(habit, tag, days)
 

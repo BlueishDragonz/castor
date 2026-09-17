@@ -7,6 +7,7 @@ from nicegui import events, ui
 from beaverhabits import const
 from beaverhabits.app.db import User
 from beaverhabits.frontend import icons
+from beaverhabits.frontend.components import bh_card
 from beaverhabits.frontend.layout import layout
 from beaverhabits.logger import logger
 from beaverhabits.storage.dict import DictHabitList
@@ -86,15 +87,16 @@ def import_ui_page(user: User):
             logger.info(f"merged: {merged}")
             logger.info(f"unchanged: {unchanged}")
 
-            with ui.dialog() as dialog, ui.card().classes("w-64"):
-                ui.label(
-                    "Are you sure? "
-                    + f"{len(added)} habits will be added and "
-                    + f"{len(merged)} habits will be merged.",
-                )
-                with ui.row():
-                    ui.button("Yes", on_click=lambda: dialog.submit("Yes"))
-                    ui.button("No", on_click=lambda: dialog.submit("No"))
+            with ui.dialog() as dialog:
+                with bh_card(variant="dialog").classes("w-64"):
+                    ui.label(
+                        "Are you sure? "
+                        + f"{len(added)} habits will be added and "
+                        + f"{len(merged)} habits will be merged.",
+                    )
+                    with ui.row():
+                        ui.button("Yes", on_click=lambda: dialog.submit("Yes"))
+                        ui.button("No", on_click=lambda: dialog.submit("No"))
             result = await dialog
             if result != "Yes":
                 return
@@ -115,7 +117,7 @@ def import_ui_page(user: User):
             ui.notify(str(error), color="negative", position="top")
 
     with layout(title="Import"):
-        with ui.column().classes("gap-2"):
+        with bh_card():
             # Upload: https://nicegui.io/documentation/upload
             upload = ui.upload(on_upload=handle_upload, max_files=1)
             upload.props('accept=.json,.csv color="grey-10" flat')
@@ -123,6 +125,6 @@ def import_ui_page(user: User):
 
             # Note
             with ui.row().classes("gap-1"):
-                ui.label("Restore your existing setup and continue")
+                ui.label("Restore your existing setup and continue").classes("bh-copy")
                 with ui.link(target=const.IMPORT_WIKI_PAGE, new_tab=True):
                     ui.icon(icons.HELP)

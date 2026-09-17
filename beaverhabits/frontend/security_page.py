@@ -17,7 +17,7 @@ from beaverhabits.app.auth import (
     user_logout,
 )
 from beaverhabits.app.db import User
-from beaverhabits.frontend.components import compat_card
+from beaverhabits.frontend.components import bh_card
 from beaverhabits.frontend.layout import custom_headers, layout
 from beaverhabits.frontend.security_passkeys import (
     add_security_passkeys_javascript as add_security_passkey_javascript,
@@ -159,7 +159,7 @@ async def security_page(user: User):
     def dialog_shell(title, description, icon):
         """Create the one dynamic region inside the visible dialog card."""
         with refs['dialog']:
-            with compat_card().classes('bh-security-panel'):
+            with bh_card(variant="dialog").classes('bh-security-panel'):
                 refs['body'] = ui.column().classes('bh-security-stage')
         with refs['body']:
             ui.icon(icon).classes('bh-security-emblem').props('aria-hidden=true')
@@ -449,12 +449,12 @@ async def security_page(user: User):
 
     with layout(title='Security'):
         with ui.column().classes('bh-security'):
-            with compat_card().classes('w-full bh-security-card'):
+            with bh_card().classes('w-full bh-security-card'):
                 heading('Passkeys')
                 refs['credentials'] = ui.column().classes('w-full gap-4')
                 refs['add'] = ui.button('Add passkey', icon='add', on_click=open_passkey).classes('w-full').props('unelevated no-caps')
                 await reload_credentials()
-            with compat_card().classes('w-full bh-security-card'):
+            with bh_card().classes('w-full bh-security-card'):
                 heading('Password')
                 ui.label('Manage your password using your current password, or recover access by email.').classes('bh-security-copy')
                 with ui.column().classes('w-full gap-1'):

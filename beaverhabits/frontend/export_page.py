@@ -2,7 +2,7 @@ from nicegui import ui
 
 from beaverhabits import const, views
 from beaverhabits.app.db import User
-from beaverhabits.frontend.components import compat_card, habit_backup_dialog
+from beaverhabits.frontend.components import bh_card, habit_backup_dialog
 from beaverhabits.frontend.layout import layout
 from beaverhabits.storage.storage import HabitList
 from beaverhabits.utils import send_email
@@ -63,9 +63,9 @@ async def export_page(habit_list: HabitList, user: User):
 
     with layout(title="Export"):
         with ui.column().classes("w-80"):
-            with compat_card().classes("w-full"):
+            with bh_card().classes("w-full"):
                 export_panel(habit_list, user)
-            with compat_card().classes("w-full"):
+            with bh_card().classes("w-full"):
                 backup_panel(habit_list)
-            with compat_card().classes("w-full"):
+            with bh_card().classes("w-full"):
                 delete_account(habit_list, user)
