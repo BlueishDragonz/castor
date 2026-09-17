@@ -3,7 +3,8 @@
 Rules enforced (see plan 2026-09-12_040000):
 - R1 step-up auth (current password) before credential delete / password change.
 - R2 anti-stranding: cannot delete the last sign-in method.
-- R4 password change does not revoke existing JWTs: stated in the UI.
+- R4 superseded 2026-09-17: password change revokes existing JWTs (token_version);
+  the UI tells the user they are signed out everywhere.
 """
 
 from nicegui import ui
@@ -18,6 +19,11 @@ from beaverhabits.app.auth import (
 from beaverhabits.app.db import User
 from beaverhabits.frontend.components import add_webauthn_javascript, compat_card
 from beaverhabits.frontend.layout import custom_headers, layout
+
+# Explicit attributes apply at mount, including lazily created dialogs.
+# Password managers may override these hints at the user's discretion.
+EMPTY_PASSWORD_PROPS = 'autocomplete=new-password data-1p-ignore data-bwignore data-lpignore=true data-dashlane-ignore=true'
+EMPTY_NICKNAME_PROPS = 'autocomplete=off name=passkey-nickname data-1p-ignore data-bwignore data-lpignore=true data-dashlane-ignore=true'
 
 
 def _transport_labels(transports) -> str:
@@ -71,7 +77,9 @@ async def security_page(user: User):
             ui.label(
                 "Confirm with your current password. This cannot be undone."
             ).classes("text-sm text-gray-500")
-            pw = ui.input("Current password", password=True).classes("w-full")
+            pw = ui.input("Current password", password=True).classes(
+                "w-full"
+            ).props(EMPTY_PASSWORD_PROPS)
             with ui.row().classes("w-full justify-end"):
                 ui.button("Cancel", on_click=dialog.close).props("flat")
                 ui.button(
@@ -106,8 +114,8 @@ async def security_page(user: User):
         if not current:
             ui.notify("Enter your current password", color="negative")
             return
-        if not new or len(new) < 8:
-            ui.notify("New password must be at least 8 characters", color="negative")
+        if not new or len(new) < 12:
+            ui.notify("New password must be at least 12 characters", color="negative")
             return
         if new != confirm:
             ui.notify("New passwords do not match", color="negative")
@@ -150,7 +158,7 @@ async def security_page(user: User):
                     ui.label("Add another passkey").classes("font-bold")
                     nickname_input = ui.input(
                         "Passkey nickname (e.g. Laptop, Phone)"
-                    ).classes("w-full")
+                    ).classes("w-full").props(EMPTY_NICKNAME_PROPS)
                     ui.button(
                         "Add passkey", icon="fingerprint", on_click=start_add_key
                     ).classes("w-full")
@@ -164,11 +172,11 @@ async def security_page(user: User):
                     ui.label("Password").classes("text-lg font-bold")
                     current_pw = ui.input("Current password", password=True).classes(
                         "w-full"
-                    )
-                    new_pw = ui.input("New password", password=True).classes("w-full")
+                    ).props(EMPTY_PASSWORD_PROPS)
+                    new_pw = ui.input("New password", password=True).classes("w-full").props(EMPTY_PASSWORD_PROPS)
                     confirm_pw = ui.input(
                         "Confirm new password", password=True
-                    ).classes("w-full")
+                    ).classes("w-full").props(EMPTY_PASSWORD_PROPS)
                     ui.button(
                         "Change password",
                         on_click=lambda: do_password_change(
@@ -178,6 +186,6 @@ async def security_page(user: User):
                         ),
                     ).classes("w-full")
                     ui.label(
-                        "Note: changing your password does not sign out other "
-                        "devices — existing sessions stay valid until they expire."
+                        "Note: changing your password signs you out everywhere, "
+                        "including this device — sign in again afterwards."
                     ).classes("text-xs text-gray-500")
