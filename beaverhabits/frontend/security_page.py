@@ -336,6 +336,7 @@ async def security_page(user: User):
         dialog_shell('Change password', 'Changing your password signs you out everywhere, including this device.', 'lock_outline')
         with refs['body']:
             refs['focus'] = password_input('Current password', change_password).props('autofocus')
+            refs['recovery'] = ui.button('Forgot password?', on_click=recover_password).props('flat no-caps dense').classes('self-start')
             password_input('New password', change_password)
             password_input('Confirm new password', change_password)
             ui.label('Use at least 12 characters.').classes('bh-security-copy')
@@ -398,7 +399,7 @@ async def security_page(user: User):
         ui.navigate.to('/login')
 
     async def recover_password():
-        if not start_dialog('recovery', refs['recovery']):
+        if not start_dialog('recovery', refs['change']):
             return
         dialog_shell('Recover your password',
                      'Continue to sign out on this device and open sign in. Enter your recovery email there and choose Forgot password. No email is sent until you request it.',
@@ -423,5 +424,3 @@ async def security_page(user: User):
                     ui.label('Recovery email').classes('text-xs font-medium opacity-60')
                     ui.label(user.email).classes('w-full text-sm select-text bh-security-wrap')
                 refs['change'] = ui.button('Change password', icon='lock_outline', on_click=open_password).classes('w-full').props('outline no-caps')
-                refs['recovery'] = ui.button('Forgot password?', on_click=recover_password).props('flat no-caps dense').classes('self-start')
-                refs['recovery_status'] = message(error=True)

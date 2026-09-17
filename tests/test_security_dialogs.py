@@ -360,10 +360,15 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_recovery_opens_existing_login_flow_without_sending_mail(self):
         await self.render()
+        self.assertFalse(any(b.text == 'Forgot password?' for b in self.elements(ui.button)))
+        await self.click('Change password')
+        self.set_passwords()
+        original_fields = list(self.elements(ui.input))
         with patch.object(security.ui.navigate, 'to') as navigate, patch.object(security.views, 'forgot_password', AsyncMock()) as recover, patch.object(security, 'user_logout') as logout:
             await self.click('Forgot password?')
             navigate.assert_not_called()
             logout.assert_not_called()
+            self.assertTrue(all(not field.value for field in original_fields))
             await self.click('Continue to sign in')
             logout.assert_called_once()
             navigate.assert_called_once_with('/login')
