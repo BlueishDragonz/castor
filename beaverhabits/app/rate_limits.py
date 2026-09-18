@@ -19,6 +19,12 @@ class RateBucket(Base):
     count: Mapped[int] = mapped_column(default=1)
 
 
+# Hard cap per NAMESPACE, not per table: a burst in one namespace (e.g.
+# recovery floods) must never starve or evict another namespace's budget
+# (api-ip, auth-ip, api-user). Bound: CAP rows per namespace.
+CARDINALITY_CAP = 10000
+
+
 async def consume(namespace, identity, limit, window, *, now=None, sessions=None):
     if limit < 1 or window < 1:
         raise ValueError('Rate limit and window must be positive')
@@ -34,11 +40,12 @@ async def consume(namespace, identity, limit, window, *, now=None, sessions=None
             from sqlalchemy.dialects.postgresql import insert
         else:
             raise RuntimeError('Unsupported rate-limit database')
-        # Transactional cleanup bounds cardinality over time; hard cap prevents
-        # churn from forcing unbounded rows within a single window.
+        # Transactional cleanup bounds cardinality over time; the per-namespace
+        # hard cap prevents churn from forcing unbounded rows within a window.
         await session.execute(delete(RateBucket).where(RateBucket.expires_at <= now))
-        count = await session.scalar(select(func.count()).select_from(RateBucket))
-        if count >= 10000 and await session.get(RateBucket, key) is None:
+        count = await session.scalar(
+            select(func.count()).select_from(RateBucket).where(RateBucket.key.startswith(f'{namespace}:')))
+        if count >= CARDINALITY_CAP and await session.get(RateBucket, key) is None:
             await session.commit()
             return False
         statement = insert(RateBucket).values(key=key, expires_at=window_end, count=1)

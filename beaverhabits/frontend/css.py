@@ -226,7 +226,9 @@ BH_DESIGN_CSS = f"""/* Card base */
   border-radius: {DIALOG_RADIUS};
   padding: {DIALOG_PADDING};
   gap: {CARD_GAP};
-  width: 400px;
+  /* No fixed width: the panel is w-full inside its responsive parent
+     (e.g. auth_card's w-80 sm:w-96). A hardcode here would override the
+     parent's responsive sizing and overflow small viewports (P3-9). */
   max-width: calc(100vw - 32px);
 }}
 

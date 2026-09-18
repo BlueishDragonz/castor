@@ -87,8 +87,16 @@ class LegacyRecoverySafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 3)
 
     async def test_recipient_independent_notice_and_threaded_mail(self):
+        async def clear_budget():
+            # P0-2: each probe must be admitted; a same-email retry would be
+            # (correctly) throttled and show the distinct throttle notice.
+            from sqlalchemy import delete as _delete
+            async with self.sessions.begin() as session:
+                await session.execute(_delete(rate_limits.RateBucket))
         await views.forgot_password(self.user.email)
+        await clear_budget()
         await views.forgot_password('absent@example.com')
+        await clear_budget()
         async with self.sessions.begin() as session:
             await session.execute(update(db.User).where(db.User.id == self.user.id).values(is_active=False))
         await views.forgot_password(self.user.email)
@@ -106,7 +114,27 @@ class LegacyRecoverySafetyTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await second.dispose()
         self.assertEqual(len(self.mail), 1)
-        self.assertEqual(self.notices[0], self.notices[1])
+        # P0-2: the throttled retry must not display the success notice.
+        self.assertNotEqual(self.notices[0], self.notices[1])
+
+    async def test_throttled_recovery_admits_no_mail_and_warns_not_success(self):
+        # P0-2: hitting the recovery budget must suppress the email AND show a
+        # distinct throttled notice — never the "instructions emailed" success
+        # text that would mislead the user about an email that was not sent.
+        with patch.object(rate_limits, 'consume', AsyncMock(return_value=False)):
+            await views.forgot_password(self.user.email)
+        self.assertEqual(len(self.mail), 0)
+        self.assertEqual(len(self.notices), 1)
+        color = self.notices[0][1].get('color')
+        self.assertNotIn('check your inbox', str(self.notices).lower())
+        self.assertNotIn(self.user.email, str(self.notices))
+        self.assertNotEqual(color, 'positive')
+        # Message must differ from the admitted success case (same session,
+        # budget untouched by the mocked call, so the retry is admitted).
+        with patch.object(views, 'send_email') as mail:
+            await views.forgot_password(self.user.email)
+        self.assertEqual(mail.call_count, 1)
+        self.assertNotEqual(self.notices[-1], self.notices[0])
 
     async def test_email_failure_is_generic_and_never_logs_exception(self):
         with patch.object(views, 'send_email', side_effect=RuntimeError('synthetic-private-mail-body')):
@@ -255,6 +283,34 @@ class LegacyRecoverySafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(login.await_args.args[0].token_version, 5)
         self.assertEqual((await self.fresh()).token_version, 5)
         redirect.assert_called_once()
+
+    async def test_inactive_account_is_invalid_token_not_user_status(self):
+        # P2-6: user_reset_password never raises UserNotExists/UserInactive —
+        # an inactive account surfaces as InvalidResetPasswordToken, and the
+        # GUI must show the "invalid or expired link" notice for it.
+        with patch.object(views, 'user_reset_password', AsyncMock(
+                side_effect=exceptions.InvalidResetPasswordToken())) as service, \
+             patch.object(views, 'login_user', AsyncMock()) as login, patch.object(views, 'redirect') as redirect:
+            await views.reset_password(self.user, PASSWORD)
+        service.assert_awaited_once()
+        login.assert_not_awaited()
+        redirect.assert_not_called()
+        self.assertIn('invalid or expired', str(self.notices))
+        self.assertEqual((await self.fresh()).hashed_password, 'unused')
+
+    async def test_unexpected_user_status_errors_are_uncertain_not_link_invalid(self):
+        # P2-6: only InvalidResetPasswordToken and InvalidPasswordException
+        # are expected recovery outcomes. Any OTHER error escaping the
+        # service (UserInactive today is impossible; future refactors may
+        # change that) must land in the honest "could not confirm" handler,
+        # not the "invalid link" one.
+        with patch.object(views, 'user_reset_password', AsyncMock(side_effect=exceptions.UserInactive())), \
+             patch.object(views, 'login_user', AsyncMock()) as login, patch.object(views, 'redirect') as redirect:
+            await views.reset_password(self.user, PASSWORD)
+        login.assert_not_awaited()
+        redirect.assert_not_called()
+        self.assertIn('could not confirm', str(self.notices))
+        self.assertNotIn('invalid or expired', str(self.notices))
 
 
 if __name__ == '__main__':

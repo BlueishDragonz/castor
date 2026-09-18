@@ -222,8 +222,12 @@ async def forgot_password(email: str) -> None:
     # GUI callbacks bypass the HTTP /auth/ limiter. The former decorator had a
     # per-process cache keyed by raw args; use the persistent recovery budget.
     email = email.strip().lower()
+    admitted = None  # None = unknown (store failure), True/False = consume verdict
     try:
-        if await consume("recovery", f"forgot_email:{email}", 1, 900):
+        # Admit one request per email per window; a throttled retry must never
+        # display the success notice — no email is sent when denied here.
+        admitted = await consume("recovery", f"forgot_email:{email}", 1, 900)
+        if admitted:
             user = await user_get_by_email(email)
             if user is not None and user.is_active:
                 token = user_create_reset_token(user)
@@ -239,6 +243,10 @@ async def forgot_password(email: str) -> None:
     except Exception:
         # Neither exception text nor recipients/message bodies belong in logs.
         logger.warning("Recovery request could not be completed")
+    if admitted is False:
+        # P0-2: honest throttle notice; never claim an email was sent.
+        ui.notify("Too many recovery requests. Please wait a few minutes and try again.", color="warning")
+        return
     ui.notify(
         "If the account can be recovered, reset instructions will be emailed. Please check your inbox.",
         color="positive",
@@ -250,7 +258,9 @@ async def reset_password(user: User, password: str) -> None:
 
     try:
         new_user = await user_reset_password(user, password)
-    except (exceptions.InvalidResetPasswordToken, exceptions.UserInactive, exceptions.UserNotExists):
+    except exceptions.InvalidResetPasswordToken:
+        # The only link/token outcome the service actually raises: invalid,
+        # expired, inactive account, stale version, and replay all land here.
         ui.notify("This reset link is invalid or expired. Please request a new one.", color="negative")
         return
     except exceptions.InvalidPasswordException:

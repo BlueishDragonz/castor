@@ -241,8 +241,47 @@ class SecurityDialogTests(unittest.IsolatedAsyncioTestCase):
         await self.click('Save password')
         self.assert_inline(security_actions.AuthorizationError.message)
         self.change.assert_awaited_once()
-        self.assertEqual(self.named(ui.input, 'New password').value, 'a-new-password-12')
+        # P0-1: secrets are erased even when the form stays open for retry.
+        self.assertEqual(self.named(ui.input, 'New password').value, '')
         self.logout.assert_not_called()
+
+    async def test_password_error_paths_erase_field_values(self):
+        # P0-1: a rejected sensitive action must not leave typed secrets in
+        # the visible inputs; only the inline error survives for retry.
+        await self.render()
+        for error in (security_actions.AuthorizationError(),
+                      security_actions.PasswordPolicyError(),
+                      security_actions.RateLimitError()):
+            with self.subTest(error=type(error).__name__):
+                self.change.side_effect = error
+                await self.click('Change password')
+                self.set_passwords()
+                fields = self.elements(ui.input)
+                self.assertEqual(len(fields), 3)
+                self.assertTrue(all(field.value for field in fields))
+                await self.click('Save password')
+                self.assert_inline(error.message)
+                self.assertTrue(all(not field.value for field in fields),
+                                'secret retained in DOM after SecurityActionError')
+                self.logout.assert_not_called()
+                await self.click('Cancel')  # retryable: form stays closable
+
+    async def test_delete_error_path_erases_field_value(self):
+        # P0-1: same invariant for the remove-passkey password field.
+        self.load.return_value = [SimpleNamespace(id=b'one', name='Office key', created_at=None, transports=[])]
+        await self.render()
+        for error in (security_actions.AuthorizationError(),
+                      security_actions.CredentialNotFoundError()):
+            with self.subTest(error=type(error).__name__):
+                self.remove.side_effect = error
+                await self.click('Remove passkey')
+                field = self.named(ui.input, 'Current password')
+                field.value = 'fixture-password'
+                await self.click('Remove')
+                self.assert_inline(error.message)
+                self.assertEqual(field.value, '')
+                self.logout.assert_not_called()
+                await self.click('Cancel')
 
     async def test_password_backend_failure_is_uncertain_and_not_replayable(self):
         await self.assert_interrupted('password', RuntimeError('sensitive backend detail'))

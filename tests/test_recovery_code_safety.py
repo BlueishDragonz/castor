@@ -135,43 +135,96 @@ class RecoverySafetyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.reset(code)).status_code, 400)
         self.assertEqual(await self.state(row_id), ("unused", 4, False))
 
+    def _concurrent_reset_harness(self):
+        """Shared two-engine race scaffolding: two sessions factories, a hash
+        barrier so both requests read the same state before either writes,
+        and alternating session assignment per task."""
+        second_engine = create_async_engine(self.engine.url)
+        second_sessions = async_sessionmaker(second_engine, expire_on_commit=False)
+        factories = {}
+        ready = asyncio.Event()
+        hashes_ready = threading.Barrier(2, timeout=10)
+        helper_type = UserManager(None).password_helper.__class__
+        original_hash = helper_type.hash
+        def simultaneous_hash(helper, password):
+            # Both requests have read the same valid issuance version before
+            # either can write; a serial replay test would miss the CAS race.
+            hashes_ready.wait()
+            return original_hash(helper, password)
+        @asynccontextmanager
+        async def alternating_sessions():
+            task = asyncio.current_task()
+            if task not in factories:
+                factories[task] = self.sessions if not factories else second_sessions
+            if len(factories) == 2:
+                ready.set()
+            await ready.wait()
+            async with factories[task]() as session:
+                yield session
+        async def run(first_code, first_password, second_code, second_password):
+            with patch.object(routes, "get_async_session_context", alternating_sessions), \
+                 patch.object(routes, "_rate_limit_check", new_callable=AsyncMock), \
+                 patch.object(helper_type, "hash", simultaneous_hash):
+                return await asyncio.gather(
+                    self.reset(first_code, password=first_password),
+                    self.reset(second_code, password=second_password))
+        async def dispose():
+            await second_engine.dispose()
+        return run, dispose
+
     async def test_concurrent_resets_only_one_success_across_engines(self):
         for siblings in (False, True):
             async with self.sessions.begin() as session:
                 await session.execute(update(db.User).where(db.User.id == self.user.id).values(token_version=4, hashed_password="unused"))
             code, row_id = await self.make_code()
             other, other_id = await self.make_code() if siblings else (code, row_id)
-            second_engine = create_async_engine(self.engine.url)
-            second_sessions = async_sessionmaker(second_engine, expire_on_commit=False)
-            factories = {}
-            ready = asyncio.Event()
-            hashes_ready = threading.Barrier(2, timeout=10)
-            helper_type = UserManager(None).password_helper.__class__
-            original_hash = helper_type.hash
-            def simultaneous_hash(helper, password):
-                # Both requests have read the same valid issuance version before
-                # either can write; a serial replay test would miss the CAS race.
-                hashes_ready.wait()
-                return original_hash(helper, password)
-            @asynccontextmanager
-            async def alternating_sessions():
-                task = asyncio.current_task()
-                if task not in factories:
-                    factories[task] = self.sessions if not factories else second_sessions
-                if len(factories) == 2:
-                    ready.set()
-                await ready.wait()
-                async with factories[task]() as session:
-                    yield session
+            run, dispose = self._concurrent_reset_harness()
             try:
-                with patch.object(routes, "get_async_session_context", alternating_sessions), patch.object(routes, "_rate_limit_check", new_callable=AsyncMock), patch.object(helper_type, "hash", simultaneous_hash):
-                    results = await asyncio.gather(self.reset(code), self.reset(other))
+                results = await run(code, PASSWORD, other, PASSWORD)
                 self.assertEqual(sorted(r.status_code for r in results), [200, 400])
                 states = [await self.state(i) for i in {row_id, other_id}]
                 self.assertEqual(sum(used for _, _, used in states), 1)
                 self.assertTrue(all(version == 5 for _, version, _ in states))
             finally:
-                await second_engine.dispose()
+                await dispose()
+
+    async def test_concurrent_same_code_single_spend_with_distinct_passwords(self):
+        # P1-3: two requests race to consume ONE code with different passwords.
+        # Exactly one may commit; the loser is rejected and its password never
+        # lands — the code cannot be double-spent under concurrency.
+        code, row_id = await self.make_code()
+        first, second = "first fixture passphrase", "second fixture passphrase"
+        run, dispose = self._concurrent_reset_harness()
+        try:
+            results = await run(code, first, code, second)
+            self.assertEqual(sorted(r.status_code for r in results), [200, 400])
+            hashed, version, used = await self.state(row_id)
+            self.assertEqual((version, used), (5, True))
+            helper = UserManager(None).password_helper
+            verified = [helper.verify_and_update(p, hashed)[0] for p in (first, second)]
+            self.assertEqual(sorted(verified), [False, True],
+                             "only the winning password must verify; the loser never lands in the DB")
+        finally:
+            await dispose()
+
+    async def test_eligibility_selection_and_consumption_share_one_transaction(self):
+        # P1-3 (structural): the eligible-code SELECT runs INSIDE the write
+        # transaction that consumes it — a separately committed preflight
+        # transaction is the TOCTOU window this removes.
+        code, row_id = await self.make_code()
+        opened = []
+        original = routes.get_async_session_context
+        @asynccontextmanager
+        async def counting_sessions():
+            opened.append(asyncio.current_task())
+            async with original() as session:
+                yield session
+        with patch.object(routes, "get_async_session_context", counting_sessions), \
+             patch.object(routes, "_rate_limit_check", new_callable=AsyncMock):
+            response = await self.reset(code)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(opened), 1,
+                         "eligible-code SELECT must run inside the consuming transaction — no separate preflight session")
 
     async def test_mutable_state_rechecked_after_hashing(self):
         for mutation in ("expiry", "used", "version", "inactive"):

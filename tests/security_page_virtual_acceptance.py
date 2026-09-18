@@ -182,6 +182,44 @@ async def acceptance(folder: Path, measurements: dict) -> None:
                     measurements['new_password_login_http'] = fresh.status_code
                     assert not errors, 'Browser errors during password change'
                     measurements['page_errors'] = len(errors)
+
+                    measurements['stage'] = 'passkey login with the registered credential'
+                    # P2-8: registration alone proves nothing about sign-in.
+                    # Complete the loop: land on /login, reach passkey mode,
+                    # authenticate with the SAME virtual authenticator that
+                    # registered the credential, and confirm a signed-in GUI.
+                    login_statuses = []
+                    errors = []  # scoped to THIS stage only; prior stages asserted their own
+                    page.on('pageerror', lambda error: errors.append(type(error).__name__))
+                    page.on('response', lambda response: login_statuses.append(
+                        (response.url.removeprefix(origin), response.status))
+                        if response.url.startswith(origin + '/auth/webauthn/login/') else None)
+                    # Raw auth registration has no GUI onboarding; supply the
+                    # habit-list fixture a GUI-created account would have.
+                    with sqlite3.connect(database) as connection:
+                        connection.execute(
+                            "INSERT INTO habit_list (user_id, data, created_at, updated_at) "
+                            "SELECT id, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM user WHERE email = ?",
+                            (json.dumps({"habits": []}), EMAIL),
+                        )
+                    await page.goto(origin + '/login')
+                    email_field = page.get_by_placeholder('Enter your email')
+                    await email_field.fill(EMAIL)
+                    await email_field.blur()  # blur performs the server sync
+                    await page.get_by_role('button', name='Login with Passkey', exact=True).click()
+                    await page.wait_for_url(origin + '/gui', timeout=20000)
+                    measurements['passkey_login_reached_gui'] = True
+                    assert login_statuses == [
+                        ('/auth/webauthn/login/begin', 200),
+                        ('/auth/webauthn/login/complete', 200),
+                    ], f'Unexpected login ceremony HTTP statuses: {login_statuses}'
+                    measurements['passkey_login_http'] = [status for _, status in login_statuses]
+                    signed_in_cookie = await context.cookies()
+                    assert any(c['name'] == 'beaver_auth' and c['httpOnly'] for c in signed_in_cookie), \
+                        'Passkey login did not establish the auth cookie'
+                    measurements['passkey_login_cookie'] = True
+                    assert not errors, 'Browser errors during passkey login'
+                    measurements['page_errors'] = len(errors)
                 finally:
                     await browser.close()
 

@@ -100,6 +100,10 @@ async def _authorize(user_id, expected_version, current_password):
                 raise AuthorizationError()
             session.expunge(user)
             return user
+    except SecurityActionError:
+        # Policy/status errors propagate unchanged; the DB catch below must
+        # never convert them into 503 SecurityActionUnavailable.
+        raise
     except SQLAlchemyError:
         raise SecurityActionUnavailable() from None
 
@@ -137,6 +141,10 @@ async def change_password(user_id, expected_version, current_password, new_passw
                     raise StaleAuthorizationError()
                 updated = (await session.execute(select(db.User).where(db.User.id == user_id))).scalar_one()
                 session.expunge(updated)
+    except SecurityActionError:
+        # Policy/status errors (e.g. rowcount CAS rejection) propagate
+        # unchanged; they are not DB failures and must never surface as 503.
+        raise
     except SQLAlchemyError:
         raise SecurityActionUnavailable() from None
     await audit.record('password_change', user_id=user_id)
@@ -169,6 +177,10 @@ async def remove_passkey(user_id, expected_version, current_password, credential
                 ).execution_options(synchronize_session=False))
                 if deleted.rowcount != 1:
                     raise CredentialNotFoundError()
+    except SecurityActionError:
+        # Policy/status errors (e.g. rowcount CAS rejection) propagate
+        # unchanged; they are not DB failures and must never surface as 503.
+        raise
     except SQLAlchemyError:
         raise SecurityActionUnavailable() from None
     await audit.record('passkey_delete', user_id=user_id)

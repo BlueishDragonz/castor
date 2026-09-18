@@ -186,22 +186,26 @@ async def reset_password(req: ResetPasswordRequest, request: Request):
             PasswordResetCode.token_version.is_not(None),
         )
 
-    # Preflight only: do not hold a read transaction while performing slow hashing.
-    # Both mutable account state and code eligibility are checked again at writes.
-    async with get_async_session_context() as session:
-        candidate = (await session.execute(
+    def candidate_query():
+        # Selection and consumption share ONE transaction; with_for_update()
+        # locks the code row from selection to commit on PostgreSQL (a no-op on
+        # SQLite, which serializes writers anyway). Hashing happens BEFORE this
+        # transaction so no lock is held during slow password work.
+        return (
             select(PasswordResetCode.id, PasswordResetCode.user_id, PasswordResetCode.token_version)
             .join(User, User.id == PasswordResetCode.user_id)
             .where(*eligible_code(), User.email == req.email, User.is_active.is_(True),
                    User.token_version == PasswordResetCode.token_version)
             .order_by(PasswordResetCode.id).limit(1)
-        )).first()
-    if candidate is None:
-        raise invalid_code()
+            .with_for_update()
+        )
 
     hashed_password = await asyncio.to_thread(manager.password_helper.hash, req.new_password)
     async with get_async_session_context() as session:
         async with session.begin():
+            candidate = (await session.execute(candidate_query())).first()
+            if candidate is None:
+                raise invalid_code()
             # Compare-and-swap the account first: sibling codes share an issuance
             # version, so only one concurrent reset can change this account.
             changed = await session.execute(

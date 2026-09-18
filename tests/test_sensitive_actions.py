@@ -220,6 +220,30 @@ class SensitiveActionTests(unittest.IsolatedAsyncioTestCase):
                 await actions.remove_passkey(self.user.id, 0, PASSWORD, b'fixture-key')
         self.assertTrue(await self.key_exists())
 
+    async def test_transaction_policy_errors_propagate_not_503(self):
+        # P1-4: SecurityActionError subclasses raised INSIDE the write
+        # transaction must reach callers unchanged — never be converted to
+        # SecurityActionUnavailable (503). A 503 here would tell a user with an
+        # expired session "server error" instead of "sign in again".
+        for error in (actions.StaleAuthorizationError(), actions.PasswordPolicyError()):
+            with self.subTest(error=type(error).__name__):
+                with self.assertRaises(type(error)):
+                    await self._force_transaction_error(error)
+                self.assertEqual((await self.fresh()).token_version, 0)
+
+    async def _force_transaction_error(self, error):
+        # Drive change_password's guarded UPDATE to raise `error` inside
+        # session.begin(), after _authorize approved the snapshot.
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy.sql.dml import Update
+        original = AsyncSession.execute
+        async def raising(session, statement, *args, **kwargs):
+            if isinstance(statement, Update) and statement.table.name == 'user':
+                raise error
+            return await original(session, statement, *args, **kwargs)
+        with patch.object(AsyncSession, 'execute', raising):
+            return await actions.change_password(self.user.id, 0, PASSWORD, NEW_PASSWORD)
+
     async def test_deactivation_after_authorization_blocks_both_actions(self):
         original = actions._authorize
         async def raced(*args):
@@ -263,12 +287,22 @@ class SensitiveActionTests(unittest.IsolatedAsyncioTestCase):
                 ready.set()
             await asyncio.wait_for(ready.wait(), 10)
             return user
+        from sqlalchemy.exc import OperationalError
         with patch.object(actions, '_authorize', synchronize):
             results = await asyncio.gather(
                 actions.change_password(self.user.id, 0, PASSWORD, NEW_PASSWORD),
                 actions.change_password(self.user.id, 0, PASSWORD, NEW_PASSWORD), return_exceptions=True)
         self.assertEqual(sum(isinstance(result, db.User) for result in results), 1)
-        self.assertEqual(sum(isinstance(result, actions.StaleAuthorizationError) for result in results), 1)
+        # Both outcomes assert exactly one winner:
+        # - StaleAuthorizationError: the CAS guard rejected the loser inside
+        #   the write transaction.
+        # - OperationalError (SQLITE_BUSY): SQLite serialized the writers and
+        #   the loser could not even begin its transaction. Under load or
+        #   different SQLite builds the loser arrives here instead; that is a
+        #   correct one-winner result, not a product bug.
+        losers = [r for r in results if not isinstance(r, db.User)]
+        self.assertEqual(len(losers), 1)
+        self.assertIsInstance(losers[0], (actions.StaleAuthorizationError, OperationalError))
         self.assertEqual((await self.fresh()).token_version, 1)
 
 

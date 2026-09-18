@@ -338,6 +338,9 @@ async def security_page(user: User):
             interrupted = 'uncertain'
         except security_actions.SecurityActionError as exc:
             refs['error'].text = exc.message
+            # Rejected action: erase typed secrets from the visible inputs
+            # immediately; the inline error alone survives for retry.
+            erase_fields()
             return
         except Exception:
             interrupted = 'uncertain'
@@ -393,6 +396,9 @@ async def security_page(user: User):
             interrupted = 'uncertain'
         except security_actions.SecurityActionError as exc:
             refs['error'].text = exc.message
+            # Rejected action: erase typed secrets from the visible inputs
+            # immediately; the inline error alone survives for retry.
+            erase_fields()
             set_pending(False)
             return
         except Exception:

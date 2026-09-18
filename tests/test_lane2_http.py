@@ -105,5 +105,41 @@ class LimiterTests(unittest.IsolatedAsyncioTestCase):
             keys=(await session.execute(select(RateBucket.key))).scalars().all()
         self.assertTrue(all('192.0.2.4' not in k for k in keys))
 
+    async def test_namespace_pressure_does_not_throttle_other_namespaces(self):
+        # P1-5: the cardinality cap must be per-namespace. A recovery flood
+        # approaching the shared 10k row cap must not evict/block API traffic.
+        from beaverhabits.app.rate_limits import consume, RateBucket, CARDINALITY_CAP
+        from sqlalchemy import insert
+        # Fill 'recovery' namespace to the cap: one row per distinct identity.
+        async with self.sessions.begin() as session:
+            await session.execute(insert(RateBucket).values([
+                {'key': f'recovery:{i:06d}:{99999}', 'expires_at': 99999, 'count': 1}
+                for i in range(CARDINALITY_CAP)
+            ]))
+        # A fresh recovery identity is rejected by its own namespace cap...
+        self.assertFalse(await consume('recovery', 'flooded-newcomer', 5, 60, now=120, sessions=self.sessions))
+        # ...but api-ip and auth-ip namespaces stay fully admitted.
+        self.assertTrue(await consume('api-ip', '192.0.2.10', 5, 60, now=120, sessions=self.sessions))
+        self.assertTrue(await consume('auth-ip', '192.0.2.10', 5, 60, now=120, sessions=self.sessions))
+        self.assertTrue(await consume('api-user', 'user-1', 5, 60, now=120, sessions=self.sessions))
+
+    async def test_cardinality_cap_counts_within_namespace_only(self):
+        # P1-5: the count-then-insert honesty part — the cap query must count
+        # rows of THIS namespace, not the whole table.
+        from beaverhabits.app.rate_limits import consume, RateBucket, CARDINALITY_CAP
+        from sqlalchemy import insert
+        half = CARDINALITY_CAP // 2
+        async with self.sessions.begin() as session:
+            await session.execute(insert(RateBucket).values([
+                {'key': f'recovery:a{i:06d}:{99999}', 'expires_at': 99999, 'count': 1}
+                for i in range(half)
+            ] + [
+                {'key': f'api-ip:b{i:06d}:{99999}', 'expires_at': 99999, 'count': 1}
+                for i in range(half)
+            ]))
+        # Total rows == cap, but neither namespace alone is at its own cap.
+        self.assertTrue(await consume('recovery', 'newcomer', 5, 60, now=120, sessions=self.sessions))
+        self.assertTrue(await consume('api-ip', 'newcomer', 5, 60, now=120, sessions=self.sessions))
+
 
 if __name__ == '__main__': unittest.main()
