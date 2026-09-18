@@ -7,6 +7,7 @@ from beaverhabits.frontend.design_tokens import (
     BUTTON_RADIUS,
     EMBLEM_RADIUS,
     CARD_PADDING,
+    CARD_PADDING_COMPACT,
     DIALOG_PADDING,
     CARD_GAP,
     EMBLEM_SIZE,
@@ -204,12 +205,20 @@ body {
 
 # === Beaver Habits Design System (promoted from security page) ===
 # Uses Quasar CSS custom properties for colours so it adapts to light/dark/themes.
-BH_DESIGN_CSS = f"""...
-/* Card base */
+BH_DESIGN_CSS = f"""/* Card base */
 .bh-card {{
   border-radius: {CARD_RADIUS};
   padding: {CARD_PADDING};
   gap: {CARD_GAP};
+  box-shadow: none;
+}}
+
+/* Compact card variant for dense lists (habit rows) */
+.bh-card-compact {{
+  border-radius: {CARD_RADIUS};
+  padding: {CARD_PADDING_COMPACT};
+  gap: {CARD_GAP};
+  box-shadow: none;
 }}
 
 /* Dialog / panel variant */

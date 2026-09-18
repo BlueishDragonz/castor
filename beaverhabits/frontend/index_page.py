@@ -112,11 +112,11 @@ def habit_list_ui(days: list[datetime.date], active_habits: List[Habit]):
                 continue
 
             for habit in habit_list:
-                with bh_card():
+                with bh_card().classes("bh-card-compact"):
                     with grid(columns, 1):
                         habit_row(habit, tag, days)
 
-            ui.space()
+            ui.space().classes("h-2")  # 2px gap between habit rows
 
 
 def get_active_habits(habits: HabitList) -> List[Habit]:

@@ -13,6 +13,7 @@ EMBLEM_RADIUS = "16px"
 
 # ─── Spacing ────────────────────────────────────────────────────────────
 CARD_PADDING = "22px"
+CARD_PADDING_COMPACT = "16px"  # 6px less for dense lists (habit rows)
 DIALOG_PADDING = "24px"
 CARD_GAP = "18px"
 
