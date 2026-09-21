@@ -59,7 +59,7 @@ if (Astro.request.method === 'POST') {
       <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
       <p class="text-sm text-muted-foreground">
         signed in as
-        <Badge variant="outline" class="align-middle ml-1">{email}</Badge>
+        <Badge variant="outline" className="align-middle ml-1">{email}</Badge>
       </p>
     </header>
 
@@ -106,7 +106,7 @@ if (Astro.request.method === 'POST') {
         <CardTitle>Account</CardTitle>
         <CardDescription>Manage your session and account.</CardDescription>
       </CardHeader>
-      <CardContent class="space-y-4">
+      <CardContent className="space-y-4">
         <form method="post" action="/logout">
           <Button type="submit" variant="outline">Sign out</Button>
         </form>

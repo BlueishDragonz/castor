@@ -157,8 +157,8 @@ const totalCompletionsAll = habitStats.reduce(
     </header>
 
     {loadError && (
-      <Card class="border-destructive/50">
-        <CardContent class="text-destructive py-4">{loadError}</CardContent>
+      <Card className="border-destructive/50">
+        <CardContent className="text-destructive py-4">{loadError}</CardContent>
       </Card>
     )}
 
@@ -202,8 +202,8 @@ const totalCompletionsAll = habitStats.reduce(
       {habitStats.map((h) => (
         <li>
           <Card>
-            <CardHeader class="flex-row items-center justify-between gap-4 space-y-0">
-              <CardTitle class="text-base">{h.name}</CardTitle>
+            <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
+              <CardTitle className="text-base">{h.name}</CardTitle>
               <div class="flex items-center gap-2">
                 <Badge variant="outline">{h.totalCompletions} total</Badge>
                 <Badge variant="secondary">{h.last30Days} / 30 last 30d</Badge>

@@ -58,8 +58,8 @@ if (Astro.request.method === 'POST') {
 
     <form method="post" class="space-y-4">
       <div class="space-y-2">
-        <Label for="name">Habit name</Label>
-        <Input id="name" name="name" required maxlength="60" placeholder="e.g. Drink water" />
+        <Label htmlFor="name">Habit name</Label>
+        <Input id="name" name="name" required maxLength={60} placeholder="e.g. Drink water" />
       </div>
       <div class="flex gap-3">
         <Button type="submit">Create</Button>

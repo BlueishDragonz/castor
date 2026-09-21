@@ -77,27 +77,27 @@ if (Astro.request.method === 'POST') {
 
       <form method="post" class="space-y-4">
         <div class="space-y-2">
-          <Label for="username">Email</Label>
+          <Label htmlFor="username">Email</Label>
           <Input
             id="username"
             name="username"
             type="email"
             required
-            autocomplete="email"
+            autoComplete="email"
             placeholder="you@example.com"
           />
         </div>
         <div class="space-y-2">
-          <Label for="password">Password</Label>
+          <Label htmlFor="password">Password</Label>
           <Input
             id="password"
             name="password"
             type="password"
             required
-            autocomplete="current-password"
+            autoComplete="current-password"
           />
         </div>
-        <Button type="submit" class="w-full">Sign in</Button>
+        <Button type="submit" className="w-full">Sign in</Button>
       </form>
 
       <p class="text-center text-xs text-muted-foreground">

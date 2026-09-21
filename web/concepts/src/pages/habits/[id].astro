@@ -142,8 +142,8 @@ function formatBadge(dmy: string): string {
     </header>
 
     {loadError && (
-      <Card class="border-destructive/50">
-        <CardContent class="text-destructive py-4">{loadError}</CardContent>
+      <Card className="border-destructive/50">
+        <CardContent className="text-destructive py-4">{loadError}</CardContent>
       </Card>
     )}
 
@@ -154,7 +154,7 @@ function formatBadge(dmy: string): string {
           Consecutive days ending today.
         </CardDescription>
       </CardHeader>
-      <CardContent class="flex items-baseline gap-6">
+      <CardContent className="flex items-baseline gap-6">
         <div class="text-4xl font-semibold tracking-tight">
           {streak}
           <span class="text-base font-normal text-muted-foreground ml-1">day{streak === 1 ? '' : 's'}</span>
@@ -206,9 +206,9 @@ function formatBadge(dmy: string): string {
       </CardContent>
     </Card>
 
-    <Card class="border-destructive/50">
+    <Card className="border-destructive/50">
       <CardHeader>
-        <CardTitle class="text-destructive">Danger zone</CardTitle>
+        <CardTitle className="text-destructive">Danger zone</CardTitle>
         <CardDescription>
           Retiring a habit hides it from your list but keeps its history.
         </CardDescription>

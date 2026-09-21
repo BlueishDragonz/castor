@@ -67,8 +67,8 @@ try {
     </div>
 
     {error && (
-      <Card class="border-destructive/50">
-        <CardContent class="text-destructive py-4">{error}</CardContent>
+      <Card className="border-destructive/50">
+        <CardContent className="text-destructive py-4">{error}</CardContent>
       </Card>
     )}
 
@@ -77,7 +77,7 @@ try {
         <CardHeader>
           <CardTitle>Welcome to Castor</CardTitle>
         </CardHeader>
-        <CardContent class="space-y-3 text-sm text-muted-foreground">
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>Castor helps you keep small daily habits without the noise of social tracking.</p>
           <p>Click <strong>+ Add habit</strong> to start. Each habit is private to your account and lives only on this server.</p>
         </CardContent>
@@ -88,10 +88,10 @@ try {
       {habits.map((h) => (
         <li>
           <Card>
-            <CardHeader class="flex-row items-center justify-between gap-4 space-y-0">
+            <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
               <div class="flex items-center gap-3">
                 <Badge variant="outline">{h.id}</Badge>
-                <CardTitle class="text-base">{h.name}</CardTitle>
+                <CardTitle className="text-base">{h.name}</CardTitle>
               </div>
               <form method="post" action={`/habits/${h.id}/complete`}>
                 <Button type="submit" size="sm">Mark done</Button>
