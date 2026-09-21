@@ -1,21 +1,28 @@
 ---
 /**
- * Home page — for now, a small landing that proxies to the FastAPI
- * backend's /api/health endpoint and reports whether it's reachable.
+ * Home page — signed-out landing.
  *
- * The /api/* prefix is proxied by Astro's Vite dev server to the
- * NiceGUI backend on :8080. The same prefix is forwarded in production
- * via the reverse proxy in front of both services.
+ * Proxies a /health check to the backend to show the connection state.
+ * Signed-in users get bounced to /habits.
+ *
+ * The /health endpoint lives at the backend root (not under /api/v1)
+ * because it is mounted by main.py directly on the FastAPI app. We
+ * probe it through the same-origin proxy chain (Astro server -> Vite
+ * proxy in dev / reverse proxy in production).
  */
 import Layout from '../layouts/Layout.astro';
 import { Button } from '../components/ui/button';
+import { backendFetch } from '../lib/auth';
+
+if (Astro.locals.session) {
+  return Astro.redirect('/habits');
+}
 
 let backendStatus: 'ok' | 'down' | 'unknown' = 'unknown';
 let backendMessage = 'unreachable';
 
 try {
-  const res = await fetch(new URL('/api/health', Astro.url.origin), {
-    // 3-second ceiling so a slow backend never blocks the landing page
+  const res = await backendFetch(Astro.cookies, '/health', {
     signal: AbortSignal.timeout(3000),
   });
   if (res.ok) {
@@ -32,8 +39,8 @@ try {
 ---
 
 <Layout title="Castor">
-  <main class="mx-auto max-w-2xl px-6 py-16">
-    <div class="mb-8 flex items-center gap-3">
+  <main class="mx-auto max-w-2xl px-6 py-16 space-y-8">
+    <div class="flex items-center gap-3">
       <div
         class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground"
         style="background: var(--castor-emblem-bg-primary); border-radius: var(--castor-emblem-radius);"
@@ -43,7 +50,7 @@ try {
       <div>
         <h1 class="text-3xl font-semibold tracking-tight">Castor</h1>
         <p class="text-sm text-muted-foreground">
-          Privacy-first habit tracker · shadcn/ui + Astro migration in progress
+          Privacy-first habit tracker · shadcn/ui + Astro
         </p>
       </div>
     </div>
@@ -63,32 +70,29 @@ try {
         <span class="font-medium">
           {backendStatus === 'ok' ? 'Connected' : 'Unavailable'}
         </span>
-        <code class="text-xs text-muted-foreground">/api/health → {backendMessage}</code>
+        <code class="text-xs text-muted-foreground">/health → {backendMessage}</code>
       </div>
     </section>
 
     <section
-      class="mt-6 rounded-2xl border border-border bg-card p-6 shadow-sm"
+      class="rounded-2xl border border-border bg-card p-6 shadow-sm"
       style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
     >
-      <h2 class="mb-3 text-lg font-semibold">Migration progress</h2>
+      <h2 class="mb-3 text-lg font-semibold">What you can do here</h2>
       <ul class="space-y-2 text-sm text-muted-foreground">
-        <li>✅ Astro 7 + Tailwind v4 + shadcn/ui design tokens</li>
-        <li>✅ Castor design tokens ported to CSS variables</li>
-        <li>✅ shadcn Button primitive (new-york style)</li>
-        <li>✅ /api reverse proxy to FastAPI/NiceGUI backend</li>
-        <li>⏳ Concepts 02/04/09 (Cue Atlas, Memory Drawer, Private Circle)</li>
-        <li>⏳ Auth flow, webauthn, OAuth, PWA</li>
-        <li>⏳ Calendar heatmap React port</li>
+        <li>✓ Register a new account and sign in</li>
+        <li>✓ Add habits to your private list</li>
+        <li>✓ Mark habits done each day</li>
+        <li>✓ Sign out and clear your session</li>
+        <li>○ Concepts 02/04/09 (Cue Atlas, Memory Drawer, Private Circle) — coming next</li>
+        <li>○ PWA shell, dark mode parity, OAuth — coming next</li>
       </ul>
       <div class="mt-5 flex gap-3">
         <Button asChild>
           <a href="/login">Sign in</a>
         </Button>
         <Button variant="outline" asChild>
-          <a href="https://github.com/BlueishDragonz/castor" target="_blank" rel="noopener">
-            View repo
-          </a>
+          <a href="/register">Create account</a>
         </Button>
       </div>
     </section>

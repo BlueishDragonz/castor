@@ -1,0 +1,43 @@
+---
+/**
+ * /habits/{id}/complete — mark a habit done for today.
+ *
+ * Server-side POST handler: proxies to /api/v1/habits/{id}/completions
+ * with today's date in ISO format, then redirects back to /habits.
+ *
+ * The completion endpoint's request body is documented as a `date`
+ * string. We pass today's local date.
+ */
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect('/habits');
+}
+
+// The backend's Tick schema defaults `date_fmt` to `%d-%m-%Y` (DD-MM-YYYY).
+// We must send the date in that format, not ISO YYYY-MM-DD.
+const today = new Date();
+const dd = String(today.getDate()).padStart(2, '0');
+const mm = String(today.getMonth() + 1).padStart(2, '0');
+const yyyy = today.getFullYear();
+const todayDMY = `${dd}-${mm}-${yyyy}`;
+
+const res = await backendFetch(Astro.cookies, `/api/v1/habits/${id}/completions`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ date: todayDMY, done: true }),
+});
+
+if (!res.ok) {
+  // Surface backend error to the user via a redirect-with-query approach.
+  // For v1: just bounce back; a future toast component will replace this.
+  console.error(`mark complete failed: ${res.status}`);
+}
+
+return Astro.redirect('/habits');
+---

@@ -6,11 +6,23 @@ import tailwindcss from '@tailwindcss/vite';
 
 // https://astro.build/config
 // - React integration: enables shadcn/ui (React) islands
-// - @astrojs/node: SSR adapter for the pilot deploy (single Node process
-//   fronts both this Astro app and the existing FastAPI/NiceGUI backend).
-//   Astro server proxies /api/* requests to the backend on BACKEND_URL.
-// - Tailwind v4 via Vite plugin: shadcn/ui's CSS-variable system rides on
-//   Tailwind v4 tokens; no PostCSS config needed.
+// - @astrojs/node: SSR adapter so castor can serve the pilot deploy from
+//   a single Node process. The reverse proxy in front of both this app
+//   and the FastAPI/NiceGUI backend is the production story; in dev,
+//   Vite proxies /api/* (and /auth/*) to the backend on BACKEND_URL.
+// - Tailwind v4 via Vite plugin: shadcn/ui's CSS-variable system rides
+//   on Tailwind v4 tokens; no PostCSS config needed.
+//
+// Backend route prefixes discovered from `beaverhabits/routes/api.py`
+// (init_api_routes mounts `api_router` under `/api/v1`) and
+// `beaverhabits/app/app.py` (init_auth_routes mounts fastapi-users
+// routers under `/auth`, `/users`). Both are proxied below.
+//
+// BACKEND_URL defaults to localhost:8085 because port 8080 was occupied
+// on this machine by an SSH tunnel. Set BACKEND_URL=http://host:port
+// to point at another deployment.
+const backend = process.env.BACKEND_URL || 'http://localhost:8085';
+
 export default defineConfig({
   output: 'server',
   adapter: node({ mode: 'standalone' }),
@@ -20,13 +32,15 @@ export default defineConfig({
     plugins: [tailwindcss()],
     server: {
       proxy: {
-        // Forward API traffic to the existing FastAPI/NiceGUI backend on
-        // 8080. Same-domain via reverse proxy in production.
-        '/api': {
-          target: process.env.BACKEND_URL || 'http://localhost:8080',
-          changeOrigin: true,
-          ws: true,
-        },
+        '/api/v1': { target: backend, changeOrigin: true, ws: true },
+        '/auth': { target: backend, changeOrigin: true, ws: true },
+        '/users': { target: backend, changeOrigin: true, ws: true },
+        '/webauthn': { target: backend, changeOrigin: true, ws: true },
+        '/forgot-password': { target: backend, changeOrigin: true, ws: true },
+        '/reset-password': { target: backend, changeOrigin: true, ws: true },
+        // /health is mounted at the FastAPI root (see beaverhabits/main.py:64),
+        // not under /api/v1, so we proxy the bare path too.
+        '/health': { target: backend, changeOrigin: true, ws: false },
       },
     },
   },

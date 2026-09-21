@@ -1,74 +1,110 @@
 ---
 /**
- * Login page — the smallest end-to-end proof that:
- *   1. Astro + Tailwind + shadcn tokens render
- *   2. The Node adapter serves the page over HTTP
- *   3. The /api proxy reaches the existing FastAPI/NiceGUI backend
- *   4. The user can be authenticated via the same backend (form posts to
- *      /api/auth/login which the Python side already serves)
+ * /login — form posts to backend /auth/login (form-encoded).
  *
- * The form submits to the backend directly so we exercise the proxy.
- * Once authenticated, we redirect to /habits.
+ * On 200: store the bearer in an httpOnly cookie via Astro.server
+ * cookie API + redirect to /habits. On 4xx: render an Alert with the
+ * backend's error detail.
+ *
+ * Already signed-in users get bounced to /habits on visit.
  */
 import Layout from '../layouts/Layout.astro';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Alert, AlertDescription } from '../components/ui/alert';
+import { backendFetch, writeSession } from '../lib/auth';
+
+// Already signed in? Skip the form.
+if (Astro.locals.session) {
+  return Astro.redirect('/habits');
+}
+
+let errorMessage: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const username = (form.get('username') ?? '').toString();
+  const password = (form.get('password') ?? '').toString();
+
+  if (!username || !password) {
+    errorMessage = 'Email and password are required.';
+  } else {
+    // fastapi-users default BearerTransport expects form-encoded body.
+    const body = new URLSearchParams({ username, password });
+    const res = await backendFetch(Astro.cookies, '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as { access_token: string; token_type: string };
+      writeSession(Astro.cookies, data.access_token, username);
+      return Astro.redirect('/habits');
+    }
+
+    if (res.status === 400 || res.status === 401) {
+      errorMessage = 'That email and password do not match an account.';
+    } else {
+      errorMessage = `Sign-in failed (HTTP ${res.status}). Try again.`;
+    }
+  }
+}
 ---
 
 <Layout title="Sign in — Castor">
   <main class="flex min-h-screen items-center justify-center px-4">
-    <div
-      class="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-sm"
-      style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
-    >
-      <div class="mb-6 flex items-center gap-3">
+    <div class="w-full max-w-sm space-y-6">
+      <div class="flex items-center gap-3">
         <div
-          class="h-12 w-12 rounded-2xl flex items-center justify-center text-lg font-semibold text-primary-foreground"
+          class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground"
           style="background: var(--castor-emblem-bg-primary); border-radius: var(--castor-emblem-radius);"
         >
           C
         </div>
         <div>
-          <h1 class="text-xl font-semibold leading-tight">Castor</h1>
+          <h1 class="text-xl font-semibold leading-tight">Sign in to Castor</h1>
           <p class="text-xs text-muted-foreground">privacy-first habit tracker</p>
         </div>
       </div>
 
-      <form
-        action="/api/auth/login"
-        method="post"
-        class="flex flex-col gap-4"
-        data-sveltekit-noscroll
-      >
-        <label class="flex flex-col gap-1">
-          <span class="text-sm font-medium">Email</span>
-          <input
-            type="email"
+      {errorMessage && (
+        <Alert variant="destructive">
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      <form method="post" class="space-y-4">
+        <div class="space-y-2">
+          <Label for="username">Email</Label>
+          <Input
+            id="username"
             name="username"
+            type="email"
             required
             autocomplete="email"
-            class="h-10 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            placeholder="you@example.com"
           />
-        </label>
-
-        <label class="flex flex-col gap-1">
-          <span class="text-sm font-medium">Password</span>
-          <input
-            type="password"
+        </div>
+        <div class="space-y-2">
+          <Label for="password">Password</Label>
+          <Input
+            id="password"
             name="password"
+            type="password"
             required
             autocomplete="current-password"
-            class="h-10 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
-        </label>
-
-        <Button type="submit" class="mt-2">Sign in</Button>
-
-        <p class="text-center text-xs text-muted-foreground">
-          <a href="/forgot-password" class="hover:underline">Forgot password?</a>
-          <span class="mx-2 opacity-50">·</span>
-          <a href="/register" class="hover:underline">Create account</a>
-        </p>
+        </div>
+        <Button type="submit" class="w-full">Sign in</Button>
       </form>
+
+      <p class="text-center text-xs text-muted-foreground">
+        <a href="/forgot-password" class="hover:underline">Forgot password?</a>
+        <span class="mx-2 opacity-50">·</span>
+        <a href="/register" class="hover:underline">Create account</a>
+      </p>
     </div>
   </main>
 </Layout>

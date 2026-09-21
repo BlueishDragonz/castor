@@ -1,0 +1,131 @@
+---
+/**
+ * /register — new account form.
+ *
+ * Two-step server action: first POST /auth/register with the email +
+ * password, then auto-login via /auth/login so the user lands on
+ * /habits with a valid session.
+ *
+ * Backend returns the new user record on register (HTTP 201). Email
+ * validation is RFC 5322 strict — `.local` and other reserved TLDs
+ * are rejected.
+ */
+import Layout from '../layouts/Layout.astro';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Alert, AlertDescription } from '../components/ui/alert';
+import { backendFetch, writeSession } from '../lib/auth';
+
+if (Astro.locals.session) {
+  return Astro.redirect('/habits');
+}
+
+let errorMessage: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const email = (form.get('email') ?? '').toString().trim().toLowerCase();
+  const password = (form.get('password') ?? '').toString();
+
+  if (!email || !password) {
+    errorMessage = 'Email and password are required.';
+  } else if (password.length < 12) {
+    errorMessage = 'Use at least 12 characters for your password.';
+  } else {
+    const reg = await backendFetch(Astro.cookies, '/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        is_active: true,
+        is_superuser: false,
+        is_verified: true,
+      }),
+    });
+
+    if (reg.ok) {
+      // Auto-login so the user lands on /habits with a session.
+      const body = new URLSearchParams({ username: email, password });
+      const login = await backendFetch(Astro.cookies, '/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (login.ok) {
+        const data = (await login.json()) as { access_token: string };
+        writeSession(Astro.cookies, data.access_token, email);
+        return Astro.redirect('/habits');
+      }
+      errorMessage = 'Account created, but auto-login failed. Try signing in.';
+    } else if (reg.status === 422) {
+      const detail = await reg.json().catch(() => null);
+      const msg =
+        detail?.detail?.[0]?.msg ?? 'Email or password did not meet requirements.';
+      errorMessage = msg;
+    } else if (reg.status === 400) {
+      const detail = await reg.json().catch(() => null);
+      errorMessage = detail?.detail ?? 'That email may already be registered.';
+    } else {
+      errorMessage = `Could not create account (HTTP ${reg.status}).`;
+    }
+  }
+}
+---
+
+<Layout title="Create account — Castor">
+  <main class="flex min-h-screen items-center justify-center px-4">
+    <div class="w-full max-w-sm space-y-6">
+      <div class="flex items-center gap-3">
+        <div
+          class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground"
+          style="background: var(--castor-emblem-bg-primary); border-radius: var(--castor-emblem-radius);"
+        >
+          C
+        </div>
+        <div>
+          <h1 class="text-xl font-semibold leading-tight">Create your account</h1>
+          <p class="text-xs text-muted-foreground">self-hosted, privacy-first</p>
+        </div>
+      </div>
+
+      {errorMessage && (
+        <Alert variant="destructive">
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      <form method="post" class="space-y-4">
+        <div class="space-y-2">
+          <Label for="email">Email</Label>
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            required
+            autocomplete="email"
+            placeholder="you@example.com"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="password">Password (12+ characters)</Label>
+          <Input
+            id="password"
+            name="password"
+            type="password"
+            required
+            minlength="12"
+            autocomplete="new-password"
+          />
+        </div>
+        <Button type="submit" class="w-full">Create account</Button>
+      </form>
+
+      <p class="text-center text-xs text-muted-foreground">
+        Already have an account?{' '}
+        <a href="/login" class="hover:underline">Sign in</a>
+      </p>
+    </div>
+  </main>
+</Layout>

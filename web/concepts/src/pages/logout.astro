@@ -1,0 +1,14 @@
+---
+/**
+ * /logout — clears the session cookies and redirects to /login.
+ *
+ * The upstream JWT bearer remains technically valid until the upstream
+ * JWT lifetime expires. The user's token_version bump endpoint
+ * (`/users/me` PATCH) is the future proper logout; for v1 we just drop
+ * the local cookie so the user is signed out of *this app*.
+ */
+import { clearSession } from '../lib/auth';
+
+clearSession(Astro.cookies);
+return Astro.redirect('/login');
+---

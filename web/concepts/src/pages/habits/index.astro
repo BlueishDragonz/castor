@@ -1,0 +1,105 @@
+---
+/**
+ * /habits — the signed-in home view.
+ *
+ * Lists active habits for the current user. Bearer-authed fetch to
+ * /api/v1/habits. Each habit is rendered as a shadcn Card with a
+ * "Mark done" button that POSTs /api/v1/habits/{id}/completions and
+ * reloads the page (the simplest correct flow for v1).
+ *
+ * The Mark Done POST goes through a small client-side script because
+ * the backend expects form-encoded body, not JSON.
+ */
+import Layout from '../../layouts/Layout.astro';
+import { Button } from '../../components/ui/button';
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
+import { Badge } from '../../components/ui/badge';
+import { backendFetch } from '../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const { email } = Astro.locals.session;
+
+interface Habit {
+  id: string;
+  name: string;
+}
+
+let habits: Habit[] = [];
+let error: string | null = null;
+try {
+  const res = await backendFetch(Astro.cookies, '/api/v1/habits');
+  if (res.ok) {
+    habits = (await res.json()) as Habit[];
+  } else if (res.status === 404) {
+    // 404 here means "no habit list yet for this user" (a fresh account).
+    // That's not an error — render the empty state.
+    habits = [];
+  } else {
+    error = `Could not load habits (HTTP ${res.status}).`;
+  }
+} catch (e) {
+  error = (e as Error).message;
+}
+---
+
+<Layout title="Habits — Castor">
+  <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
+    <header class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Habits</h1>
+        <p class="text-sm text-muted-foreground">signed in as {email}</p>
+      </div>
+      <form method="post" action="/logout">
+        <Button type="submit" variant="ghost" size="sm">Sign out</Button>
+      </form>
+    </header>
+
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
+      </p>
+      <Button asChild>
+        <a href="/habits/new">+ Add habit</a>
+      </Button>
+    </div>
+
+    {error && (
+      <Card class="border-destructive/50">
+        <CardContent class="text-destructive py-4">{error}</CardContent>
+      </Card>
+    )}
+
+    {!error && habits.length === 0 && (
+      <Card>
+        <CardHeader>
+          <CardTitle>Welcome to Castor</CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3 text-sm text-muted-foreground">
+          <p>Castor helps you keep small daily habits without the noise of social tracking.</p>
+          <p>Click <strong>+ Add habit</strong> to start. Each habit is private to your account and lives only on this server.</p>
+        </CardContent>
+      </Card>
+    )}
+
+    <ul class="space-y-3">
+      {habits.map((h) => (
+        <li>
+          <Card>
+            <CardHeader class="flex-row items-center justify-between gap-4 space-y-0">
+              <div class="flex items-center gap-3">
+                <Badge variant="outline">{h.id}</Badge>
+                <CardTitle class="text-base">{h.name}</CardTitle>
+              </div>
+              <form method="post" action={`/habits/${h.id}/complete`}>
+                <Button type="submit" size="sm">Mark done</Button>
+              </form>
+            </CardHeader>
+          </Card>
+        </li>
+      ))}
+    </ul>
+  </main>
+</Layout>

@@ -1,0 +1,72 @@
+---
+/**
+ * /habits/new — add a new habit.
+ *
+ * POSTs JSON to /api/v1/habits and redirects to /habits on success.
+ */
+import Layout from '../../layouts/Layout.astro';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Alert, AlertDescription } from '../../components/ui/alert';
+import { backendFetch } from '../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+let errorMessage: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const name = (form.get('name') ?? '').toString().trim();
+
+  if (!name) {
+    errorMessage = 'Give your habit a name.';
+  } else {
+    const res = await backendFetch(Astro.cookies, '/api/v1/habits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+
+    if (res.ok) {
+      return Astro.redirect('/habits');
+    }
+    if (res.status === 400 || res.status === 422) {
+      const detail = await res.json().catch(() => null);
+      errorMessage = detail?.detail ?? 'That name was not accepted.';
+    } else {
+      errorMessage = `Could not create habit (HTTP ${res.status}).`;
+    }
+  }
+}
+---
+
+<Layout title="Add habit — Castor">
+  <main class="mx-auto max-w-md px-6 py-16 space-y-6">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Add a habit</h1>
+      <p class="text-sm text-muted-foreground">one small thing, repeated daily.</p>
+    </div>
+
+    {errorMessage && (
+      <Alert variant="destructive">
+        <AlertDescription>{errorMessage}</AlertDescription>
+      </Alert>
+    )}
+
+    <form method="post" class="space-y-4">
+      <div class="space-y-2">
+        <Label for="name">Habit name</Label>
+        <Input id="name" name="name" required maxlength="60" placeholder="e.g. Drink water" />
+      </div>
+      <div class="flex gap-3">
+        <Button type="submit">Create</Button>
+        <Button variant="outline" asChild>
+          <a href="/habits">Cancel</a>
+        </Button>
+      </div>
+    </form>
+  </main>
+</Layout>
