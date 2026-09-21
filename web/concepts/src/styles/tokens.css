@@ -1,0 +1,119 @@
+/*
+ * Castor design tokens — shadcn/ui + Tailwind v4 single source of truth.
+ *
+ * Ported from the upstream Python design tokens (now deprecated). Each
+ * Quasar variable that the Python side referenced (--q-primary,
+ * --q-primary-rgb, --q-negative, etc.) is now declared here as a shadcn
+ * CSS variable.
+ *
+ * Convention:
+ *   - shadcn names: --background, --foreground, --primary, --primary-foreground,
+ *     --card, --card-foreground, --muted, --muted-foreground, --border,
+ *     --input, --ring, --destructive, --destructive-foreground, --radius.
+ *   - The dark mode block redefines the same names for [data-theme="dark"].
+ *   - Castor tokens (radii, padding, copy opacity) are emitted as raw
+ *     CSS so existing class names still work (CARD_RADIUS 18px etc.).
+ *
+ * To add a new theme, copy the :root block, swap values, register a
+ * [data-theme="<name>"] rule.
+ */
+
+@import "tailwindcss";
+
+:root {
+  /* ──── Brand palette (light) ─────────────────────────────────────── */
+  --background: oklch(0.99 0.005 95);          /* near-white parchment */
+  --foreground: oklch(0.18 0.02 240);          /* deep ink */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 240);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 240);
+  --primary: oklch(0.55 0.16 162);             /* castor-teal */
+  --primary-rgb: 41 163 137;                   /* legacy Quasar consumers */
+  --primary-foreground: oklch(0.99 0.005 95);
+  --secondary: oklch(0.96 0.01 162);
+  --secondary-foreground: oklch(0.18 0.02 240);
+  --muted: oklch(0.96 0.005 95);
+  --muted-foreground: oklch(0.18 0.02 240 / 0.72);
+  --accent: oklch(0.94 0.02 162);
+  --accent-foreground: oklch(0.18 0.02 240);
+  --destructive: oklch(0.55 0.22 27);          /* castor negative */
+  --destructive-foreground: oklch(0.99 0.005 95);
+  --border: oklch(0.92 0.005 95);
+  --input: oklch(0.92 0.005 95);
+  --ring: oklch(0.55 0.16 162);                /* matches primary */
+  --positive: oklch(0.55 0.14 142);            /* castor success */
+  --warning: oklch(0.78 0.16 75);
+  --info: oklch(0.62 0.13 230);
+  --radius: 0.625rem;                          /* 10px = BUTTON_RADIUS */
+
+  /* ──── Castor tokens (legacy alias) ──────────────────────────────── */
+  --castor-card-radius: 18px;
+  --castor-dialog-radius: 20px;
+  --castor-panel-radius: 20px;
+  --castor-button-radius: 10px;
+  --castor-emblem-radius: 16px;
+  --castor-card-padding: 22px;
+  --castor-card-padding-compact: 16px;
+  --castor-dialog-padding: 24px;
+  --castor-card-gap: 18px;
+  --castor-emblem-size: 52px;
+  --castor-emblem-bg-primary: rgb(var(--primary-rgb) / 0.09);
+  --castor-emblem-bg-success: rgb(22 129 75 / 0.1);
+  --castor-copy-font-size: 13px;
+  --castor-copy-line-height: 1.65;
+  --castor-copy-opacity: 0.72;
+  --castor-transition-duration: 200ms;
+  --castor-transition-easing: ease-out;
+}
+
+[data-theme="dark"] {
+  --background: oklch(0.16 0.01 240);
+  --foreground: oklch(0.94 0.005 95);
+  --card: oklch(0.20 0.01 240);
+  --card-foreground: oklch(0.94 0.005 95);
+  --popover: oklch(0.20 0.01 240);
+  --popover-foreground: oklch(0.94 0.005 95);
+  --primary: oklch(0.62 0.14 162);
+  --primary-rgb: 64 191 161;
+  --primary-foreground: oklch(0.16 0.01 240);
+  --secondary: oklch(0.24 0.01 162);
+  --secondary-foreground: oklch(0.94 0.005 95);
+  --muted: oklch(0.22 0.01 240);
+  --muted-foreground: oklch(0.94 0.005 95 / 0.72);
+  --accent: oklch(0.26 0.02 162);
+  --accent-foreground: oklch(0.94 0.005 95);
+  --destructive: oklch(0.55 0.22 27);
+  --destructive-foreground: oklch(0.94 0.005 95);
+  --border: oklch(0.28 0.01 240);
+  --input: oklch(0.28 0.01 240);
+  --ring: oklch(0.62 0.14 162);
+}
+
+/* ──── Castor legacy aliases (Quasar -> shadcn mapping) ─────────────── */
+:root {
+  --q-primary: var(--primary);
+  --q-primary-rgb: var(--primary-rgb);
+  --q-negative: var(--destructive);
+  --q-positive: var(--positive);
+  --q-warning: var(--warning);
+  --q-info: var(--info);
+  --q-dark: var(--foreground);
+}
+
+/* Base resets so Astro HTML behaves like the shadcn-style surface. */
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Inter font is already self-hosted under castor-repo/statics/fonts/. */

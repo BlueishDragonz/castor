@@ -1,0 +1,96 @@
+---
+/**
+ * Home page — for now, a small landing that proxies to the FastAPI
+ * backend's /api/health endpoint and reports whether it's reachable.
+ *
+ * The /api/* prefix is proxied by Astro's Vite dev server to the
+ * NiceGUI backend on :8080. The same prefix is forwarded in production
+ * via the reverse proxy in front of both services.
+ */
+import Layout from '../layouts/Layout.astro';
+import { Button } from '../components/ui/button';
+
+let backendStatus: 'ok' | 'down' | 'unknown' = 'unknown';
+let backendMessage = 'unreachable';
+
+try {
+  const res = await fetch(new URL('/api/health', Astro.url.origin), {
+    // 3-second ceiling so a slow backend never blocks the landing page
+    signal: AbortSignal.timeout(3000),
+  });
+  if (res.ok) {
+    backendStatus = 'ok';
+    backendMessage = await res.text();
+  } else {
+    backendStatus = 'down';
+    backendMessage = `HTTP ${res.status}`;
+  }
+} catch (e) {
+  backendStatus = 'down';
+  backendMessage = (e as Error).message;
+}
+---
+
+<Layout title="Castor">
+  <main class="mx-auto max-w-2xl px-6 py-16">
+    <div class="mb-8 flex items-center gap-3">
+      <div
+        class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground"
+        style="background: var(--castor-emblem-bg-primary); border-radius: var(--castor-emblem-radius);"
+      >
+        C
+      </div>
+      <div>
+        <h1 class="text-3xl font-semibold tracking-tight">Castor</h1>
+        <p class="text-sm text-muted-foreground">
+          Privacy-first habit tracker · shadcn/ui + Astro migration in progress
+        </p>
+      </div>
+    </div>
+
+    <section
+      class="rounded-2xl border border-border bg-card p-6 shadow-sm"
+      style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
+    >
+      <h2 class="mb-2 text-lg font-semibold">Backend connection</h2>
+      <div class="flex items-center gap-3 text-sm">
+        <span
+          class="inline-block h-2.5 w-2.5 rounded-full"
+          style={`background: ${
+            backendStatus === 'ok' ? 'var(--positive)' : 'var(--destructive)'
+          };`}
+        />
+        <span class="font-medium">
+          {backendStatus === 'ok' ? 'Connected' : 'Unavailable'}
+        </span>
+        <code class="text-xs text-muted-foreground">/api/health → {backendMessage}</code>
+      </div>
+    </section>
+
+    <section
+      class="mt-6 rounded-2xl border border-border bg-card p-6 shadow-sm"
+      style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
+    >
+      <h2 class="mb-3 text-lg font-semibold">Migration progress</h2>
+      <ul class="space-y-2 text-sm text-muted-foreground">
+        <li>✅ Astro 7 + Tailwind v4 + shadcn/ui design tokens</li>
+        <li>✅ Castor design tokens ported to CSS variables</li>
+        <li>✅ shadcn Button primitive (new-york style)</li>
+        <li>✅ /api reverse proxy to FastAPI/NiceGUI backend</li>
+        <li>⏳ Concepts 02/04/09 (Cue Atlas, Memory Drawer, Private Circle)</li>
+        <li>⏳ Auth flow, webauthn, OAuth, PWA</li>
+        <li>⏳ Calendar heatmap React port</li>
+      </ul>
+      <div class="mt-5 flex gap-3">
+        <Button asChild>
+          <a href="/login">Sign in</a>
+        </Button>
+        <Button variant="outline" asChild>
+          <a href="https://github.com/BlueishDragonz/castor" target="_blank" rel="noopener">
+            View repo
+          </a>
+        </Button>
+      </div>
+    </section>
+  </main>
+</Layout>

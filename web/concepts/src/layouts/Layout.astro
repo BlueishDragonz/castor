@@ -1,0 +1,39 @@
+---
+/**
+ * Castor Layout — global page shell.
+ *
+ * Loads the design tokens, applies the active theme, and provides a slot
+ * for page content. Server-rendered, no client JS unless the page opts in.
+ *
+ * The `data-theme` attribute toggles between light/dark by reading a
+ * cookie set on first visit. Future: hook into a theme-switch component.
+ */
+import '../styles/tokens.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'Castor',
+  description = 'A privacy-first habit tracker you can self-host.',
+} = Astro.props;
+
+// Theme defaults to "light" until /api/account/me reports otherwise.
+const theme = Astro.cookies.get('castor-theme')?.value ?? 'light';
+---
+
+<!doctype html>
+<html lang="en" data-theme={theme}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+  </head>
+  <body class="min-h-screen antialiased">
+    <slot />
+  </body>
+</html>
