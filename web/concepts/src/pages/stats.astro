@@ -1,0 +1,236 @@
+---
+/**
+ * /stats — aggregate completion stats per habit.
+ *
+ * SSR fetches the habit list and (in parallel) up to 10000 completion
+ * dates per habit. Per habit we surface total completions, last-30-day
+ * count, and a density bar (% of the last 30 days completed). At the
+ * top we show overall counts: habits tracked, total completions, and
+ * distinct active days in the last 30.
+ *
+ * Date math uses epoch-day buckets so completions from any timezone
+ * line up to the same calendar day.
+ */
+import Layout from '../layouts/Layout.astro';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+import { Separator } from '../components/ui/separator';
+import { backendFetch } from '../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+interface Habit {
+  id: string;
+  name: string;
+}
+
+interface HabitStats {
+  id: string;
+  name: string;
+  totalCompletions: number;
+  last30Days: number;
+  percentDone: number;
+}
+
+let habits: Habit[] = [];
+let loadError: string | null = null;
+
+try {
+  const res = await backendFetch(Astro.cookies, '/api/v1/habits');
+  if (res.ok) {
+    habits = (await res.json()) as Habit[];
+  } else if (res.status !== 404) {
+    loadError = `Could not load habits (HTTP ${res.status}).`;
+  }
+  // 404 = fresh user with no habit list. Empty state.
+} catch (e) {
+  loadError = (e as Error).message;
+}
+
+// Date helpers — bucket by epoch day so DST/timezone shifts don't matter.
+const DAY_MS = 86_400_000;
+function parseDate(s: string): number | null {
+  // DD-MM-YYYY
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return Math.floor(d.getTime() / DAY_MS);
+}
+
+const now = new Date();
+const todayEpoch = Math.floor(
+  Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / DAY_MS,
+);
+const cutoffEpoch = todayEpoch - 30; // exclusive-ish: anything ≥ cutoff is "in last 30"
+
+// Fetch all completions in parallel; tolerate per-habit failures.
+const results = await Promise.all(
+  habits.map(async (h) => {
+    try {
+      const res = await backendFetch(
+        Astro.cookies,
+        `/api/v1/habits/${h.id}/completions?limit=10000`,
+      );
+      if (!res.ok) {
+        return { habit: h, dates: [] as string[], failed: true };
+      }
+      const dates = (await res.json()) as string[];
+      return { habit: h, dates, failed: false };
+    } catch {
+      return { habit: h, dates: [] as string[], failed: true };
+    }
+  }),
+);
+
+const habitStats: HabitStats[] = results.map(({ habit, dates, failed }) => {
+  let total = 0;
+  let last30 = 0;
+  for (const d of dates) {
+    const epoch = parseDate(d);
+    if (epoch === null) continue;
+    total += 1;
+    if (epoch >= cutoffEpoch && epoch <= todayEpoch) {
+      last30 += 1;
+    }
+  }
+  const percent = Math.min(100, Math.round((last30 / 30) * 100));
+  // For habits whose fetch failed, suppress numbers rather than lie.
+  return {
+    id: habit.id,
+    name: habit.name,
+    totalCompletions: failed ? 0 : total,
+    last30Days: failed ? 0 : last30,
+    percentDone: failed ? 0 : percent,
+  };
+});
+
+const distinctActiveDaysLast30 = new Set<number>();
+for (const { dates } of results) {
+  for (const d of dates) {
+    const epoch = parseDate(d);
+    if (epoch === null) continue;
+    if (epoch >= cutoffEpoch && epoch <= todayEpoch) {
+      distinctActiveDaysLast30.add(epoch);
+    }
+  }
+}
+
+const totalCompletionsAll = habitStats.reduce(
+  (sum, h) => sum + h.totalCompletions,
+  0,
+);
+---
+
+<Layout title="Stats — Castor">
+  <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
+    <header class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Stats</h1>
+        <p class="text-sm text-muted-foreground">
+          signed in as {Astro.locals.session.email}
+        </p>
+      </div>
+      <a
+        href="/habits"
+        class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        &larr; Back to habits
+      </a>
+    </header>
+
+    {loadError && (
+      <Card class="border-destructive/50">
+        <CardContent class="text-destructive py-4">{loadError}</CardContent>
+      </Card>
+    )}
+
+    {!loadError && habits.length > 0 && (
+      <Card>
+        <CardHeader>
+          <CardTitle>Overall</CardTitle>
+          <CardDescription>
+            Aggregate across all habits you are tracking.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div class="flex flex-wrap items-center gap-2 text-sm">
+            <Badge variant="secondary">
+              {habits.length} habit{habits.length === 1 ? '' : 's'} tracked
+            </Badge>
+            <Badge variant="outline">{totalCompletionsAll} total completions</Badge>
+            <Badge variant="outline">
+              {distinctActiveDaysLast30.size} active day
+              {distinctActiveDaysLast30.size === 1 ? '' : 's'} in the last 30
+            </Badge>
+          </div>
+        </CardContent>
+      </Card>
+    )}
+
+    {!loadError && habits.length > 0 && <Separator />}
+
+    {!loadError && habits.length === 0 && (
+      <Card>
+        <CardHeader>
+          <CardTitle>No stats yet</CardTitle>
+          <CardDescription>
+            Add a habit to start tracking stats.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )}
+
+    <ul class="space-y-3">
+      {habitStats.map((h) => (
+        <li>
+          <Card>
+            <CardHeader class="flex-row items-center justify-between gap-4 space-y-0">
+              <CardTitle class="text-base">{h.name}</CardTitle>
+              <div class="flex items-center gap-2">
+                <Badge variant="outline">{h.totalCompletions} total</Badge>
+                <Badge variant="secondary">{h.last30Days} / 30 last 30d</Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div
+                class="h-2 w-full overflow-hidden rounded-full"
+                style="background-color: var(--muted);"
+                role="progressbar"
+                aria-valuenow={h.percentDone}
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-label={`${h.name}: ${h.percentDone}% of last 30 days`}
+              >
+                <div
+                  class="h-full rounded-full transition-[width]"
+                  style={`width: ${h.percentDone}%; background-color: var(--positive);`}
+                />
+              </div>
+              <p class="mt-2 text-xs text-muted-foreground">
+                {h.percentDone}% of the last 30 days
+              </p>
+            </CardContent>
+          </Card>
+        </li>
+      ))}
+    </ul>
+  </main>
+</Layout>

@@ -113,8 +113,14 @@ check_page_redirect() {
 check_page_200 "/" "Castor"
 check_page_200 "/login" "Sign in — Castor"
 check_page_200 "/register" "Create account — Castor"
+check_page_200 "/forgot-password" "Forgot password — Castor\|Reset your password — Castor\|Forgot password\|Reset password\|Reset\|Forgot"
+check_page_200 "/reset-password?token=ABC&email=test@example.com" "Reset\|Forgot\|password"
 check_page_redirect "/habits"
 check_page_redirect "/habits/new"
+check_page_redirect "/habits/123"
+check_page_redirect "/stats"
+check_page_redirect "/settings"
+check_page_redirect "/account/delete"
 
 # /health proxies to backend
 echo "› checking /health (proxy to backend)"

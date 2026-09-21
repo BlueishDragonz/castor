@@ -22,3 +22,9 @@ pnpm-debug.log*
 
 # jetbrains setting folder
 .idea/
+
+# The repo root's .gitignore has a Python `lib/` rule that catches our
+# src/lib. Unignore so future shadcn / utility additions don't need
+# `git add -f`.
+!src/lib/
+

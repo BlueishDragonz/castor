@@ -1,0 +1,223 @@
+---
+/**
+ * /habits/{id} — single-habit detail view.
+ *
+ * Shows the habit name, current streak, recent completion history
+ * (last 30 entries from a 90-day window), and a Mark-done button
+ * that POSTs to /habits/{id}/complete.
+ *
+ * Data flow:
+ *   1. /api/v1/habits — list to resolve this id's display name.
+ *      If the id isn't in the list (or the request errors), redirect
+ *      to /habits so we never render an orphan detail page.
+ *   2. /api/v1/habits/{id}/completions?limit=90 — completion dates
+ *      in DD-MM-YYYY format. We slice to 30 for display and compute
+ *      a streak (consecutive days ending today).
+ */
+import Layout from '../../layouts/Layout.astro';
+import { Button } from '../../components/ui/button';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '../../components/ui/card';
+import { Badge } from '../../components/ui/badge';
+import { Separator } from '../../components/ui/separator';
+import { backendFetch } from '../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect('/habits');
+}
+
+interface Habit {
+  id: string;
+  name: string;
+}
+
+let habit: Habit | null = null;
+let loadError: string | null = null;
+try {
+  const res = await backendFetch(Astro.cookies, '/api/v1/habits');
+  if (res.ok) {
+    const list = (await res.json()) as Habit[];
+    habit = list.find((h) => h.id === id) ?? null;
+  } else if (res.status === 404) {
+    // 404 = no habits yet for this user; this id can't be in that empty set.
+    habit = null;
+  } else {
+    loadError = `Could not load habits (HTTP ${res.status}).`;
+  }
+} catch (e) {
+  loadError = (e as Error).message;
+}
+
+if (!habit && !loadError) {
+  // Unknown id — bounce to the list rather than render a phantom page.
+  return Astro.redirect('/habits');
+}
+
+// Fetch completion dates. DD-MM-YYYY strings from the backend.
+let completionDates: string[] = [];
+let completionsError: string | null = null;
+try {
+  const res = await backendFetch(
+    Astro.cookies,
+    `/api/v1/habits/${id}/completions?limit=90`,
+  );
+  if (res.ok) {
+    completionDates = (await res.json()) as string[];
+  } else {
+    completionsError = `Could not load completions (HTTP ${res.status}).`;
+  }
+} catch (e) {
+  completionsError = (e as Error).message;
+}
+
+// Build a Set of "YYYY-MM-DD" keys for fast streak lookups.
+const completedKeys = new Set<string>();
+for (const dmy of completionDates) {
+  // dmy is DD-MM-YYYY — parse locale-safely by reformatting.
+  const iso = dmy.split('-').reverse().join('-');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    completedKeys.add(iso);
+  }
+}
+
+function isoFor(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Streak: consecutive days ending today. If today is missing, streak is 0.
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+let streak = 0;
+if (completedKeys.has(isoFor(today))) {
+  const cursor = new Date(today);
+  while (completedKeys.has(isoFor(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+}
+
+// Last-completed date: the most recent entry in the list (newest first
+// per the backend ordering), formatted for display.
+const lastCompletedDMY = completionDates[0] ?? null;
+
+// Display the 30 most recent completion dates as Badge chips, newest first.
+const recentBadges = completionDates.slice(0, 30);
+
+// A small formatter for the badge label: turn DD-MM-YYYY into a more
+// readable "21 Sep 2026" without dragging in a date library.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatBadge(dmy: string): string {
+  const [dd, mm, yyyy] = dmy.split('-');
+  if (!dd || !mm || !yyyy) return dmy;
+  const month = MONTHS[Number(mm) - 1] ?? mm;
+  return `${Number(dd)} ${month} ${yyyy}`;
+}
+---
+<Layout title={habit ? `${habit.name} — Castor` : 'Habit — Castor'}>
+  <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
+    <header class="flex items-center justify-between">
+      <div class="space-y-1">
+        <a href="/habits" class="text-sm text-muted-foreground hover:underline">&larr; Back to habits</a>
+        <h1 class="text-2xl font-semibold tracking-tight">{habit?.name ?? 'Habit'}</h1>
+        <p class="text-sm text-muted-foreground">
+          <Badge variant="outline">{id}</Badge>
+        </p>
+      </div>
+      <form method="post" action="/logout">
+        <Button type="submit" variant="ghost" size="sm">Sign out</Button>
+      </form>
+    </header>
+
+    {loadError && (
+      <Card class="border-destructive/50">
+        <CardContent class="text-destructive py-4">{loadError}</CardContent>
+      </Card>
+    )}
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Current streak</CardTitle>
+        <CardDescription>
+          Consecutive days ending today.
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="flex items-baseline gap-6">
+        <div class="text-4xl font-semibold tracking-tight">
+          {streak}
+          <span class="text-base font-normal text-muted-foreground ml-1">day{streak === 1 ? '' : 's'}</span>
+        </div>
+        <Separator orientation="vertical" className="h-10" />
+        <div class="text-sm text-muted-foreground">
+          <div class="text-foreground">Last completed</div>
+          <div>{lastCompletedDMY ?? 'Never'}</div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Recent completions</CardTitle>
+        <CardDescription>
+          {recentBadges.length === 0
+            ? 'No completions yet — mark today to start your streak.'
+            : `Showing the ${recentBadges.length} most recent.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {completionsError && (
+          <p class="text-sm text-destructive">{completionsError}</p>
+        )}
+        {!completionsError && recentBadges.length > 0 && (
+          <ul class="flex flex-wrap gap-2">
+            {recentBadges.map((dmy) => (
+              <li>
+                <Badge variant="secondary">{formatBadge(dmy)}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Mark done today</CardTitle>
+        <CardDescription>
+          Records today as a completion. Safe to tap more than once.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form method="post" action={`/habits/${id}/complete`}>
+          <Button type="submit">Mark done</Button>
+        </form>
+      </CardContent>
+    </Card>
+
+    <Card class="border-destructive/50">
+      <CardHeader>
+        <CardTitle class="text-destructive">Danger zone</CardTitle>
+        <CardDescription>
+          Retiring a habit hides it from your list but keeps its history.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button asChild variant="outline">
+          <a href={`/habits/${id}/retire`}>Retire this habit</a>
+        </Button>
+      </CardContent>
+    </Card>
+  </main>
+</Layout>

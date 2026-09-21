@@ -1,0 +1,125 @@
+---
+/**
+ * /settings — the signed-in user's preferences and account controls.
+ *
+ * Sections:
+ *   1. Account identity (email) — read from Astro.locals.session.
+ *   2. Theme — Light/Dark toggle. Submitting the form sets the
+ *      `castor-theme` cookie (max-age 1 year, sameSite lax, path /)
+ *      and redirects back here so Layout.astro re-renders with the
+ *      new `data-theme` attribute. No client JS — the redirect gives
+ *      us the re-render we need.
+ *   3. Account actions — Sign out (POST /logout) and a destructive
+ *      link to /account/delete.
+ *
+ * Backend GET /api/v1/users/me does not exist in upstream, so the page
+ * reads email straight from the local session — the same value the
+ * /habits header shows.
+ */
+import Layout from '../layouts/Layout.astro';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { Alert, AlertDescription } from '../components/ui/alert';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const { email } = Astro.locals.session;
+
+// Read the current theme so the radio reflects what's already in effect.
+const currentTheme = Astro.cookies.get('castor-theme')?.value === 'dark' ? 'dark' : 'light';
+
+// Theme POST handler. Validate the value, set the cookie, then redirect
+// back to /settings so Layout.astro re-renders with the new data-theme.
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const next = (form.get('theme') ?? '').toString();
+  if (next === 'light' || next === 'dark') {
+    Astro.cookies.set('castor-theme', next, {
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 365,
+    });
+    return Astro.redirect('/settings');
+  }
+}
+---
+
+<Layout title="Settings — Castor">
+  <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
+    <header>
+      <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
+      <p class="text-sm text-muted-foreground">
+        signed in as
+        <Badge variant="outline" class="align-middle ml-1">{email}</Badge>
+      </p>
+    </header>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Appearance</CardTitle>
+        <CardDescription>Choose how Castor looks. Saved per device.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form method="post" class="space-y-4">
+          <fieldset class="space-y-2">
+            <legend class="text-sm font-medium">Theme</legend>
+
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="theme"
+                value="light"
+                checked={currentTheme === 'light'}
+                class="h-4 w-4 accent-primary"
+              />
+              <span class="text-sm">Light</span>
+            </label>
+
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="theme"
+                value="dark"
+                checked={currentTheme === 'dark'}
+                class="h-4 w-4 accent-primary"
+              />
+              <span class="text-sm">Dark</span>
+            </label>
+          </fieldset>
+
+          <Button type="submit" size="sm">Save theme</Button>
+        </form>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Account</CardTitle>
+        <CardDescription>Manage your session and account.</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <form method="post" action="/logout">
+          <Button type="submit" variant="outline">Sign out</Button>
+        </form>
+
+        <div class="border-t pt-4 space-y-2">
+          <p class="text-sm text-muted-foreground">
+            Deleting your account is permanent — all your habits and history are erased.
+          </p>
+          <Button asChild variant="destructive">
+            <a href="/account/delete">Delete account</a>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  </main>
+</Layout>

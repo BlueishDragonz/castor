@@ -1,0 +1,96 @@
+---
+/**
+ * /account/delete — destructive confirm page.
+ *
+ * GET:  renders a destructive Alert + a confirm form + a Cancel link
+ *       back to /settings.
+ * POST: calls DELETE /api/v1/account. On 204: clearSession + redirect
+ *       to /. On any non-204: re-render with an Alert describing the
+ *       failure so the user can retry or bail to /settings.
+ */
+import Layout from '../../layouts/Layout.astro';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
+import { backendFetch, clearSession } from '../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const { email } = Astro.locals.session;
+
+let errorMessage: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const res = await backendFetch(Astro.cookies, '/api/v1/account', {
+    method: 'DELETE',
+  });
+
+  if (res.status === 204 || res.ok) {
+    clearSession(Astro.cookies);
+    return Astro.redirect('/');
+  }
+
+  // Surface the backend's detail if it sent one, otherwise a generic
+  // message keyed off the status code. The user is still signed in so
+  // they can retry or navigate back to /settings.
+  if (res.status === 401 || res.status === 403) {
+    errorMessage = 'Your session has expired. Sign in again and retry.';
+  } else {
+    let detail: string | null = null;
+    try {
+      const body = (await res.json()) as { detail?: string } | null;
+      detail = body?.detail ?? null;
+    } catch {
+      // body wasn't JSON; fall through to generic message
+    }
+    errorMessage = detail ?? `Could not delete account (HTTP ${res.status}).`;
+  }
+}
+---
+
+<Layout title="Delete account — Castor">
+  <main class="mx-auto max-w-md px-6 py-16 space-y-6">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Delete account</h1>
+      <p class="text-sm text-muted-foreground">signed in as {email}</p>
+    </div>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>This is permanent</CardTitle>
+        <CardDescription>
+          Your account, habits, and history will be erased from Castor.
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <Alert variant="destructive">
+          <AlertTitle>Are you sure?</AlertTitle>
+          <AlertDescription>
+            There is no undo. You will be signed out and your data gone.
+          </AlertDescription>
+        </Alert>
+
+        {errorMessage && (
+          <Alert variant="destructive">
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        )}
+
+        <form method="post" class="flex items-center gap-3">
+          <Button type="submit" variant="destructive">Yes, delete my account</Button>
+          <Button variant="outline" asChild>
+            <a href="/settings">Cancel</a>
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  </main>
+</Layout>
