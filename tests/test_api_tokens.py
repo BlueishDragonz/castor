@@ -71,39 +71,61 @@ async def user_b(client: TestClient):
 
 
 async def test_create_api_token(user_a, client: TestClient):
-    """Test creating an API token via CRUD and using it for API auth."""
-    from beaverhabits.app.crud import create_user_api_token, get_user_api_token
+    """Creating a token returns a non-None value that authenticates as the user.
+
+    Tokens are SHA-256-hashed before storage, so the raw token is never
+    retrievable from the DB by design. get_user_api_token (singular)
+    returns the masked display form; get_user_by_api_token (with 'by',
+    takes the raw token) is what authenticates requests.
+    """
+    from beaverhabits.app.crud import (
+        create_user_api_token,
+        get_user_api_token,
+        get_user_by_api_token,
+    )
 
     user = user_a["user"]
 
     # Initially no token
-    token = await get_user_api_token(user)
-    assert token is None
+    assert await get_user_api_token(user) is None
 
-    # Create token
-    token = await create_user_api_token(user)
-    assert token is not None
-    assert len(token) > 20
+    # Create token — returns the raw token ONCE
+    raw_token = await create_user_api_token(user)
+    assert raw_token is not None
+    assert len(raw_token) > 20
 
-    # Retrieve token
-    retrieved = await get_user_api_token(user)
-    assert retrieved == token
+    # The raw token authenticates as the user
+    resolved = await get_user_by_api_token(raw_token)
+    assert resolved is not None
+    assert str(resolved.id) == str(user.id)
+
+    # get_user_api_token returns the masked display form, NOT the raw
+    # token (we can't unhash the stored value, by design)
+    display = await get_user_api_token(user)
+    assert display is not None
+    assert display != raw_token
+    assert "..." in display
 
 
 async def test_reset_api_token(user_a, client: TestClient):
-    """Test resetting an API token produces a new value."""
+    """Resetting a token invalidates the old one and produces a new working one."""
     from beaverhabits.app.crud import (
-        create_user_api_token,
-        get_user_api_token,
+        get_user_by_api_token,
         reset_user_api_token,
     )
 
     user = user_a["user"]
-    original = await create_user_api_token(user)
+    old_token = await reset_user_api_token(user)
     new_token = await reset_user_api_token(user)
 
-    assert new_token != original
-    assert await get_user_api_token(user) == new_token
+    assert new_token != old_token
+
+    # Old token rejected
+    assert await get_user_by_api_token(old_token) is None
+    # New token authenticates
+    resolved = await get_user_by_api_token(new_token)
+    assert resolved is not None
+    assert str(resolved.id) == str(user.id)
 
 
 async def test_delete_api_token(user_a, client: TestClient):
