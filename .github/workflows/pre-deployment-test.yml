@@ -19,3 +19,88 @@ jobs:
         run: uv sync --group fly
       - name: Test with python
         run: DATABASE_URL="sqlite+aiosqlite:///:memory:" HABITS_STORAGE="USER_DISK" uv run pytest
+
+  astro-check:
+    name: Astro type-check + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/concepts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: web/concepts/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Type-check (astro check)
+        # Fails on type errors, but tolerates Astro's "hints" (style
+        # suggestions that aren't blocking).
+        run: pnpm exec astro check
+      - name: Build (astro build)
+        # Catches build-time errors that check misses (e.g. missing
+        # static imports, invalid frontmatter at compile time).
+        run: pnpm exec astro build
+      - name: Security audit
+        # Fails on any vulnerability with a known fix. The --prod flag
+        # skips dev-only dependencies that aren't shipped.
+        run: pnpm audit --prod --audit-level=moderate
+        continue-on-error: true
+        # The audit is informational; we don't block PRs on unfixed
+        # CVEs, but the report is visible on the run.
+
+  smoke:
+    name: Astro smoke (login + habits public routes)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/concepts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: web/concepts/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start dev server
+        # Bind to 127.0.0.1 so the smoke test can reach it; Astro's dev
+        # server doesn't need TLS in CI.
+        run: pnpm exec astro dev --port 4321 --host 127.0.0.1 &
+        env:
+          PUBLIC_BACKEND_URL: http://127.0.0.1:8085
+          BACKEND_URL: http://127.0.0.1:8085
+      - name: Wait for server
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://127.0.0.1:4321/login >/dev/null; then
+              echo "server up"; break
+            fi
+            sleep 1
+          done
+      - name: Smoke tests
+        run: |
+          # /login is public — should render the form.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/login)" = "200"
+          # /habits requires auth — should redirect to /login (302/303).
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/habits)
+          test "$CODE" = "302" -o "$CODE" = "303" || (echo "expected 302/303, got $CODE"; exit 1)
+          # /terms and /privacy are public — should 200.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/terms)" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/privacy)" = "200"
+          # /admin requires ADMIN_EMAIL — without a session we expect
+          # the page to 200 (the page itself handles 401 by rendering
+          # 'Access denied').
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/admin)" = "200"
+      - name: Stop server
+        if: always()
+        run: pkill -f "astro dev" || true
