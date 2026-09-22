@@ -20,6 +20,10 @@ EVENTS = frozenset({
     "login", "logout", "register", "password_change", "password_reset",
     "password_reset_request", "account_delete", "token_create", "token_revoke",
     "passkey_register", "passkey_delete", "backup",
+    # Private Circle (Phase 3 P2)
+    "circle_create", "circle_delete", "circle_join", "circle_leave",
+    "circle_habit_share", "circle_habit_unshare",
+    "circle_invite_create", "circle_invite_accept", "circle_invite_revoke",
 })
 OUTCOMES = frozenset({"success", "failure", "denied"})
 
