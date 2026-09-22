@@ -1,0 +1,128 @@
+---
+/**
+ * Admin panel — replacement for the NiceGUI @ui.page('/admin') that
+ * lived in beaverhabits/routes/astro.py before P3-B.
+ *
+ * Authorization model: ADMIN_EMAIL is a single-string setting in
+ * beaverhabits.configs. The Astro page cannot read it directly (it's
+ * server-side only), so authorization is delegated to the backend:
+ *   1. The Astro page calls /api/v1/admin/users via backendFetch
+ *   2. If the caller is not the ADMIN_EMAIL, backend returns 401
+ *   3. We render an "Access denied" state on 401, otherwise the user
+ *      list and backup trigger
+ *
+ * The backup trigger is a server-side <form> POST. The action is
+ * /api/admin/backup.astro — same Origin enforcement as the rest of
+ * the Astro app.
+ */
+import Layout from '../layouts/Layout.astro';
+import { backendFetch } from '../lib/auth';
+
+let users: Array<{ email: string; id: string; is_active: boolean; is_verified: boolean }> = [];
+let accessDenied = false;
+let backendError: string | null = null;
+
+try {
+  const res = await backendFetch(Astro.cookies, '/api/v1/admin/users');
+  if (res.status === 401 || res.status === 403) {
+    accessDenied = true;
+  } else if (!res.ok) {
+    backendError = `Backend returned ${res.status}`;
+  } else {
+    const data = await res.json();
+    users = data.users;
+  }
+} catch (e) {
+  backendError = e instanceof Error ? e.message : String(e);
+}
+
+// Show result of last backup trigger, if any (set as query string by
+// the form action handler).
+const backupResult = Astro.url.searchParams.get('backup');
+---
+
+<Layout title="Admin — Castor" description="Administrative actions.">
+  <main class="mx-auto max-w-3xl px-6 py-10">
+    <header class="mb-8 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold">Admin</h1>
+        <p class="text-sm text-muted-foreground mt-1">
+          Account list and administrative actions.
+        </p>
+      </div>
+      <a href="/settings" class="text-sm text-muted-foreground hover:underline">← Settings</a>
+    </header>
+
+    {backendError && (
+      <div class="mb-6 rounded-md border border-destructive bg-destructive/10 p-4 text-sm text-destructive">
+        Backend error: {backendError}
+      </div>
+    )}
+
+    {accessDenied && (
+      <div class="mb-6 rounded-md border border-destructive bg-destructive/10 p-4 text-sm text-destructive">
+        Access denied. Only the configured ADMIN_EMAIL can view this page.
+      </div>
+    )}
+
+    {backupResult === 'ok' && (
+      <div class="mb-6 rounded-md border border-green-500 bg-green-500/10 p-4 text-sm text-green-700 dark:text-green-300">
+        Backup triggered. Check the audit log for per-user status.
+      </div>
+    )}
+    {backupResult === 'fail' && (
+      <div class="mb-6 rounded-md border border-destructive bg-destructive/10 p-4 text-sm text-destructive">
+        Backup trigger failed. See server logs.
+      </div>
+    )}
+
+    {!accessDenied && !backendError && (
+      <>
+        <section class="mb-10">
+          <h2 class="text-lg font-semibold mb-3">Users ({users.length})</h2>
+          {users.length === 0 ? (
+            <p class="text-sm text-muted-foreground">No users have registered yet.</p>
+          ) : (
+            <div class="rounded-md border">
+              <table class="w-full text-sm">
+                <thead class="border-b bg-muted/50">
+                  <tr>
+                    <th class="text-left px-3 py-2 font-medium">Email</th>
+                    <th class="text-left px-3 py-2 font-medium">Active</th>
+                    <th class="text-left px-3 py-2 font-medium">Verified</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr class="border-b last:border-0">
+                      <td class="px-3 py-2 font-mono text-xs">{u.email}</td>
+                      <td class="px-3 py-2">{u.is_active ? 'yes' : 'no'}</td>
+                      <td class="px-3 py-2">{u.is_verified ? 'yes' : 'no'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section class="mb-10">
+          <h2 class="text-lg font-semibold mb-3">Manual backup</h2>
+          <p class="text-sm text-muted-foreground mb-4">
+            Triggers an immediate Telegram backup for every user that has
+            backup settings configured. Per-user failures are logged but do
+            not stop the loop.
+          </p>
+          <form method="POST" action="/api/admin/backup">
+            <button
+              type="submit"
+              class="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Trigger backup now
+            </button>
+          </form>
+        </section>
+      </>
+    )}
+  </main>
+</Layout>

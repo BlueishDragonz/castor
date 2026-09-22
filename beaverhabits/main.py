@@ -10,6 +10,7 @@ from beaverhabits.app.db import create_db_and_tables
 from beaverhabits.app.reset_routes import router as reset_router
 from beaverhabits.configs import settings
 from beaverhabits.logger import logger
+from beaverhabits.app.admin_routes import router as admin_router
 from beaverhabits.routes.api import init_api_routes
 from beaverhabits.routes.metrics import init_metrics_routes
 from beaverhabits.scheduler import daily_backup_task
@@ -81,6 +82,7 @@ else:
 init_auth_routes(app)
 app.include_router(reset_router)
 init_api_routes(app)
+app.include_router(admin_router)
 if settings.ENABLE_PLAN:
     from beaverhabits.plan.paddle import init_paddle_routes
     from beaverhabits.routes.astro import init_astro_routes
