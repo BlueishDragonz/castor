@@ -34,6 +34,7 @@ if (Astro.request.method === 'POST') {
   const dateDMY = (form.get('date') ?? '').toString().trim();
   const doneRaw = (form.get('done') ?? 'true').toString();
   const done = doneRaw !== 'false' && doneRaw !== '0';
+  const textRaw = (form.get('text') ?? '').toString();
 
   // Validate the date format before forwarding; the backend will 400
   // on malformed input but catching it here avoids the round-trip.
@@ -41,10 +42,20 @@ if (Astro.request.method === 'POST') {
     return Astro.redirect(`/habits/${id}?err=bad_date`);
   }
 
+  // Text is optional and free-form; cap at a sensible length to
+  // match what the backend's note column can hold (HabitRecord.text
+  // is unbounded but UI affordance should not invite paste-bombs).
+  const text = textRaw.slice(0, 4000);
+
+  const body: Record<string, unknown> = { date: dateDMY, done };
+  if (text) {
+    body.text = text;
+  }
+
   const res = await backendFetch(Astro.cookies, `/api/v1/habits/${id}/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date: dateDMY, done }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {

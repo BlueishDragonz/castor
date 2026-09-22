@@ -11,6 +11,12 @@
  * The trigger is rendered as the Sheet's trigger via asChild so the
  * caller's button is the actual click target. Callers pass the
  * trigger button via children.
+ *
+ * "Add note for today" form: posts to /habits/{id}/complete with
+ * date=today, done=true, text=<textarea contents>. The Astro route
+ * forwards to the backend's POST /api/v1/habits/{id}/completions
+ * with the text included. The textarea auto-focuses when the sheet
+ * opens (mounted to /habits today, not future or past).
  */
 
 import {
@@ -23,7 +29,7 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { Edit, Copy, ArrowUpDown, Archive } from 'lucide-react';
+import { Edit, Copy, ArrowUpDown, Archive, NotebookPen } from 'lucide-react';
 
 interface HabitContextSheetProps {
   habitId: string;
@@ -31,7 +37,16 @@ interface HabitContextSheetProps {
   children?: React.ReactNode;
 }
 
+function todayDDMMYYYY(): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
 export function HabitContextSheet({ habitId, habitName, children }: HabitContextSheetProps) {
+  const today = todayDDMMYYYY();
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -57,6 +72,32 @@ export function HabitContextSheet({ habitId, habitName, children }: HabitContext
               Edit
             </a>
           </Button>
+          <Separator />
+          <form method="post" action={`/habits/${habitId}/complete`} className="contents">
+            <input type="hidden" name="date" value={today} />
+            <input type="hidden" name="done" value="true" />
+            <label className="block w-full">
+              <span className="text-xs font-medium text-muted-foreground px-1">
+                Add note for today
+              </span>
+              <textarea
+                name="text"
+                rows={3}
+                maxLength={4000}
+                placeholder="What happened today? (optional)"
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </label>
+            <Button
+              type="submit"
+              variant="outline"
+              className="w-full justify-start gap-2"
+            >
+              <NotebookPen className="h-4 w-4" aria-hidden="true" />
+              Save note
+            </Button>
+          </form>
           <Separator />
           <form method="post" action={`/habits/${habitId}/duplicate`} className="contents">
             <Button
