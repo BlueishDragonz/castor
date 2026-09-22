@@ -1,0 +1,373 @@
+---
+/**
+ * /circles/{id} — circle detail (owner or member view).
+ *
+ * Renders:
+ *   - Header: circle name + crown if owner
+ *   - Members section
+ *   - Shared habits section (with visibility per habit)
+ *   - Pending invites section (owner only) + new invite form
+ *   - Feed section (members only): per-shared-habit ticks + streak + notes
+ *
+ * Forms are server-side POSTs:
+ *   - /circles/{id}/invites  (POST, owner only): mint invite
+ *   - /circles/{id}/habits/{hid} (DELETE, owner only): unshare
+ *   - /circles/{id}/members/{uid} (DELETE, owner or self): remove
+ *   - /circles/{id}/share     (POST, owner only): share a habit
+ *   - /circles/{id}/leave     (POST, member only): leave
+ *   - /circles/{id}/delete    (POST, owner only): delete circle
+ */
+import Layout from '../../../layouts/Layout.astro';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
+import { Separator } from '../../../components/ui/separator';
+import { Badge } from '../../../components/ui/badge';
+import {
+  ArrowLeft,
+  Crown,
+  Users,
+  Trash2,
+  Copy,
+  Check,
+  AlertTriangle,
+} from 'lucide-react';
+import { backendFetch } from '../../../lib/auth';
+import { VISIBILITY_LABEL, VISIBILITY_DESCRIPTION } from '../../../lib/circles';
+import type {
+  CircleDetail,
+  CircleInvite,
+  CircleFeedHabit,
+} from '../../../lib/circles';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect('/circles');
+}
+
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) {
+  return Astro.redirect('/circles');
+}
+
+let circle: CircleDetail | null = null;
+let invites: CircleInvite[] = [];
+let feed: CircleFeedHabit[] = [];
+let myHabits: Array<{ id: string; name: string }> = [];
+let error: string | null = null;
+
+const headers = { Accept: 'application/json' };
+
+try {
+  const detailRes = await backendFetch(
+    Astro.cookies,
+    `/api/v1/circles/${circleId}`,
+    { method: 'GET', headers },
+  );
+  if (detailRes.status === 403 || detailRes.status === 404) {
+    return Astro.redirect('/circles?err=forbidden');
+  }
+  if (!detailRes.ok) {
+    error = `Could not load circle (HTTP ${detailRes.status})`;
+  } else {
+    circle = (await detailRes.json()) as CircleDetail;
+  }
+} catch (e) {
+  error = (e as Error).message;
+}
+
+if (circle) {
+  if (circle.is_owner) {
+    try {
+      const invRes = await backendFetch(
+        Astro.cookies,
+        `/api/v1/circles/${circleId}/invites`,
+        { method: 'GET', headers },
+      );
+      if (invRes.ok) invites = (await invRes.json()) as CircleInvite[];
+    } catch {}
+  } else {
+    try {
+      const feedRes = await backendFetch(
+        Astro.cookies,
+        `/api/v1/circles/${circleId}/feed?days=14`,
+        { method: 'GET', headers },
+      );
+      if (feedRes.ok) feed = (await feedRes.json()) as CircleFeedHabit[];
+    } catch {}
+  }
+}
+
+// Load my habits so the owner can pick which one to share.
+if (circle?.is_owner) {
+  try {
+    const habitsRes = await backendFetch(
+      Astro.cookies,
+      '/api/v1/habits',
+      { method: 'GET', headers },
+    );
+    if (habitsRes.ok) myHabits = (await habitsRes.json()) as Array<{ id: string; name: string }>;
+  } catch {}
+}
+---
+
+<Layout title={circle ? circle.name : 'Circle'}>
+  <main class="mx-auto max-w-[65vw] min-w-[640px] px-4 py-6 space-y-4 pb-24">
+    <header class="flex items-center gap-3">
+      <Button asChild variant="ghost" size="icon" aria-label="Back to circles">
+        <a href="/circles"><ArrowLeft className="h-5 w-5" /></a>
+      </Button>
+      {circle && (
+        <h1 class="text-xl font-semibold flex items-center gap-2">
+          {circle.is_owner && <Crown className="h-5 w-5 text-amber-500" aria-label="You own this circle" />}
+          {circle.name}
+        </h1>
+      )}
+    </header>
+
+    {error && (
+      <Card className="w-full border-destructive">
+        <CardContent className="py-4">
+          <p class="text-sm text-destructive">{error}</p>
+        </CardContent>
+      </Card>
+    )}
+
+    {circle && (
+      <>
+        <!-- Members -->
+        <Card className="w-full">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Members ({circle.members.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ul class="divide-y divide-border" role="list">
+              {circle.members.map(m => (
+                <li class="py-2 flex items-center gap-2 text-sm">
+                  {m.is_owner && <Crown className="h-4 w-4 text-amber-500" aria-label="Owner" />}
+                  <span class="font-medium">{m.email}</span>
+                  {!m.is_owner && circle.is_owner && (
+                    <form method="post" action={`/circles/${circleId}/members/${m.user_id}/remove`} class="ml-auto">
+                      <Button type="submit" variant="ghost" size="icon" aria-label={`Remove ${m.email}`}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+
+        <!-- Shared habits (owner: manage; member: read feed below) -->
+        <Card className="w-full">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">
+              Shared habits ({circle.shared_habits.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {circle.shared_habits.length === 0 && (
+              <p class="text-sm text-muted-foreground">
+                No habits shared yet. {circle.is_owner ? 'Pick one below.' : ''}
+              </p>
+            )}
+            <ul class="divide-y divide-border" role="list">
+              {circle.shared_habits.map(sh => (
+                <li class="py-2 flex items-center gap-2 text-sm">
+                  <span class="font-mono text-xs text-muted-foreground">{sh.habit_id.slice(0, 8)}…</span>
+                  <Badge variant="outline">{VISIBILITY_LABEL[sh.visibility]}</Badge>
+                  {circle.is_owner && (
+                    <form method="post" action={`/circles/${circleId}/habits/${sh.habit_id}/unshare`} class="ml-auto">
+                      <Button type="submit" variant="ghost" size="icon" aria-label="Unshare this habit">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+
+            {circle.is_owner && myHabits.length > 0 && (
+              <form method="post" action={`/circles/${circleId}/share`} class="mt-4 flex flex-wrap items-end gap-2">
+                <div class="flex-1 min-w-[200px]">
+                  <label for="habit-id" class="block text-xs font-medium mb-1">Add a habit</label>
+                  <select
+                    id="habit-id"
+                    name="habit_id"
+                    required
+                    class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  >
+                    <option value="">Select a habit…</option>
+                    {myHabits
+                      .filter(h => !circle!.shared_habits.some(sh => sh.habit_id === h.id))
+                      .map(h => (
+                        <option value={h.id}>{h.name}</option>
+                      ))}
+                  </select>
+                </div>
+                <div>
+                  <label for="visibility" class="block text-xs font-medium mb-1">Visibility</label>
+                  <select
+                    id="visibility"
+                    name="visibility"
+                    class="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  >
+                    <option value="ticks">Ticks only</option>
+                    <option value="ticks+streak">Ticks + streak</option>
+                    <option value="ticks+streak+notes">Ticks + streak + notes</option>
+                  </select>
+                </div>
+                <Button type="submit">Share</Button>
+              </form>
+            )}
+            {circle.is_owner && (
+              <p class="mt-2 text-xs text-muted-foreground">
+                {VISIBILITY_DESCRIPTION['ticks+streak+notes']}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <!-- Feed (members see this; owner too) -->
+        <Card className="w-full">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">Recent activity (last 14 days)</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {feed.length === 0 ? (
+              <p class="text-sm text-muted-foreground">
+                {circle.shared_habits.length === 0
+                  ? 'No habits are shared yet.'
+                  : 'No ticks in the last 14 days.'}
+              </p>
+            ) : (
+              <ul class="space-y-3" role="list">
+                {feed.map(item => (
+                  <li class="border border-border rounded-lg p-3">
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class="font-medium text-sm">{item.name}</span>
+                      <span class="text-xs text-muted-foreground">({item.owner_email})</span>
+                      {item.streak > 0 && (item.visibility === 'ticks+streak' || item.visibility === 'ticks+streak+notes') && (
+                        <Badge variant="outline" className="ml-auto">🔥 {item.streak}-day streak</Badge>
+                      )}
+                    </div>
+                    <div class="flex flex-wrap gap-1">
+                      {item.records.map(r => (
+                        <div
+                          class={`h-6 w-6 rounded text-[10px] grid place-items-center ${r.done ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
+                          title={r.text ?? (r.done ? 'Done' : 'Not done')}
+                          aria-label={`${r.day}: ${r.done ? 'Done' : 'Not done'}${r.text ? ` — ${r.text}` : ''}`}
+                        >
+                          {Number(r.day.slice(-2))}
+                        </div>
+                      ))}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <!-- Invites (owner only) -->
+        {circle.is_owner && (
+          <Card className="w-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-medium">Invites</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-3">
+              <form method="post" action={`/circles/${circleId}/invites`} class="flex flex-wrap items-end gap-2">
+                <div>
+                  <label for="delivery" class="block text-xs font-medium mb-1">Delivery</label>
+                  <select id="delivery" name="delivery" class="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
+                    <option value="link">Shareable link</option>
+                    <option value="email">Email (token shown to you)</option>
+                  </select>
+                </div>
+                <div class="flex-1 min-w-[200px]">
+                  <label for="invited-email" class="block text-xs font-medium mb-1">Invitee email (optional for link)</label>
+                  <input
+                    id="invited-email"
+                    name="invited_email"
+                    type="email"
+                    autocomplete="off"
+                    placeholder="member@example.com"
+                    class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  />
+                </div>
+                <div>
+                  <label for="ttl-hours" class="block text-xs font-medium mb-1">Expires (hours)</label>
+                  <input
+                    id="ttl-hours"
+                    name="ttl_hours"
+                    type="number"
+                    min="1"
+                    max="720"
+                    value="72"
+                    class="flex h-9 w-24 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  />
+                </div>
+                <Button type="submit">Mint invite</Button>
+              </form>
+              {invites.length > 0 && (
+                <ul class="divide-y divide-border" role="list">
+                  {invites.map(inv => (
+                    <li class="py-2 flex items-center gap-2 text-sm">
+                      <Badge variant="outline">{inv.delivery}</Badge>
+                      {inv.invited_email && <span class="text-xs text-muted-foreground">{inv.invited_email}</span>}
+                      <span class="text-xs text-muted-foreground">
+                        {inv.used_at
+                          ? `used ${new Date(inv.used_at).toLocaleString('en-GB')}`
+                          : `expires ${new Date(inv.expires_at).toLocaleString('en-GB')}`}
+                      </span>
+                      {inv.raw_token && (
+                        <code class="ml-auto text-xs bg-muted px-2 py-0.5 rounded font-mono">{inv.raw_token}</code>
+                      )}
+                      {!inv.used_at && (
+                        <form method="post" action={`/circles/${circleId}/invites/${inv.id}/revoke`}>
+                          <Button type="submit" variant="ghost" size="icon" aria-label="Revoke invite">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        <Separator />
+
+        <!-- Danger zone -->
+        {circle.is_owner ? (
+          <form method="post" action={`/circles/${circleId}/delete`} onsubmit="return confirm('Delete this circle for everyone? This cannot be undone.')">
+            <Button type="submit" variant="destructive">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete circle
+            </Button>
+          </form>
+        ) : (
+          <form method="post" action={`/circles/${circleId}/leave`} onsubmit="return confirm('Leave this circle?')">
+            <Button type="submit" variant="outline">
+              Leave circle
+            </Button>
+          </form>
+        )}
+      </>
+    )}
+  </main>
+</Layout>

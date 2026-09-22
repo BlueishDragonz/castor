@@ -1,0 +1,41 @@
+---
+/**
+ * /circles/{id}/share — share a habit with the circle (owner only).
+ * POST {habit_id, visibility}.
+ */
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) return Astro.redirect('/login');
+const { id } = Astro.params;
+if (!id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+if (Astro.request.method !== 'POST') {
+  return Astro.redirect(`/circles/${circleId}`);
+}
+
+const form = await Astro.request.formData();
+const habitId = (form.get('habit_id') ?? '').toString();
+const visibility = (form.get('visibility') ?? 'ticks').toString();
+
+if (!['ticks', 'ticks+streak', 'ticks+streak+notes'].includes(visibility)) {
+  return Astro.redirect(`/circles/${circleId}?err=bad_visibility`);
+}
+if (!habitId) {
+  return Astro.redirect(`/circles/${circleId}?err=no_habit`);
+}
+
+const res = await backendFetch(Astro.cookies, `/api/v1/circles/${circleId}/habits`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ habit_id: habitId, visibility }),
+});
+
+if (!res.ok) {
+  const code = res.status === 403 ? 'forbidden' : res.status === 404 ? 'not_found' : 'share_failed';
+  return Astro.redirect(`/circles/${circleId}?err=${code}`);
+}
+
+return Astro.redirect(`/circles/${circleId}`);
+---

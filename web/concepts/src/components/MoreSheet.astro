@@ -1,0 +1,184 @@
+---
+import {
+  Sheet,
+  SheetTrigger,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetClose,
+} from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import {
+  Shield,
+  HelpCircle,
+  Upload,
+  Download,
+  LogOut,
+  Users,
+  X,
+  ChevronRight,
+} from 'lucide-react';
+---
+
+<script is:inline>
+  // Assign directly to window for template access
+  window.closeAndNavigate = function(url) {
+    const sheet = document.querySelector('[data-sheet="more-sheet"]');
+    if (sheet) {
+      sheet.close();
+    }
+    window.location.href = url;
+  };
+
+  window.handleLogout = async function() {
+    const sheet = document.querySelector('[data-sheet="more-sheet"]');
+    if (sheet) {
+      sheet.close();
+    }
+    await fetch('/logout', { method: 'POST' });
+    window.location.href = '/login';
+  };
+</script>
+
+<Sheet>
+  <SheetTrigger asChild>
+    <Button variant="ghost" size="icon" aria-label="More options">
+      <span class="sr-only">More options</span>
+      <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+      </svg>
+    </Button>
+  </SheetTrigger>
+
+  <SheetContent side="bottom" className="w-full max-w-[480px] mx-auto rounded-t-2xl p-0" data-sheet="more-sheet">
+    <div class="flex flex-col">
+      <!-- Drag handle -->
+      <div class="w-9 h-1 bg-muted rounded mx-auto my-1.5" />
+
+      <!-- Title -->
+      <SheetHeader className="px-4 pb-2">
+        <SheetTitle className="text-[13px] font-semibold">More</SheetTitle>
+      </SheetHeader>
+
+      <!-- Account Section -->
+      <div class="px-4">
+        <h3 class="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase pt-4 pb-1">
+          Account
+        </h3>
+
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-left rounded-none py-3 px-4 hover:bg-accent"
+          onClick={() => (window as any).closeAndNavigate('/security')}
+        >
+          <div class="flex items-center gap-3 w-full">
+            <div class="w-7 h-7 grid place-items-center text-muted-foreground">
+              <Shield className="h-5 w-5" />
+            </div>
+            <span class="text-[15px]">Security</span>
+            <span class="flex-1" />
+            <span class="text-[11px] text-muted-foreground">2 passkeys</span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </Button>
+
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-left rounded-none py-3 px-4 hover:bg-accent"
+          onClick={() => (window as any).closeAndNavigate('/help')}
+        >
+          <div class="flex items-center gap-3 w-full">
+            <div class="w-7 h-7 grid place-items-center text-muted-foreground">
+              <HelpCircle className="h-5 w-5" />
+            </div>
+            <span class="text-[15px]">Help</span>
+            <span class="flex-1" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </Button>
+      </div>
+
+      <Separator className="my-1.5" />
+
+      <!-- Data Section -->
+      <div class="px-4">
+        <h3 class="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase pt-4 pb-1">
+          Data
+        </h3>
+
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-left rounded-none py-3 px-4 hover:bg-accent"
+          onClick={() => (window as any).closeAndNavigate('/import')}
+        >
+          <div class="flex items-center gap-3 w-full">
+            <div class="w-7 h-7 grid place-items-center text-muted-foreground">
+              <Upload className="h-5 w-5" />
+            </div>
+            <span class="text-[15px]">Import</span>
+            <span class="flex-1" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </Button>
+
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-left rounded-none py-3 px-4 hover:bg-accent"
+          onClick={() => (window as any).closeAndNavigate('/export')}
+        >
+          <div class="flex items-center gap-3 w-full">
+            <div class="w-7 h-7 grid place-items-center text-muted-foreground">
+              <Download className="h-5 w-5" />
+            </div>
+            <span class="text-[15px]">Export</span>
+            <span class="flex-1" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </Button>
+
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-left rounded-none py-3 px-4 hover:bg-accent"
+          onClick={() => (window as any).closeAndNavigate('/circles')}
+        >
+          <div class="flex items-center gap-3 w-full">
+            <div class="w-7 h-7 grid place-items-center text-muted-foreground">
+              <Users className="h-5 w-5" />
+            </div>
+            <span class="text-[15px]">Private Circles</span>
+            <span class="flex-1" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </Button>
+      </div>
+
+      <Separator className="my-1.5" />
+
+      <!-- Session Section -->
+      <div class="px-4 pb-4">
+        <h3 class="text-[11px] font-semibold tracking-wider text-destructive uppercase pt-4 pb-1">
+          Session
+        </h3>
+
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-left rounded-none py-3 px-4 hover:bg-accent text-destructive"
+          onClick={() => (window as any).handleLogout()}
+        >
+          <div class="flex items-center gap-3 w-full">
+            <div class="w-7 h-7 grid place-items-center text-destructive">
+              <LogOut className="h-5 w-5" />
+            </div>
+            <span class="text-[15px]">Log out</span>
+          </div>
+        </Button>
+      </div>
+    </div>
+
+    <SheetClose className="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+      <X className="h-4 w-4" />
+      <span class="sr-only">Close</span>
+    </SheetClose>
+  </SheetContent>
+</Sheet>

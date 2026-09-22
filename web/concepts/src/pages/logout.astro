@@ -1,13 +1,30 @@
 ---
 /**
- * /logout — clears the session cookies and redirects to /login.
+ * /logout — clears the local session cookies AND bumps token_version
+ * on the backend so any leaked JWT is invalidated.
  *
- * The upstream JWT bearer remains technically valid until the upstream
- * JWT lifetime expires. The user's token_version bump endpoint
- * (`/users/me` PATCH) is the future proper logout; for v1 we just drop
- * the local cookie so the user is signed out of *this app*.
+ * Steps (in order):
+ *   1. POST /auth/logout on the backend → bumps user.token_version
+ *      → any future request with the old JWT will be rejected by
+ *      VersionedJWTStrategy (ver mismatch).
+ *   2. clearSession() drops the httpOnly cookie + the username cookie.
+ *   3. Redirect to /login.
+ *
+ * If step 1 fails (network error, server down), we still complete steps
+ * 2 and 3 so the user is signed out locally; the worst case is a brief
+ * window where the bearer is still cryptographically valid but the cookie
+ * is gone — and token_version only matters at the next API call which
+ * can't happen without the cookie anyway.
  */
-import { clearSession } from '../lib/auth';
+import { backendFetch, clearSession } from '../lib/auth';
+
+if (Astro.locals.session) {
+  try {
+    await backendFetch(Astro.cookies, '/auth/logout', { method: 'POST' });
+  } catch {
+    // Network error or backend down — clear locally anyway.
+  }
+}
 
 clearSession(Astro.cookies);
 return Astro.redirect('/login');

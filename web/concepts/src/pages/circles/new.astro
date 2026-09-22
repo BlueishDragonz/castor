@@ -1,0 +1,100 @@
+---
+/**
+ * /circles/new — create a new circle. Server-side POST handler.
+ *
+ * GET: render the form.
+ * POST: {name} → backend POST /api/v1/circles → redirect to /circles/{id}.
+ *
+ * The caller becomes the owner and is auto-added as a member so they
+ * can immediately see their own shared habits.
+ */
+import Layout from '../../layouts/Layout.astro';
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { ArrowLeft } from 'lucide-react';
+import { backendFetch } from '../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+let name = '';
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  name = (form.get('name') ?? '').toString().trim();
+
+  if (name.length < 1 || name.length > 80) {
+    error = 'Name must be between 1 and 80 characters.';
+  } else {
+    const res = await backendFetch(Astro.cookies, '/api/v1/circles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (res.ok) {
+      const created = (await res.json()) as { id: number };
+      return Astro.redirect(`/circles/${created.id}`);
+    }
+    const detail = res.status === 401 || res.status === 403
+      ? 'Not authenticated.'
+      : res.status === 422
+        ? 'Name is too long or empty.'
+        : `Could not create circle (HTTP ${res.status}).`;
+    error = detail;
+  }
+}
+---
+
+<Layout title="New Circle">
+  <main class="mx-auto max-w-[65vw] min-w-[640px] px-4 py-6 space-y-4 pb-24">
+    <header class="flex items-center gap-3">
+      <Button asChild variant="ghost" size="icon" aria-label="Back to circles">
+        <a href="/circles"><ArrowLeft className="h-5 w-5" /></a>
+      </Button>
+      <h1 class="text-xl font-semibold">New Private Circle</h1>
+    </header>
+
+    <Card className="w-full">
+      <CardHeader>
+        <CardTitle className="text-base font-medium">Circle details</CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <form method="post" action="/circles/new" class="space-y-4">
+          <div>
+            <label for="name" class="block text-sm font-medium mb-1.5">
+              Circle name
+            </label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              required
+              minlength="1"
+              maxlength="80"
+              autocomplete="off"
+              value={name}
+              placeholder="e.g. Family wellness"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <p class="mt-1 text-xs text-muted-foreground">
+              1–80 characters. The owner (you) can rename it later.
+            </p>
+          </div>
+
+          {error && (
+            <p class="text-sm text-destructive">{error}</p>
+          )}
+
+          <div class="flex gap-2">
+            <Button type="button" variant="outline" asChild>
+              <a href="/circles">Cancel</a>
+            </Button>
+            <Button type="submit">Create circle</Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  </main>
+</Layout>

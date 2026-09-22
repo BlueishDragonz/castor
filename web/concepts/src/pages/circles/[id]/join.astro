@@ -1,0 +1,47 @@
+---
+/**
+ * /circles/{id}/join — any user accepts an invite with {token}.
+ *
+ * POST: forwards to backend POST /api/v1/circles/{id}/join.
+ * On success, redirect to /circles/{id}.
+ */
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) return Astro.redirect('/login');
+const { id } = Astro.params;
+if (!id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+let token = '';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  token = (form.get('token') ?? '').toString().trim();
+}
+
+if (!token) {
+  // Token may have been passed in the URL for shareable-link flow:
+  // /circles/123/join?token=xyz  (auto-submit a server-side POST).
+  token = (Astro.url.searchParams.get('token') ?? '').trim();
+  if (!token) {
+    return Astro.redirect(`/circles/${circleId}?err=join_no_token`);
+  }
+  // Fall through to backend call below.
+}
+
+const res = await backendFetch(Astro.cookies, `/api/v1/circles/${circleId}/join`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ token }),
+});
+
+if (!res.ok) {
+  const code = res.status === 404 ? 'invite_invalid'
+    : res.status === 410 ? 'invite_used_or_expired'
+    : res.status === 403 ? 'forbidden'
+    : 'join_failed';
+  return Astro.redirect(`/circles/${circleId}?err=${code}`);
+}
+
+return Astro.redirect(`/circles/${circleId}`);
+---

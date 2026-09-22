@@ -1,0 +1,24 @@
+---
+/**
+ * /circles/{id}/invites/{invite_id}/revoke — owner revokes a pending invite.
+ */
+import { backendFetch } from '../../../../../lib/auth';
+
+if (!Astro.locals.session) return Astro.redirect('/login');
+const { id, invite_id } = Astro.params;
+if (!id || !invite_id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+if (Astro.request.method !== 'POST') {
+  return Astro.redirect(`/circles/${circleId}`);
+}
+
+await backendFetch(
+  Astro.cookies,
+  `/api/v1/circles/${circleId}/invites/${invite_id}`,
+  { method: 'DELETE' },
+);
+
+return Astro.redirect(`/circles/${circleId}`);
+---

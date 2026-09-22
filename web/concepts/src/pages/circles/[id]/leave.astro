@@ -1,0 +1,35 @@
+---
+/**
+ * /circles/{id}/leave — member leaves a circle.
+ */
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) return Astro.redirect('/login');
+const { id } = Astro.params;
+if (!id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+if (Astro.request.method !== 'POST') {
+  return Astro.redirect(`/circles/${circleId}`);
+}
+
+const session = Astro.locals.session;
+// We need the user's UUID for the URL; fetch it from the backend.
+// Fallback path: if GET /users/me isn't available, just redirect to /circles.
+try {
+  const meRes = await backendFetch(Astro.cookies, '/users/me', { method: 'GET' });
+  if (meRes.ok) {
+    const me = (await meRes.json()) as { id: string };
+    await backendFetch(
+      Astro.cookies,
+      `/api/v1/circles/${circleId}/members/${me.id}`,
+      { method: 'DELETE' },
+    );
+  }
+} catch {
+  // Best-effort: ignore errors and still redirect.
+}
+
+return Astro.redirect('/circles');
+---

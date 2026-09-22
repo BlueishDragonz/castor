@@ -1,0 +1,55 @@
+---
+/**
+ * /circles/{id}/invites — owner mints an invite.
+ *
+ * POST {delivery, invited_email?, ttl_hours?}
+ *
+ * After success, the invite token is shown ONCE in the redirect query
+ * string so the owner can copy it from the detail page. The page itself
+ * fetches the raw token from ?new_token= on render.
+ */
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) return Astro.redirect('/login');
+const { id } = Astro.params;
+if (!id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+if (Astro.request.method !== 'POST') {
+  return Astro.redirect(`/circles/${circleId}`);
+}
+
+const form = await Astro.request.formData();
+const delivery = (form.get('delivery') ?? 'link').toString();
+const invited_email = (form.get('invited_email') ?? '').toString().trim();
+const ttlRaw = (form.get('ttl_hours') ?? '72').toString();
+const ttl_hours = Math.max(1, Math.min(720, Number(ttlRaw) || 72));
+
+if (!['link', 'email'].includes(delivery)) {
+  return Astro.redirect(`/circles/${circleId}?err=bad_delivery`);
+}
+
+const res = await backendFetch(Astro.cookies, `/api/v1/circles/${circleId}/invites`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    delivery,
+    invited_email: invited_email || null,
+    ttl_hours,
+  }),
+});
+
+if (!res.ok) {
+  const code = res.status === 400 ? 'invite_bad_input'
+    : res.status === 403 ? 'forbidden'
+    : res.status === 404 ? 'not_found'
+    : 'invite_failed';
+  return Astro.redirect(`/circles/${circleId}?err=${code}`);
+}
+
+const invite = (await res.json()) as { id: number; raw_token: string };
+// Show the raw token once via query string. The detail page reads it from
+// `?new_token=...` and renders it as a copyable code.
+return Astro.redirect(`/circles/${circleId}?new_invite=${invite.id}&new_token=${encodeURIComponent(invite.raw_token)}`);
+---

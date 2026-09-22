@@ -1,0 +1,26 @@
+---
+/**
+ * /circles/{id}/habits/{habit_id}/unshare — owner removes a habit from the circle.
+ */
+import { backendFetch } from '../../../../../lib/auth';
+
+if (!Astro.locals.session) return Astro.redirect('/login');
+const { id, habit_id } = Astro.params;
+if (!id || !habit_id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+if (Astro.request.method !== 'POST') {
+  return Astro.redirect(`/circles/${circleId}`);
+}
+
+const res = await backendFetch(Astro.cookies, `/api/v1/circles/${circleId}/habits/${habit_id}`, {
+  method: 'DELETE',
+});
+
+if (!res.ok) {
+  return Astro.redirect(`/circles/${circleId}?err=unshare_failed`);
+}
+
+return Astro.redirect(`/circles/${circleId}`);
+---

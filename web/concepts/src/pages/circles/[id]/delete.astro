@@ -1,0 +1,26 @@
+---
+/**
+ * /circles/{id}/delete — owner deletes a circle.
+ */
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) return Astro.redirect('/login');
+const { id } = Astro.params;
+if (!id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+if (Astro.request.method !== 'POST') {
+  return Astro.redirect(`/circles/${circleId}`);
+}
+
+const res = await backendFetch(Astro.cookies, `/api/v1/circles/${circleId}`, {
+  method: 'DELETE',
+});
+
+if (!res.ok) {
+  return Astro.redirect(`/circles/${circleId}?err=delete_failed`);
+}
+
+return Astro.redirect('/circles');
+---

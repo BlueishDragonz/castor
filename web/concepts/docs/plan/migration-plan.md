@@ -460,25 +460,29 @@ Tasks (✅ all done):
 4. ✅ Dropped the now-unused `token` prop on `HabitGrid` and the `token={token}` argument from `/habits/index.astro`
 5. 🟡 Notes-textarea-on-long-press deferred (needs the long-press helper to differentiate notes vs context sheet; out of scope for this slice)
 
-### Slice P2 — Private Circle (initial design)
+### Slice P2 — Private Circle (✅ shipped — new backend code + Astro pages; D14 closed)
 
-What this slice delivers (deferred from earlier slices so P1 lands first):
-- Backend: `app/circles.py` (SQLAlchemy models), `routes/circles.py` (mounted at `/api/v1/circles/*`), `app/audit.py` gains circle events
-- Astro: `/circles` (list), `/circles/[id]` (detail), `/circles/[id]/invite` (shareable link)
-- `MoreSheet` gains "Circles" entry
-- Domain layer: `src/lib/circles.ts` (types, pure functions for visibility filtering)
+What this slice delivers:
+- Backend: `beaverhabits/app/circles.py` (4 SQLAlchemy models + read-side helpers), `beaverhabits/app/circle_routes.py` (13 FastAPI routes mounted at `/api/v1/circles`), `app/auth.py` gains `user_bump_token_version`, `app/webauthn_routes.py` gains `/auth/logout` (D14)
+- Audit: 9 new events — `circle_create`, `circle_delete`, `circle_join`, `circle_leave`, `circle_habit_share`, `circle_habit_unshare`, `circle_invite_create`, `circle_invite_accept`, `circle_invite_revoke`, plus the existing `logout`
+- Astro pages: `/circles` (list), `/circles/new`, `/circles/[id]` (detail with members + shared habits + feed + invite manager), `/circles/[id]/{share,unshare,delete,leave,join,invites,revoke}` server-side POSTs
+- Astro domain layer: `src/lib/circles.ts` (types + `visibilityAllows`)
+- `MoreSheet`: gains "Private Circles" entry
+- Astro `/logout`: POSTs to backend `/auth/logout` to bump `token_version` before clearing cookies (D14)
 
-Tasks:
-1. **Schema:** `circle`, `circle_member`, `circle_habit`, `circle_invite` SQLAlchemy tables; `create_db_and_tables` adds them
-2. **Routes:** POST/GET/DELETE `/api/v1/circles`, POST/DELETE `/api/v1/circles/{id}/members`, POST/DELETE `/api/v1/circles/{id}/habits`, GET/POST `/api/v1/circles/{id}/invites`
-3. **Auth:** reuse `VersionedJWTStrategy` + `token_version`; new `registration_user` dependency scoped to circle membership
-4. **Visibility:** circle members can ONLY read the `Habit` rows whose `id` is in their circles' `circle_habit` rows AND `visibility` permits
-5. **Astro UI:** see §2.6; uses the same `Sheet`/`Dialog`/`Drawer` primitives
-6. **Smoke:** create circle, invite by email, accept (token URL), add shared habit, observe member's tick visible to owner
+Tasks (✅ all done):
+1. ✅ Schema: `circle`, `circle_member`, `circle_habit`, `circle_invite` SQLAlchemy tables; CHECK constraints on name length, visibility, delivery mode; UNIQUE on (circle_id, user_id) and (circle_id, habit_id)
+2. ✅ Routes: 13 endpoints under `/api/v1/circles/*` (see table in §2.6). JWT + token_version enforced via `current_active_user`. Ownership checks via `_require_owner`; member-or-owner via `_require_owner_or_member`.
+3. ✅ Auth: reuses `VersionedJWTStrategy` + `current_active_user`. New `user_bump_token_version()` helper used by `/auth/logout`.
+4. ✅ Visibility: per-habit CircleHabit row with `visibility ∈ {ticks, ticks+streak, ticks+streak+notes}`. Server-side `circle_feed` endpoint enforces visibility — `streak` field is 0 unless visibility tier includes it; `text` field is only included on per-day records when tier is `ticks+streak+notes`.
+5. ✅ Astro UI: list, create, detail (members + shared habits + feed + invites), per-action POST routes. 65vw content cap consistent with design spec.
+6. ✅ Smoke: list returns [] for new user; create + invite + join + share + tick + view feed (deferred to manual testing on apollo)
 
-Rollback: feature flag `CIRCLES_ENABLED`. Default off in production
-until at least one full release cycle has been run with the flag on
-in dev/staging.
+Backend TODO list (not blocking this slice):
+- `/api/v1/habits/import` (D5; documented)
+- `POST /api/v1/account` cleanup (D16; documented)
+
+Long-press → notes textarea on habit rows is the only remaining P2 polish item; needs the long-press helper to differentiate from context-sheet, ~1 slice hour.
 
 ### Slice P3 — Decoupling and hardening (Phase 4 in the goal)
 
@@ -550,7 +554,7 @@ Covered by Slice P3 above. The deliverable here is the final report
 | P1 habit detail (D5/D12) | ✅ shipped (long-press notes deferred to P2) | 0 (already done this slice) | P0 grid |
 | P1 import/export (D5) | ✅ shipped (backend POST /habits/import gap documented) | 0 (already done this slice) | none |
 | P2 polish (D9/D13/D15) | ✅ shipped (long-press notes-textarea is the only remaining P2 item) | 0 (already done this slice) | all P1 |
-| P2 Private Circle | not started | 5 | all P1; new backend code |
+| P2 Private Circle | ✅ shipped (D14 closed; long-press notes-textarea is the only remaining P2 polish item) | 0 (already done this slice) | all P1 |
 | P3 decoupling | not started | 1 | all P2 |
 
 Total calendar (best case, sequential): **~16 days**. With

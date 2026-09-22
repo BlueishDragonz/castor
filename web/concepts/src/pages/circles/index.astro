@@ -1,0 +1,102 @@
+---
+/**
+ * /circles — list of circles the user owns or belongs to.
+ *
+ * Server-rendered. Fetches via /api/v1/circles (authenticated) and
+ * renders a card per circle with create-cta at the top.
+ */
+import Layout from '../../layouts/Layout.astro';
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Separator } from '../../components/ui/separator';
+import { Users, Plus, Crown } from 'lucide-react';
+import { backendFetch } from '../../lib/auth';
+import type { CircleSummary } from '../../lib/circles';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+let circles: CircleSummary[] = [];
+let error: string | null = null;
+
+try {
+  const res = await backendFetch(Astro.cookies, '/api/v1/circles', { method: 'GET' });
+  if (res.ok) {
+    circles = await res.json();
+  } else if (res.status !== 404) {
+    error = `Could not load circles (HTTP ${res.status})`;
+  }
+} catch (e) {
+  error = (e as Error).message;
+}
+---
+
+<Layout title="Private Circles">
+  <main class="mx-auto max-w-[65vw] min-w-[640px] px-4 py-6 space-y-4 pb-24">
+    <header class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <Users className="h-6 w-6" />
+        <h1 class="text-xl font-semibold">Private Circles</h1>
+      </div>
+      <Button asChild>
+        <a href="/circles/new" aria-label="Create new circle">
+          <Plus className="h-4 w-4 mr-2" />
+          New circle
+        </a>
+      </Button>
+    </header>
+
+    <p class="text-sm text-muted-foreground">
+      A Private Circle is a small (3–8) trusted group that can see each
+      other's habit ticks, streak, and (opt-in) notes. Circles are never
+      public and never discoverable — membership requires an invite.
+    </p>
+
+    {error && (
+      <Card className="w-full border-destructive">
+        <CardContent className="py-4">
+          <p class="text-sm text-destructive">{error}</p>
+        </CardContent>
+      </Card>
+    )}
+
+    {!error && circles.length === 0 && (
+      <Card className="w-full">
+        <CardContent className="py-8 text-center space-y-3">
+          <Users className="h-10 w-10 mx-auto text-muted-foreground" />
+          <p class="text-sm text-muted-foreground">
+            You don't belong to any circles yet.
+          </p>
+          <Button asChild>
+            <a href="/circles/new">Create your first circle</a>
+          </Button>
+        </CardContent>
+      </Card>
+    )}
+
+    {circles.length > 0 && (
+      <div class="space-y-3">
+        {circles.map(c => (
+          <Card className="w-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-medium flex items-center gap-2">
+                {c.is_owner && <Crown className="h-4 w-4 text-amber-500" aria-label="You own this circle" />}
+                <a href={`/circles/${c.id}`} class="hover:underline">
+                  {c.name}
+                </a>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 text-sm text-muted-foreground">
+              {c.member_count} member{c.member_count === 1 ? '' : 's'}
+              {' · '}
+              {c.shared_habit_count} shared habit{c.shared_habit_count === 1 ? '' : 's'}
+              {' · '}
+              created {new Date(c.created_at).toLocaleDateString('en-GB')}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    )}
+  </main>
+</Layout>
