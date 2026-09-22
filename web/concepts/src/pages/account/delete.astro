@@ -2,11 +2,22 @@
 /**
  * /account/delete — destructive confirm page.
  *
- * GET:  renders a destructive Alert + a confirm form + a Cancel link
- *       back to /settings.
- * POST: calls DELETE /api/v1/account. On 204: clearSession + redirect
- *       to /. On any non-204: re-render with an Alert describing the
- *       failure so the user can retry or bail to /settings.
+ * GET:  renders a destructive Alert + a confirm form. The user must
+ *       type their password before the form will accept a submit; this
+ *       mirrors the pattern in beaverhabits/app/security_actions.py
+ *       where every credential-destructive action re-authenticates.
+ *       The castor-main passkey removal flow already requires password
+ *       re-entry (see security_page.py::start_dialog for the dialog
+ *       flow). Account deletion deserves the same protection.
+ *
+ * POST: the form carries {password, confirm}. We POST to a new server
+ *       route at /api/account/delete that forwards to
+ *       DELETE /api/v1/account and re-verifies the password via
+ *       /auth/login (the backend has no /verify-password endpoint yet).
+ *
+ * On 204: clearSession + redirect to /. On any non-204: re-render with
+ * an Alert describing the failure so the user can retry or bail to
+ * /settings.
  */
 import Layout from '../../layouts/Layout.astro';
 import {
@@ -17,8 +28,10 @@ import {
   CardContent,
 } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
-import { backendFetch, clearSession } from '../../lib/auth';
+import { clearSession } from '../../lib/auth';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -27,31 +40,51 @@ if (!Astro.locals.session) {
 const { email } = Astro.locals.session;
 
 let errorMessage: string | null = null;
+let confirmChecked = false;
+let passwordFilled = false;
 
 if (Astro.request.method === 'POST') {
-  const res = await backendFetch(Astro.cookies, '/api/v1/account', {
-    method: 'DELETE',
-  });
+  const form = await Astro.request.formData();
+  const password = (form.get('password') ?? '').toString();
+  const confirm = (form.get('confirm') ?? '').toString();
+  confirmChecked = confirm === 'DELETE';
+  passwordFilled = password.length > 0;
 
-  if (res.status === 204 || res.ok) {
-    clearSession(Astro.cookies);
-    return Astro.redirect('/');
-  }
-
-  // Surface the backend's detail if it sent one, otherwise a generic
-  // message keyed off the status code. The user is still signed in so
-  // they can retry or navigate back to /settings.
-  if (res.status === 401 || res.status === 403) {
-    errorMessage = 'Your session has expired. Sign in again and retry.';
+  if (!confirmChecked) {
+    errorMessage = 'Type DELETE (uppercase) in the confirm box to proceed.';
+  } else if (!passwordFilled) {
+    errorMessage = 'Enter your password to confirm.';
   } else {
-    let detail: string | null = null;
-    try {
-      const body = (await res.json()) as { detail?: string } | null;
-      detail = body?.detail ?? null;
-    } catch {
-      // body wasn't JSON; fall through to generic message
+    // Forward the password-confirmed delete to the server route, which
+    // re-verifies the password via /auth/login and then calls
+    // DELETE /api/v1/account. The server route is the only place that
+    // should know about the verification logic.
+    const res = await fetch(new URL('/api/account/delete', Astro.url.origin), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': Astro.request.headers.get('cookie') ?? '',
+      },
+      body: JSON.stringify({ password }),
+    });
+
+    if (res.ok || res.status === 204) {
+      clearSession(Astro.cookies);
+      return Astro.redirect('/');
     }
-    errorMessage = detail ?? `Could not delete account (HTTP ${res.status}).`;
+
+    if (res.status === 401 || res.status === 403) {
+      errorMessage = 'Password did not match. Try again.';
+    } else {
+      let detail: string | null = null;
+      try {
+        const body = (await res.json()) as { detail?: string } | null;
+        detail = body?.detail ?? null;
+      } catch {
+        // body wasn't JSON; fall through
+      }
+      errorMessage = detail ?? `Could not delete account (HTTP ${res.status}).`;
+    }
   }
 }
 ---
@@ -84,11 +117,46 @@ if (Astro.request.method === 'POST') {
           </Alert>
         )}
 
-        <form method="post" class="flex items-center gap-3">
-          <Button type="submit" variant="destructive">Yes, delete my account</Button>
-          <Button variant="outline" asChild>
-            <a href="/settings">Cancel</a>
-          </Button>
+        <form method="post" class="space-y-4">
+          <div class="space-y-2">
+            <Label htmlFor="password">Your password</Label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+              placeholder="Re-enter your password"
+            />
+            <p class="text-xs text-muted-foreground">
+              We re-verify your password to make sure it's really you.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <Label htmlFor="confirm">Type DELETE to confirm</Label>
+            <Input
+              id="confirm"
+              name="confirm"
+              type="text"
+              required
+              autoComplete="off"
+              placeholder="DELETE"
+            />
+          </div>
+
+          <div class="flex items-center gap-3">
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={!confirmChecked && !passwordFilled}
+            >
+              Yes, delete my account
+            </Button>
+            <Button variant="outline" asChild>
+              <a href="/settings">Cancel</a>
+            </Button>
+          </div>
         </form>
       </CardContent>
     </Card>

@@ -9,6 +9,8 @@
  * cookie set on first visit. Future: hook into a theme-switch component.
  */
 import '../styles/tokens.css';
+import BottomNav from '../components/BottomNav.astro';
+import { DesktopMenu } from '../components/DesktopMenu.tsx';
 
 interface Props {
   title?: string;
@@ -30,10 +32,22 @@ const theme = Astro.cookies.get('castor-theme')?.value ?? 'light';
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
+
+    <!-- PWA — ported from beaverhabits/frontend/layout.py::pwa_headers. -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Castor" />
+    <meta name="application-name" content="Castor" />
+    <meta name="theme-color" content="#f9f9f9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title}</title>
   </head>
   <body class="min-h-screen antialiased">
     <slot />
+    <BottomNav client:load />
+    <DesktopMenu client:load />
   </body>
 </html>

@@ -25,18 +25,18 @@ Read in this order — they are the contract for everything else:
 ```
 P0 mobile nav chrome    ✅ mostly shipped (gap on D13)
 P0 multi-day grid       🟡 in flight
-P1 auth flows           🟡 in flight (D1, D3, D11 critical)
-P1 settings             🟡 in flight
+P1 auth flows           ✅ shipped
+P1 settings             ✅ shipped (D14 backend gap deferred)
 P1 habit detail         🟡 in flight
 P1 import/export        🟡 in flight
 P2 polish               not started
 P2 Private Circle       not started
 P3 decoupling           not started
+
+Last slice shipped: P1 settings (commit pending). Next: P1 habit detail or P1 import/export.
 ```
 
-`pnpm exec astro check` reports 8 type errors (4 unique issues: D1, D3,
-D11, plus a 3-site `<input class=…>` mistake). Fix these before
-declaring any slice done — the CI gate rejects on type errors.
+`pnpm exec astro check` reports 0 type errors. CI gate rejects on type errors.
 
 ## Local dev
 

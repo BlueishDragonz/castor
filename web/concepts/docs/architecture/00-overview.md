@@ -307,14 +307,14 @@ Each divergence must be resolved before the migration can claim
 | D3 | `login.astro` / `register.astro` reference `userHandle`, `signature`, `attestationObject`, `authenticatorData` on `AuthenticatorResponse` — types are wrong | P1 | TS errors block `astro check` |
 | D4 | `habits/new.astro` uses `class=` on React `<input>` (3 sites) | P1 | TS errors |
 | D5 | `/import` page exists (262 lines) but no test against `/api/v1/habits/import` (or whatever endpoint exists) | P1 | Behaviour unknown |
-| D6 | `/settings` missing Help, Import/Export entries (now in More sheet — verify nav still works) | P1 | UX gap |
+| D6 | `/settings` missing Help, Import/Export entries (now in More sheet — verify nav still works) | ✅ Shipped — Help card with shadcn Dialog + four links (Wiki, Supporter, YouTube, Issues) on `/settings`; Import/Export remain accessible via `MoreSheet → Data` per the migration plan |
 | D7 | `auth.ts` cookie `secure=false` in dev; `secure=true` flip not yet done in any environment | ✅ Shipped — `isProd()` in `lib/auth.ts` reads `PUBLIC_BACKEND_URL` / `BACKEND_URL` / `TLS_TERMINATED` and flips `Secure` accordingly |
-| D8 | No PWA meta tags ported from `layout.py::pwa_headers` | P2 | UX gap |
+| D8 | No PWA meta tags ported from `layout.py::pwa_headers` | ✅ Shipped — `Layout.astro` carries apple-touch-icon, theme-color, manifest link; `public/manifest.webmanifest` written |
 | D9 | Long-press event not ported from `intersection_observer.js`/`long-press-event.min.js` | P2 | UX gap |
 | D10 | No Umami analytics port (`UMAMI_ANALYTICS_ID`) | P3 | Observability |
 | D11 | Bridge `beaver_webauthn` → `castor_webauthn_browser` so WebAuthn ceremonies round-trip via Astro API routes; server-side `castor_token` httpOnly write (impossible from JS) | ✅ Shipped — `/api/auth/webauthn/login/complete.ts` and `/register/complete.ts`, `mirrorWebAuthnBrowserCookie()` in `lib/auth.ts` |
 | D12 | No "Best streaks" UI on `/habits/[id]` (computed but not rendered) | P2 | Parity gap |
 | D13 | No `tag_filter_component` chip UI in Astro grid (HabitGrid has props for it; chips not rendered) | P2 | Parity gap |
-| D14 | `clearSession` doesn't invalidate JWT server-side (token_version gate is server-side anyway, so this is fine — but logout should still bump version for symmetry) | P2 | Hygiene |
+| D14 | `clearSession` doesn't invalidate JWT server-side (token_version gate is server-side anyway, so this is fine — but logout should still bump version for symmetry) | 🟡 Backend gap — `/auth/logout` HTTP endpoint doesn't exist yet; the only `user_logout()` helper is NiceGUI-side. Astro-side `clearSession` correctly drops cookies; the JWT remains technically valid until lifetime expires. Castor's `VersionedJWTStrategy` will reject any future password-change-bound token, which closes most of the risk. **Documented as Phase 3 backend TODO.** |
 | D15 | `/habits/order` UI exists but no test of PUT to `/api/v1/habits/meta` | P2 | Behaviour unknown |
-| D16 | No `/account/delete` confirmation dialog — straight POST from `/settings` | P2 | UX gap |
+| D16 | `/account/delete` confirmation dialog — straight POST from `/settings` | ✅ Shipped — `/account/delete` now requires password + typed "DELETE" + new `/api/account/delete` server route that re-verifies via `/auth/login` before forwarding `DELETE /api/v1/account` |

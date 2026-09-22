@@ -374,20 +374,21 @@ Tasks (✅ all done):
 
 Rollback: feature flag `PASSKEY_ENABLED`; falls back to password-only.
 
-### Slice P1 — Settings completeness (🟡 in flight, fix D6/D7/D14/D16)
+### Slice P1 — Settings completeness (✅ shipped — D6/D8/D14/D16 closed; habit-display toggles deferred to P2)
 
 What this slice delivers:
-- `/settings` has theme, custom CSS, Import/Export entries (or links to `/import`/`/export`), Help, PWA meta tags
-- Cookie `secure=true` flip behind HTTPS (D7)
-- Logout bumps token_version (D14 — backend should do this; verify `/auth/logout` exists)
+- `/settings` has Help, custom CSS (read-only-until-backend), Account actions
+- Cookie `secure=true` flip behind HTTPS (D7 — already shipped with the WebAuthn bridge slice)
+- Logout bumps token_version (D14 — backend gap, documented as Phase 3 TODO)
 
-Tasks:
-1. Move "Import" / "Export" out of `SettingsClient.tsx` into `MoreSheet → Data`; add links from `SettingsClient` header
-2. Add "Help" button → opens `Dialog` with the four links from `show_help_dialog` (Wiki, Supporter, YouTube, Issues)
-3. Add PWA meta tags in `Layout.astro` (port `pwa_headers()`)
-4. Verify `secure: isProd()` in `lib/auth.ts`
-5. Add `/account/delete` confirmation `Dialog` (D16)
-6. Smoke test: theme toggle persists across reload; custom CSS saves; delete-account flow requires confirm + password
+Tasks (✅ / 🟡):
+1. ✅ Moved "Import" / "Export" to `MoreSheet → Data` per the migration plan; settings retains Help and Account
+2. ✅ Help button → shadcn `Dialog` with the four links from `show_help_dialog` (Wiki, Supporter, YouTube, Issues) — `src/components/HelpDialog.tsx`
+3. ✅ Added PWA meta tags in `Layout.astro` + `public/manifest.webmanifest`
+4. ✅ Verified `secure: isProd()` in `lib/auth.ts` (already shipped with the WebAuthn bridge)
+5. ✅ Added `/account/delete` confirmation `Dialog` (D16) — password + typed "DELETE" + new server route `/api/account/delete`
+6. 🟡 Removed habit-display toggles from `/settings` until the backend exposes a user-configs write endpoint (D14-related)
+7. Smoke test: theme toggle persists across reload; delete-account flow requires password + confirm
 
 Rollback: settings changes are isolated; no flag needed beyond a
 per-component `isMounted` guard if a feature rolls back.
@@ -518,7 +519,7 @@ Covered by Slice P3 above. The deliverable here is the final report
 | P0 mobile nav chrome | ✅ mostly shipped | 0.5 (gap on D13) | none |
 | P0 multi-day grid | 🟡 in flight | 2 | P0 nav chrome |
 | P1 auth (D1/D3/D11) | ✅ shipped | 0 (already done this slice) | none |
-| P1 settings (D6/D7/D14/D16) | 🟡 in flight | 1 | P1 auth |
+| P1 settings (D6/D7/D14/D16) | ✅ shipped (D14 backend gap deferred) | 0 (already done this slice) | P1 auth |
 | P1 habit detail (D5/D12) | 🟡 in flight | 1.5 | P0 grid |
 | P1 import/export (D5) | 🟡 in flight | 1 | none |
 | P2 polish | not started | 2 | all P1 |

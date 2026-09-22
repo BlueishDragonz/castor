@@ -2,19 +2,33 @@
 /**
  * /settings — the signed-in user's preferences and account controls.
  *
- * Sections:
+ * Sections (only what the backend supports today):
  *   1. Account identity (email) — read from Astro.locals.session.
  *   2. Theme — Light/Dark toggle. Submitting the form sets the
  *      `castor-theme` cookie (max-age 1 year, sameSite lax, path /)
  *      and redirects back here so Layout.astro re-renders with the
  *      new `data-theme` attribute. No client JS — the redirect gives
  *      us the re-render we need.
- *   3. Account actions — Sign out (POST /logout) and a destructive
+ *   3. Custom CSS — Advanced customization. The textarea is bound to
+ *      SettingsClient which POSTs to /api/v1/settings/custom-css (a
+ *      new server route that wraps the backend's user_configs update).
+ *      The legacy castor main applied CSS via the backend's tinycss2
+ *      sanitizer (see beaverhabits/css_sanitizer.py); the Astro side
+ *      sends raw text and relies on the backend to reject anything
+ *      unsafe. Custom CSS is non-portable across browsers; v1 keeps
+ *      it as a textarea rather than a CodeMirror island.
+ *   4. Help — opens a shadcn Dialog with the same four links as the
+ *      legacy layout.py::show_help_dialog (Wiki / Supporter / YouTube
+ *      / Issues).
+ *   5. Account actions — Sign out (POST /logout) and a destructive
  *      link to /account/delete.
  *
- * Backend GET /api/v1/users/me does not exist in upstream, so the page
- * reads email straight from the local session — the same value the
- * /habits header shows.
+ * Habit-display preferences (streak badge, total badge, date columns,
+ * tag filters, calendar) were present in earlier drafts but the
+ * backend has no endpoint for them yet (/api/v1/habits/meta only
+ * accepts {order}). Those are parked until the backend ships
+ * `user_configs` write endpoints — see docs/plan/migration-plan.md
+ * Phase 3 P2 "polish" for the slice that wires them up.
  */
 import Layout from '../layouts/Layout.astro';
 import {
@@ -27,6 +41,9 @@ import {
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Alert, AlertDescription } from '../components/ui/alert';
+import { Separator } from '../components/ui/separator';
+import HelpDialog from '../components/HelpDialog.tsx';
+import SettingsClient from '../components/SettingsClient.tsx';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -35,26 +52,31 @@ if (!Astro.locals.session) {
 const { email } = Astro.locals.session;
 
 // Read the current theme so the radio reflects what's already in effect.
-const currentTheme = Astro.cookies.get('castor-theme')?.value === 'dark' ? 'dark' : 'light';
+const currentTheme =
+  Astro.cookies.get('castor-theme')?.value === 'dark' ? 'dark' : 'light';
 
 // Theme POST handler. Validate the value, set the cookie, then redirect
 // back to /settings so Layout.astro re-renders with the new data-theme.
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const next = (form.get('theme') ?? '').toString();
-  if (next === 'light' || next === 'dark') {
-    Astro.cookies.set('castor-theme', next, {
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 365,
-    });
-    return Astro.redirect('/settings');
+  const action = (form.get('_action') ?? '').toString();
+
+  if (action === 'theme') {
+    const next = (form.get('theme') ?? '').toString();
+    if (next === 'light' || next === 'dark') {
+      Astro.cookies.set('castor-theme', next, {
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 365,
+      });
+      return Astro.redirect('/settings');
+    }
   }
 }
 ---
 
 <Layout title="Settings — Castor">
-  <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
+  <main class="mx-auto max-w-[min(65vw,720px)] min-w-[640px] px-6 py-12 space-y-8 pb-24">
     <header>
       <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
       <p class="text-sm text-muted-foreground">
@@ -70,6 +92,7 @@ if (Astro.request.method === 'POST') {
       </CardHeader>
       <CardContent>
         <form method="post" class="space-y-4">
+          <input type="hidden" name="_action" value="theme" />
           <fieldset class="space-y-2">
             <legend class="text-sm font-medium">Theme</legend>
 
@@ -103,6 +126,42 @@ if (Astro.request.method === 'POST') {
 
     <Card>
       <CardHeader>
+        <CardTitle>Custom CSS</CardTitle>
+        <CardDescription>
+          Advanced: write custom CSS to customize Castor's appearance.
+          Saved on Save; sanitized server-side before applying.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <textarea
+          id="custom-css"
+          name="custom-css"
+          class="min-h-[200px] font-mono text-xs w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+          placeholder="/* Your custom CSS here */"
+          spellcheck="false"
+        ></textarea>
+        <p class="text-xs text-muted-foreground mt-2">
+          Changes save when you click Save. Invalid CSS is rejected by the
+          backend's CSS sanitizer — see
+          <code>beaverhabits/css_sanitizer.py</code> for the allowlist.
+        </p>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Help</CardTitle>
+        <CardDescription>
+          Resources and places to ask questions or report bugs.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <HelpDialog client:load />
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
         <CardTitle>Account</CardTitle>
         <CardDescription>Manage your session and account.</CardDescription>
       </CardHeader>
@@ -111,15 +170,19 @@ if (Astro.request.method === 'POST') {
           <Button type="submit" variant="outline">Sign out</Button>
         </form>
 
-        <div class="border-t pt-4 space-y-2">
-          <p class="text-sm text-muted-foreground">
-            Deleting your account is permanent — all your habits and history are erased.
-          </p>
-          <Button asChild variant="destructive">
-            <a href="/account/delete">Delete account</a>
-          </Button>
-        </div>
+        <Separator />
+
+        <Alert variant="destructive">
+          <AlertDescription>
+            Deleting your account is permanent — all your habits and
+            history are erased.
+          </AlertDescription>
+        </Alert>
+        <Button asChild variant="destructive">
+          <a href="/account/delete">Delete account</a>
+        </Button>
       </CardContent>
     </Card>
   </main>
+  <SettingsClient client:load />
 </Layout>
