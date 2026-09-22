@@ -243,3 +243,24 @@ async def user_archive(user: User) -> User:
                         "updated_at": datetime.datetime.now(datetime.timezone.utc),
                     },
                 )
+
+
+async def user_bump_token_version(user: User) -> User:
+    """Increment token_version so any cached JWT for this user is invalidated.
+
+    Used by /auth/logout to invalidate a token that's already been issued
+    (the cookie is cleared on the client; the JWT itself remains valid
+    until lifetime expires unless we bump). VersionedJWTStrategy.read_token
+    already enforces version match, so a single UPDATE here retires every
+    outstanding token for this account.
+    """
+    from sqlalchemy import update
+    async with get_async_session_context() as session:
+        async with session.begin():
+            await session.execute(
+                update(User)
+                .where(User.id == str(user.id))
+                .values(token_version=User.token_version + 1)
+            )
+            await session.refresh(user)
+        return user

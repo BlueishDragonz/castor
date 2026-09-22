@@ -2,10 +2,11 @@ from fastapi import Depends, FastAPI
 
 from beaverhabits.configs import settings
 
+from .circle_routes import router as circle_router
 from .dependencies import current_admin_user
 from .schemas import UserCreate, UserRead, UserUpdate
 from .users import auth_backend, fastapi_users
-from .webauthn_routes import router as webauthn_router
+from .webauthn_routes import logout_router, router as webauthn_router
 
 
 def init_auth_routes(app: FastAPI) -> None:
@@ -32,6 +33,13 @@ def init_auth_routes(app: FastAPI) -> None:
         prefix="/users",
         tags=["users"],
     )
-    
+
     # WebAuthn / Passkey routes
     app.include_router(webauthn_router, tags=["auth"])
+
+    # Private Circle routes (Phase 3 P2)
+    app.include_router(circle_router, prefix="/api/v1", tags=["circles"])
+
+    # Token-version-bumping logout. Mounted AFTER the fastapi-users auth
+    # router so this /auth/logout shadows the bearer-revoke one.
+    app.include_router(logout_router)

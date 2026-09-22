@@ -556,3 +556,33 @@ async def webauthn_delete_credential(
     except SecurityActionError as exc:
         raise HTTPException(exc.status_code, exc.message) from None
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# /auth/logout — bump token_version so any cached JWT for this account is
+# invalidated. Cookie clearing happens on the Astro side.
+#
+# NOTE: fastapi_users' get_auth_router also provides /auth/logout (which
+# returns the bearer transport's logout payload). This endpoint is mounted
+# in app/app.py AFTER the auth router so it shadows the fastapi-users one
+# at the same path.
+# ---------------------------------------------------------------------------
+
+
+logout_router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@logout_router.post("/logout", status_code=204)
+async def auth_logout(user: User = Depends(current_active_user)) -> Response:
+    """Invalidate every outstanding token for this user.
+
+    The Astro client clears the httpOnly cookie on receipt of a 2xx; this
+    endpoint additionally bumps token_version so even a stolen JWT copied
+    before logout is rejected at the next request (VersionedJWTStrategy
+    compares the JWT's 'ver' claim against the user's current version).
+    """
+    from .auth import user_bump_token_version
+
+    await user_bump_token_version(user)
+    await record("logout", user_id=user.id)
+    return Response(status_code=204)
