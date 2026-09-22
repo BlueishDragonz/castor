@@ -12,7 +12,6 @@ from beaverhabits.configs import settings
 from beaverhabits.logger import logger
 from beaverhabits.routes.api import init_api_routes
 from beaverhabits.routes.metrics import init_metrics_routes
-from beaverhabits.routes.routes import init_gui_routes
 from beaverhabits.scheduler import daily_backup_task
 
 logger.info("Starting Castor...")
@@ -88,8 +87,6 @@ if settings.ENABLE_PLAN:
 
     init_astro_routes(app)
     init_paddle_routes(app)
-
-init_gui_routes(app)
 
 from beaverhabits.app.http_security import BrowserOriginMiddleware
 from beaverhabits.app.rate_limits import IPRateLimitMiddleware

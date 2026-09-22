@@ -1,43 +1,27 @@
+"""Landing-page + SEO static-file mount.
+
+In P3-B we dropped the NiceGUI pages for /terms, /privacy, /admin,
+and /admin/backup. The replacements land in subsequent commits:
+  - /terms, /privacy: Astro static pages (P3-D)
+  - /admin, /admin/backup: Astro admin page + API route (P3-E)
+
+What's left here is the static file mount: the landing page built
+out of statics/astro/dist/ is served by the FastAPI app so the
+reverse proxy in front of both services can route to it. The
+landing page is a separate Astro project (not the migration
+target in web/concepts/).
+"""
 import os
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.responses import FileResponse
-from nicegui import app, ui
+from nicegui import app
 
-from beaverhabits import views
-from beaverhabits.app.db import User
-from beaverhabits.app.dependencies import current_admin_user
-from beaverhabits.configs import settings
-from beaverhabits.frontend import paddle_page
-from beaverhabits.frontend.admin import admin_page
-from beaverhabits.frontend.paddle_page import PRIVACY, TERMS
 from beaverhabits.logger import logger
 
 
-# Add NiceGUI pages for terms, privacy, and admin
-@ui.page("/terms")
-def terms_page():
-    paddle_page.markdown(TERMS)
-
-
-@ui.page("/privacy")
-def privacy_page():
-    paddle_page.markdown(PRIVACY)
-
-
-@ui.page("/admin", include_in_schema=False)
-async def admin(user: User = Depends(current_admin_user)):
-    await admin_page(user)
-
-
-@ui.page("/admin/backup", include_in_schema=False)
-async def manual_backup(user: User = Depends(current_admin_user)):
-    logger.info(f"Starting backup, triggered by {user.email}")
-    await views.backup_all_users()
-
-
 def init_astro_routes(fastapi_app: FastAPI) -> None:
-    """Mount Astro static files using NiceGUI"""
+    """Mount Astro static files (landing page + SEO assets)."""
     ASTRO_DIST_PATH = "statics/astro/dist"
 
     @fastapi_app.get("/robots.txt")
