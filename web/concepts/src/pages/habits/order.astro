@@ -1,0 +1,219 @@
+---
+/**
+ * /habits/order — server-side handler for the reorder page.
+ *
+ * POST: takes a `habit_ids` form field (comma-separated), calls
+ * PUT /api/v1/habits/meta with {order: [...]} on the backend, then
+ * redirects back to /habits.
+ *
+ * GET: renders the drag-and-drop reorder page.
+ *
+ * Security: no bearer ever reaches the client. The JWT is read
+ * from the httpOnly cookie on the server only. This eliminates the
+ * __REORDER_TOKEN__ window global that was the same XSS exposure
+ * pattern as the WebAuthn, import, and habit-detail pages.
+ */
+import Layout from '../../layouts/Layout.astro';
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { GripVertical, ArrowUpDown, Save, X } from 'lucide-react';
+import { backendFetch } from '../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+interface Habit {
+  id: string;
+  name: string;
+}
+
+let habits: Habit[] = [];
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const raw = (form.get('habit_ids') ?? '').toString();
+  const habitIds = raw.split(',').map(s => s.trim()).filter(Boolean);
+
+  // Validate that habitIds is a non-empty array of strings.
+  if (habitIds.length === 0) {
+    return Astro.redirect('/habits?err=reorder_empty');
+  }
+
+  const res = await backendFetch(Astro.cookies, '/api/v1/habits/meta', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order: habitIds }),
+  });
+
+  if (!res.ok) {
+    const code = res.status === 401 || res.status === 403 ? 'unauth'
+      : res.status === 404 ? 'not_found'
+      : 'reorder_failed';
+    return Astro.redirect(`/habits?err=${code}`);
+  }
+
+  return Astro.redirect('/habits');
+}
+
+// GET — render the page.
+try {
+  const res = await backendFetch(Astro.cookies, '/api/v1/habits', {
+    method: 'GET',
+  });
+  if (res.ok) {
+    habits = (await res.json()) as Habit[];
+  } else {
+    error = `Could not load habits (HTTP ${res.status})`;
+  }
+} catch (e) {
+  error = (e as Error).message;
+}
+---
+
+<Layout title="Reorder Habits">
+  <main class="mx-auto max-w-[65vw] min-w-[640px] px-4 py-6 space-y-4 pb-24">
+    <header class="flex items-center justify-between">
+      <h1 class="text-xl font-semibold">Reorder Habits</h1>
+    </header>
+
+    <Card className="w-full">
+      <CardHeader>
+        <CardTitle className="text-base font-medium flex items-center gap-2">
+          <ArrowUpDown className="h-5 w-5" />
+          Drag to Reorder
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {error ? (
+          <p class="text-sm text-destructive text-center py-4">{error}</p>
+        ) : habits.length === 0 ? (
+          <p class="text-sm text-muted-foreground text-center py-4">
+            No habits to reorder. Create some habits first.
+          </p>
+        ) : (
+          <>
+            <p class="text-sm text-muted-foreground mb-4">
+              Drag habits to change their order. This order is used in the home screen.
+            </p>
+            <form id="reorder-form" method="post" action="/habits/order">
+              <input type="hidden" name="habit_ids" id="habit-ids-input" value={habits.map(h => h.id).join(',')} />
+              <ul id="habit-list" class="space-y-2" role="list" aria-label="Habits to reorder">
+                {habits.map((habit, index) => (
+                  <li
+                    class="flex items-center gap-3 p-3 bg-muted/50 border border-border rounded-lg cursor-grab active:cursor-grabbing transition-shadow hover:shadow-md"
+                    draggable="true"
+                    data-habit-id={habit.id}
+                    data-index={index}
+                  >
+                    <GripVertical className="h-6 w-6 text-muted-foreground flex-shrink-0 cursor-grab" aria-hidden="true" />
+                    <span class="flex-1 text-sm font-medium">{habit.name}</span>
+                    <span class="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                      #{index + 1}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div class="flex gap-2 mt-6">
+                <Button type="button" variant="outline" className="flex-1" data-action="cancel-reorder">
+                  <X className="h-4 w-4 mr-2" />
+                  Cancel
+                </Button>
+                <Button type="submit" className="flex-1" data-action="save-reorder">
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Order
+                </Button>
+              </div>
+            </form>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  </main>
+</Layout>
+
+<script>
+  // Drag and drop: rewrite the hidden habit_ids field on every drop so
+  // the form submit POSTs the current order. No client-side fetch.
+  const list = document.getElementById('habit-list') as HTMLUListElement | null;
+  const input = document.getElementById('habit-ids-input') as HTMLInputElement | null;
+  let draggedItem: HTMLElement | null = null;
+  let originalOrder: string[] = [];
+
+  if (list && input) {
+    originalOrder = Array.from(list.querySelectorAll('[data-habit-id]'))
+      .map(el => el.getAttribute('data-habit-id')!)
+      .filter(Boolean);
+
+    const updateInput = () => {
+      const ids = Array.from(list!.querySelectorAll('[data-habit-id]'))
+        .map(el => el.getAttribute('data-habit-id')!)
+        .filter(Boolean);
+      input!.value = ids.join(',');
+    };
+
+    list.addEventListener('dragstart', (e) => {
+      const target = e.target as HTMLElement;
+      const item = target.closest('[data-habit-id]') as HTMLElement | null;
+      if (!item) return;
+      draggedItem = item;
+      item.classList.add('opacity-50', 'ring-2', 'ring-primary');
+      e.dataTransfer?.setData('text/plain', item.getAttribute('data-habit-id') || '');
+      e.dataTransfer!.effectAllowed = 'move';
+    });
+
+    list.addEventListener('dragend', () => {
+      const item = draggedItem;
+      if (item) item.classList.remove('opacity-50', 'ring-2', 'ring-primary');
+      draggedItem = null;
+    });
+
+    list.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = 'move';
+      if (!draggedItem) return;
+      const afterElement = getDragAfterElement(list, e.clientY);
+      if (afterElement == null) {
+        list.appendChild(draggedItem);
+      } else {
+        list.insertBefore(draggedItem, afterElement);
+      }
+    });
+
+    list.addEventListener('drop', () => {
+      // Reflect the new order into the hidden input so submit POSTs it.
+      updateInput();
+      // Refresh the visible position numbers so the UI stays consistent.
+      Array.from(list.querySelectorAll('[data-habit-id]')).forEach((el, idx) => {
+        el.setAttribute('data-index', idx.toString());
+        const pos = el.querySelector('span:last-child');
+        if (pos) pos.textContent = `#${idx + 1}`;
+      });
+    });
+  }
+
+  function getDragAfterElement(container: HTMLElement, y: number) {
+    const draggableElements = [...container.querySelectorAll('[data-habit-id]:not(.dragging)')] as HTMLElement[];
+    return draggableElements.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) {
+        return { offset, element: child };
+      } else {
+        return closest;
+      }
+    }, { offset: Number.NEGATIVE_INFINITY, element: null as HTMLElement | null }).element;
+  }
+
+  document.querySelector('[data-action="cancel-reorder"]')?.addEventListener('click', () => {
+    // Restore original order without submitting.
+    if (!list || !input) return;
+    originalOrder.forEach((id) => {
+      const item = list.querySelector(`[data-habit-id="${id}"]`);
+      if (item) list.appendChild(item);
+    });
+    input.value = originalOrder.join(',');
+    window.history.back();
+  });
+</script>

@@ -1,0 +1,83 @@
+---
+/**
+ * HabitCheckBox — a single grid cell that toggles completion for a habit on a given day.
+ *
+ * Submits a real <form action="/habits/{id}/complete" method="post">
+ * with {date, done}. The server-side route forwards to
+ * POST /api/v1/habits/{id}/completions using the httpOnly cookie.
+ *
+ * No bearer ever reaches the client. This removes the
+ * window.toggleDone global and the `token` prop that were the
+ * same XSS exposure pattern as the WebAuthn, import, and
+ * habit-detail pages.
+ *
+ * Accessibility: each cell is a `<button role="switch">` so screen
+ * readers announce the state and Enter/Space toggles it.
+ */
+interface Props {
+  habitId: string;
+  habitName: string;
+  date: Date;
+  done: boolean;
+  isToday: boolean;
+  isPast: boolean;
+}
+
+const { habitId, habitName, date, done, isToday, isPast } = Astro.props;
+
+const dateStr = date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+const ariaLabel = isToday
+  ? `Today, ${habitName}`
+  : isPast
+    ? `${Math.floor((new Date().getTime() - date.getTime()) / (1000 * 60 * 60 * 24))} days ago, ${habitName}`
+    : `Future, ${habitName}`;
+---
+
+<form
+  method="post"
+  action={`/habits/${habitId}/complete`}
+  class="contents"
+  data-habit-checkbox
+>
+  <input type="hidden" name="date" value={dateStr} />
+  <input type="hidden" name="done" value={done ? 'false' : 'true'} />
+  <button
+    type="submit"
+    role="switch"
+    aria-checked={done}
+    aria-label={ariaLabel}
+    disabled={!isPast && !isToday}
+    data-done={done}
+    class={[
+      'inline-flex h-5 w-5 items-center justify-center rounded-md border-2 transition-colors',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+      done
+        ? 'border-primary bg-primary text-primary-foreground'
+        : 'border-border bg-background hover:bg-accent',
+      isToday ? 'ring-2 ring-primary ring-offset-2' : '',
+      !isPast && !isToday ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+    ].join(' ')}
+  >
+    {done && (
+      <svg viewBox="0 0 16 16" fill="none" class="h-3 w-3" aria-hidden="true">
+        <path d="M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z" fill="currentColor"/>
+      </svg>
+    )}
+  </button>
+</form>
+
+<style is:global>
+  /* HabitCheckBox button styling — matches the legacy castor-main look
+     (rounded squares, primary colour when ticked) but uses a button
+     element so screen readers announce it as a switch. */
+  [data-habit-checkbox] button[role="switch"] {
+    appearance: none;
+    -webkit-appearance: none;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  [data-habit-checkbox] button[role="switch"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+</style>

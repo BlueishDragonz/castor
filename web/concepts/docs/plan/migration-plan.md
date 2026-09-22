@@ -445,6 +445,21 @@ Tasks:
 2. Add `LongPress` directive helper (replaces `long-press-event.min.js`)
 3. Polish heatmap colours against design tokens
 
+### Slice P2 — Polish (✅ shipped — D9, D13, D15 closed; long-press notes-textarea is the only remaining P2 item)
+
+What this slice delivers:
+- Tag-filter chip toggle bug fixed (was effectively never visible)
+- `/habits/order` is server-side POST → backend `PUT /api/v1/habits/meta`
+- `HabitCheckBox` is a real `<form action="/habits/{id}/complete">` (no client fetch)
+- Long-press / right-click on a habit name opens the context sheet (was already wired; callbacks were empty)
+
+Tasks (✅ all done):
+1. ✅ Fixed `updateFilter()` toggle in `HabitGrid.astro`: visible at top OR when scrolling up; hidden when scrolling down
+2. ✅ Rewrote `/habits/order` as a server-side handler: drag-and-drop updates hidden `habit_ids`; submit POSTs to the same route; backend call is `PUT /api/v1/habits/meta {order: [...]}`. `__REORDER_TOKEN__` window global removed.
+3. ✅ Rewrote `HabitCheckBox` as a `<form action="/habits/{id}/complete">`. `token` prop and `window.toggleDone` global removed. Bearer never reaches the client.
+4. ✅ Dropped the now-unused `token` prop on `HabitGrid` and the `token={token}` argument from `/habits/index.astro`
+5. 🟡 Notes-textarea-on-long-press deferred (needs the long-press helper to differentiate notes vs context sheet; out of scope for this slice)
+
 ### Slice P2 — Private Circle (initial design)
 
 What this slice delivers (deferred from earlier slices so P1 lands first):
@@ -528,13 +543,13 @@ Covered by Slice P3 above. The deliverable here is the final report
 
 | Slice | Status | Effort (calendar days) | Dependencies |
 |---|---|---|---|
-| P0 mobile nav chrome | ✅ mostly shipped | 0.5 (gap on D13) | none |
+| P0 mobile nav chrome | ✅ shipped (D13 closed in P2 polish) | 0.5 | none |
 | P0 multi-day grid | 🟡 in flight | 2 | P0 nav chrome |
 | P1 auth (D1/D3/D11) | ✅ shipped | 0 (already done this slice) | none |
 | P1 settings (D6/D7/D14/D16) | ✅ shipped (D14 backend gap deferred) | 0 (already done this slice) | P1 auth |
 | P1 habit detail (D5/D12) | ✅ shipped (long-press notes deferred to P2) | 0 (already done this slice) | P0 grid |
 | P1 import/export (D5) | ✅ shipped (backend POST /habits/import gap documented) | 0 (already done this slice) | none |
-| P2 polish | not started | 2 | all P1 |
+| P2 polish (D9/D13/D15) | ✅ shipped (long-press notes-textarea is the only remaining P2 item) | 0 (already done this slice) | all P1 |
 | P2 Private Circle | not started | 5 | all P1; new backend code |
 | P3 decoupling | not started | 1 | all P2 |
 

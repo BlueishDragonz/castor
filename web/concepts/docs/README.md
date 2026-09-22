@@ -23,17 +23,22 @@ Read in this order — they are the contract for everything else:
 ## Status
 
 ```
-P0 mobile nav chrome    ✅ mostly shipped (gap on D13)
+P0 mobile nav chrome    ✅ mostly shipped (gap on D13 closed in P2)
 P0 multi-day grid       🟡 in flight
 P1 auth flows           ✅ shipped
 P1 settings             ✅ shipped (D14 backend gap deferred)
 P1 habit detail         ✅ shipped (long-press notes deferred to P2)
 P1 import/export        ✅ shipped (backend POST /habits/import gap documented)
-P2 polish               not started
+P2 polish               ✅ shipped (long-press notes-textarea is the only remaining P2 item)
 P2 Private Circle       not started
 P3 decoupling           not started
 
-Last slice shipped: P1 habit detail (commit pending). Next: P2 polish (long-press notes, tag filter chips, calendar heatmap polish) or P2 Private Circle.
+Last slice shipped: P2 polish (D9/D13/D15 — commit pending). Next: P2 Private Circle (new backend code + Astro pages).
+
+**13 of 16 divergence items closed. The remaining items are:**
+- D10 — Umami analytics port (P3 observability; non-blocking)
+- D14 — `/auth/logout` HTTP endpoint (backend TODO; documented)
+- long-press notes-textarea on habit rows (small UX polish; ~1 slice hour)
 ```
 
 `pnpm exec astro check` reports 0 type errors. CI gate rejects on type errors.

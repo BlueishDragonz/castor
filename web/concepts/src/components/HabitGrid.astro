@@ -28,7 +28,6 @@ interface Habit {
 interface Props {
   habits: Habit[];
   days: Date[];
-  token: string;
   showStreak?: boolean;   // Default: false (matches main branch setting)
   showTotal?: boolean;    // Default: false (matches main branch setting)
   showEveryDayStreaks?: boolean; // Default: false
@@ -45,7 +44,6 @@ interface Props {
 const {
   habits,
   days,
-  token,
   showStreak = false,
   showTotal = false,
   showEveryDayStreaks = false,
@@ -294,7 +292,6 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
                     done={done}
                     isToday={dayIsToday}
                     isPast={dayIsPast}
-                    token={token}
                   />
                 </div>
               );
@@ -359,31 +356,32 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 )}
 
 <script>
-  // Tag filter scroll behavior - show on scroll up, hide on scroll down
+  // Tag filter scroll behavior (D13 fix).
+  // Visible when at the top, hidden when scrolling down (so it doesn't
+  // cover content), re-shown when scrolling up (so the user can grab
+  // a chip without scrolling back to the very top first).
   (() => {
     const filter = document.querySelector('[data-tag-filter]');
     if (!filter) return;
-    
+
     let lastScrollY = window.scrollY;
     let ticking = false;
-    
+
     function updateFilter() {
+      const el = filter as HTMLElement;
       const scrollY = window.scrollY;
-      const scrollUp = scrollY < lastScrollY;
-      const atTop = scrollY === 0;
-      
-      if (!filter) return;
-      
-      if (scrollUp && atTop) {
-        filter.classList.remove('hidden');
-      } else if (!scrollUp || !atTop) {
-        filter.classList.add('hidden');
+      const scrollingUp = scrollY < lastScrollY;
+
+      if (scrollY === 0 || scrollingUp) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
       }
-      
+
       lastScrollY = scrollY;
       ticking = false;
     }
-    
+
     window.addEventListener('scroll', () => {
       if (!ticking) {
         window.requestAnimationFrame(updateFilter);
