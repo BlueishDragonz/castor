@@ -1,16 +1,16 @@
 services:
-  beaverhabits:
+  castor:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: beaverhabits
+    container_name: castor
     network_mode: "container:wg-easy"
     environment:
       - HABITS_STORAGE=DATABASE
       - WEBAUTHN_RP_ID=localhost
       - WEBAUTHN_ORIGIN=http://localhost:8080
     volumes:
-      - beaverhabits_beaver_data:/app/.user/
+      - castor_data:/app/.user/
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python healthcheck.py"]
@@ -19,5 +19,5 @@ services:
       retries: 3
 
 volumes:
-  beaverhabits_beaver_data:
+  castor_data:
     external: true

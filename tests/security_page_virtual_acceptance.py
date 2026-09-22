@@ -55,9 +55,9 @@ async def acceptance(folder: Path, measurements: dict) -> None:
         import uvicorn
         from playwright.async_api import async_playwright, expect
         from fastapi_users.password import PasswordHelper
-        from beaverhabits.main import app
-        from beaverhabits.app import db
-        from beaverhabits.configs import settings
+        from castor.main import app
+        from castor.app import db
+        from castor.configs import settings
 
         engine = db.engine
         assert settings.DATABASE_URL == os.environ["DATABASE_URL"]

@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for beaverhabits on 2024-04-01T19:18:59+08:00
+# fly.toml app configuration file generated for castor on 2024-04-01T19:18:59+08:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = "beaverhabits"
+app = "castor"
 kill_signal = "SIGINT"
 kill_timeout = 5
 primary_region = "fra"

@@ -12,10 +12,10 @@ from loguru import logger
 from nicegui import core
 from sqlalchemy import select
 
-from beaverhabits.app import crud
-from beaverhabits.app.auth import user_get_by_email
-from beaverhabits.app.db import User, engine
-from beaverhabits.app.db import (
+from castor.app import crud
+from castor.app.auth import user_get_by_email
+from castor.app.db import User, engine
+from castor.app.db import (
     HabitListModel,
     UserApiTokenModel,
     UserConfigsModel,
@@ -23,13 +23,13 @@ from beaverhabits.app.db import (
     UserNoteImageModel,
     async_session_maker,
 )
-from beaverhabits.app.dependencies import current_admin_user
-from beaverhabits.app.schemas import UserCreate, UserRead
-from beaverhabits.app.users import auth_backend, fastapi_users
-from beaverhabits.configs import settings
-from beaverhabits.main import app
-from beaverhabits.routes.api import _habit_list_export_data, init_api_routes
-from beaverhabits.storage.dict import DictHabitList
+from castor.app.dependencies import current_admin_user
+from castor.app.schemas import UserCreate, UserRead
+from castor.app.users import auth_backend, fastapi_users
+from castor.configs import settings
+from castor.main import app
+from castor.routes.api import _habit_list_export_data, init_api_routes
+from castor.storage.dict import DictHabitList
 
 PASSWORD = "TestPassword123!"
 

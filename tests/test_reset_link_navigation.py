@@ -1,8 +1,8 @@
 """Invalid reset navigation is safe and never a server error."""
 import unittest
 from unittest.mock import AsyncMock, patch
-import beaverhabits.main
-from beaverhabits.app import dependencies
+import castor.main
+from castor.app import dependencies
 from fastapi import HTTPException
 from fastapi_users import exceptions
 from starlette.requests import Request

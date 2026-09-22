@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 class OriginTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from beaverhabits.app.http_security import BrowserOriginMiddleware
+        from castor.app.http_security import BrowserOriginMiddleware
         app = FastAPI()
         @app.post('/write')
         async def write():
@@ -58,7 +58,7 @@ class OriginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post('/write',headers={'Sec-Fetch-Site':'cross-site'})).status_code,403)
 
     async def test_ws_origin_gate(self):
-        from beaverhabits.app.http_security import BrowserOriginMiddleware
+        from castor.app.http_security import BrowserOriginMiddleware
         messages=[]
         async def inner(scope,receive,send):
             await send({'type':'websocket.accept'})
@@ -71,7 +71,7 @@ class OriginTests(unittest.IsolatedAsyncioTestCase):
 
 class LimiterTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from beaverhabits.app.rate_limits import RateBucket
+        from castor.app.rate_limits import RateBucket
         self.tmp=tempfile.TemporaryDirectory()
         self.engine=create_async_engine('sqlite+aiosqlite:///'+str(Path(self.tmp.name)/'limit.db'))
         self.sessions=async_sessionmaker(self.engine,expire_on_commit=False)
@@ -83,7 +83,7 @@ class LimiterTests(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     async def test_threshold_expiry_and_independent_identity(self):
-        from beaverhabits.app.rate_limits import consume
+        from castor.app.rate_limits import consume
         self.assertTrue(await consume('user','one',2,60,now=120,sessions=self.sessions))
         self.assertTrue(await consume('user','one',2,60,now=120,sessions=self.sessions))
         self.assertFalse(await consume('user','one',2,60,now=120,sessions=self.sessions))
@@ -91,12 +91,12 @@ class LimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await consume('user','one',2,60,now=180,sessions=self.sessions))
 
     async def test_atomic_limit_across_connections(self):
-        from beaverhabits.app.rate_limits import consume
+        from castor.app.rate_limits import consume
         got=await asyncio.gather(*(consume('ip','one',3,60,now=120,sessions=self.sessions) for _ in range(10)))
         self.assertEqual(sum(got),3)
 
     async def test_persisted_and_no_raw_identifier(self):
-        from beaverhabits.app.rate_limits import consume, RateBucket
+        from castor.app.rate_limits import consume, RateBucket
         from sqlalchemy import select
         await consume('ip','192.0.2.4',1,60,now=120,sessions=self.sessions)
         sessions=async_sessionmaker(self.engine,expire_on_commit=False)
@@ -108,7 +108,7 @@ class LimiterTests(unittest.IsolatedAsyncioTestCase):
     async def test_namespace_pressure_does_not_throttle_other_namespaces(self):
         # P1-5: the cardinality cap must be per-namespace. A recovery flood
         # approaching the shared 10k row cap must not evict/block API traffic.
-        from beaverhabits.app.rate_limits import consume, RateBucket, CARDINALITY_CAP
+        from castor.app.rate_limits import consume, RateBucket, CARDINALITY_CAP
         from sqlalchemy import insert
         # Fill 'recovery' namespace to the cap: one row per distinct identity.
         async with self.sessions.begin() as session:
@@ -126,7 +126,7 @@ class LimiterTests(unittest.IsolatedAsyncioTestCase):
     async def test_cardinality_cap_counts_within_namespace_only(self):
         # P1-5: the count-then-insert honesty part — the cap query must count
         # rows of THIS namespace, not the whole table.
-        from beaverhabits.app.rate_limits import consume, RateBucket, CARDINALITY_CAP
+        from castor.app.rate_limits import consume, RateBucket, CARDINALITY_CAP
         from sqlalchemy import insert
         half = CARDINALITY_CAP // 2
         async with self.sessions.begin() as session:

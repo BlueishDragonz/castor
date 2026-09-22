@@ -14,9 +14,9 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from beaverhabits.app.db import Base, User
-from beaverhabits.app.audit import AuditEvent, append_audit_event, prune_audit_events
-from beaverhabits.integrity import check_sqlite_integrity, daily_integrity_task
+from castor.app.db import Base, User
+from castor.app.audit import AuditEvent, append_audit_event, prune_audit_events
+from castor.integrity import check_sqlite_integrity, daily_integrity_task
 
 
 class AuditTests(unittest.IsolatedAsyncioTestCase):
@@ -97,7 +97,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
             connection = original_connect(*args, **kwargs)
             connection.set_trace_callback(lambda statement: calls.append(statement))
             return connection
-        with patch("beaverhabits.integrity.sqlite3.connect", side_effect=connect):
+        with patch("castor.integrity.sqlite3.connect", side_effect=connect):
             result = await check_sqlite_integrity(self.url, result_path=self.result)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(json.loads(self.result.read_text()), result)
@@ -116,7 +116,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
                 self.db.unlink()
             else:
                 self.db.write_bytes(data)
-            with patch("beaverhabits.integrity.logger") as logger:
+            with patch("castor.integrity.logger") as logger:
                 result = await check_sqlite_integrity(self.url, result_path=self.result)
             self.assertEqual(result["status"], "error")
             logger.error.assert_called()
@@ -124,7 +124,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.db.exists())
 
     async def test_non_ok_pragma_is_failed_without_raw_diagnostics(self):
-        with patch("beaverhabits.integrity.sqlite3.connect") as connect, patch("beaverhabits.integrity.logger") as logger:
+        with patch("castor.integrity.sqlite3.connect") as connect, patch("castor.integrity.logger") as logger:
             connect.return_value.execute.return_value.fetchall.return_value = [("private table diagnostic",)]
             result = await check_sqlite_integrity(self.url, result_path=self.result)
         self.assertEqual(result["status"], "failed")
@@ -132,7 +132,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         logger.error.assert_called()
 
     async def test_skip_non_sqlite_and_memory_without_connecting(self):
-        with patch("beaverhabits.integrity.sqlite3.connect") as connect:
+        with patch("castor.integrity.sqlite3.connect") as connect:
             for url in ["postgresql+asyncpg://user:private@localhost/database", "sqlite+aiosqlite:///:memory:", "sqlite://", "sqlite:///file:fixture?mode=memory&uri=true"]:
                 result = await check_sqlite_integrity(url, result_path=self.result)
                 self.assertEqual(result["status"], "skipped")
@@ -142,7 +142,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
     async def test_engine_url_and_uri_target(self):
         engine = create_async_engine(self.url)
         try:
-            with patch("beaverhabits.app.db.engine", engine):
+            with patch("castor.app.db.engine", engine):
                 result = await check_sqlite_integrity(result_path=self.result)
             self.assertEqual(result["status"], "ok")
             url = "sqlite:///" + self.db.as_uri() + "?mode=rw&uri=true"
@@ -152,7 +152,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_persistence_failure_logs_and_preserves_previous_file(self):
         self.result.write_text('{"previous": true}')
-        with patch("beaverhabits.integrity.os.replace", side_effect=OSError("private path")), patch("beaverhabits.integrity.logger") as logger:
+        with patch("castor.integrity.os.replace", side_effect=OSError("private path")), patch("castor.integrity.logger") as logger:
             result = await check_sqlite_integrity(self.url, result_path=self.result)
         self.assertFalse(result["persisted"])
         self.assertEqual(json.loads(self.result.read_text()), {"previous": True})
@@ -187,7 +187,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
             cancelled.wait(2)
             finished.set()
             return {"status": "error"}
-        with patch("beaverhabits.integrity._check", side_effect=check):
+        with patch("castor.integrity._check", side_effect=check):
             task = asyncio.create_task(check_sqlite_integrity(self.url, result_path=self.result))
             self.assertTrue(await asyncio.to_thread(entered.wait, 2))
             task.cancel()
@@ -206,7 +206,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("private connection information")
             second_run.set()
             return {"status": "ok"}
-        with patch("beaverhabits.integrity.check_sqlite_integrity", side_effect=check), patch("beaverhabits.integrity.logger") as logger:
+        with patch("castor.integrity.check_sqlite_integrity", side_effect=check), patch("castor.integrity.logger") as logger:
             task = asyncio.create_task(daily_integrity_task(self.url, interval_seconds=0.001))
             await asyncio.wait_for(second_run.wait(), 2)
             task.cancel()
@@ -220,7 +220,7 @@ class IntegrityTests(unittest.IsolatedAsyncioTestCase):
         async def check(*args, **kwargs):
             ran.set()
             return {"status": "ok"}
-        with patch("beaverhabits.integrity.check_sqlite_integrity", side_effect=check):
+        with patch("castor.integrity.check_sqlite_integrity", side_effect=check):
             task = asyncio.create_task(daily_integrity_task(self.url, result_path=self.result, interval_seconds=86400))
             await asyncio.wait_for(ran.wait(), 1)
             task.cancel()

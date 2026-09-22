@@ -80,8 +80,8 @@ def serve(folder: Path, fd: int) -> None:
                     stream.write(b"error\n")
 
     logging.basicConfig(handlers=[SafeHandler()], level=logging.WARNING, force=True)
-    from beaverhabits.main import app
-    from beaverhabits.configs import settings
+    from castor.main import app
+    from castor.configs import settings
     import uvicorn
 
     assert settings.DATABASE_URL == os.environ["DATABASE_URL"]

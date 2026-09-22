@@ -29,7 +29,7 @@ COPY requirements.txt ./
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels pip install --no-cache-dir --no-index --find-links /wheels -r requirements.txt
 
 COPY start.sh .
-COPY beaverhabits ./beaverhabits
+COPY castor ./castor
 COPY statics ./statics
 
 RUN chmod -R g+w /app && \

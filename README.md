@@ -78,7 +78,7 @@ and set:
 
 ```
 castor/
-├── beaverhabits/          # Application package
+├── castor/          # Application package
 │   ├── app/               # Auth, accounts, security actions, audit, challenges
 │   ├── routes/            # HTTP routes: API, metrics, astro, Google One Tap
 │   ├── frontend/          # UI layer

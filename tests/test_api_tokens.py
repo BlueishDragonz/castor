@@ -9,8 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from beaverhabits.app.db import User, engine
-from beaverhabits.main import app
+from castor.app.db import User, engine
+from castor.main import app
 
 PASSWORD = "TestPassword123!"
 
@@ -52,7 +52,7 @@ async def user_a(client: TestClient):
     user, token = await _register_and_login(client, email)
     yield {"user": user, "jwt": token, "headers": {"Authorization": f"Bearer {token}"}}
     # Cleanup: delete any API token created during test
-    from beaverhabits.app.crud import delete_user_api_token
+    from castor.app.crud import delete_user_api_token
     await delete_user_api_token(user)
 
 
@@ -61,7 +61,7 @@ async def user_b(client: TestClient):
     email = f"token_user_b_{datetime.now().timestamp()}@test.com"
     user, token = await _register_and_login(client, email)
     yield {"user": user, "jwt": token, "headers": {"Authorization": f"Bearer {token}"}}
-    from beaverhabits.app.crud import delete_user_api_token
+    from castor.app.crud import delete_user_api_token
     await delete_user_api_token(user)
 
 
@@ -78,7 +78,7 @@ async def test_create_api_token(user_a, client: TestClient):
     returns the masked display form; get_user_by_api_token (with 'by',
     takes the raw token) is what authenticates requests.
     """
-    from beaverhabits.app.crud import (
+    from castor.app.crud import (
         create_user_api_token,
         get_user_api_token,
         get_user_by_api_token,
@@ -109,7 +109,7 @@ async def test_create_api_token(user_a, client: TestClient):
 
 async def test_reset_api_token(user_a, client: TestClient):
     """Resetting a token invalidates the old one and produces a new working one."""
-    from beaverhabits.app.crud import (
+    from castor.app.crud import (
         get_user_by_api_token,
         reset_user_api_token,
     )
@@ -130,7 +130,7 @@ async def test_reset_api_token(user_a, client: TestClient):
 
 async def test_delete_api_token(user_a, client: TestClient):
     """Test deleting an API token clears it."""
-    from beaverhabits.app.crud import (
+    from castor.app.crud import (
         create_user_api_token,
         delete_user_api_token,
         get_user_api_token,
@@ -150,7 +150,7 @@ async def test_delete_api_token(user_a, client: TestClient):
 
 async def test_api_token_auth_lists_habits(user_a, client: TestClient):
     """Test that an API token can be used as Bearer token for API requests."""
-    from beaverhabits.app.crud import create_user_api_token
+    from castor.app.crud import create_user_api_token
 
     user = user_a["user"]
     api_token = await create_user_api_token(user)
@@ -184,7 +184,7 @@ async def test_invalid_api_token_rejected(client: TestClient):
 
 async def test_deleted_token_rejected(user_a, client: TestClient):
     """Test that a deleted API token no longer authenticates."""
-    from beaverhabits.app.crud import delete_user_api_token, reset_user_api_token
+    from castor.app.crud import delete_user_api_token, reset_user_api_token
 
     user = user_a["user"]
     api_token = await reset_user_api_token(user)
@@ -207,7 +207,7 @@ async def test_deleted_token_rejected(user_a, client: TestClient):
 
 async def test_old_token_rejected_after_reset(user_a, client: TestClient):
     """Test that the old API token stops working after a reset."""
-    from beaverhabits.app.crud import reset_user_api_token
+    from castor.app.crud import reset_user_api_token
 
     user = user_a["user"]
     old_token = await reset_user_api_token(user)
@@ -235,7 +235,7 @@ async def test_old_token_rejected_after_reset(user_a, client: TestClient):
 
 async def test_tokens_are_unique_per_user(user_a, user_b, client: TestClient):
     """Test that two users get different API tokens."""
-    from beaverhabits.app.crud import reset_user_api_token
+    from castor.app.crud import reset_user_api_token
 
     token_a = await reset_user_api_token(user_a["user"])
     token_b = await reset_user_api_token(user_b["user"])
@@ -245,7 +245,7 @@ async def test_tokens_are_unique_per_user(user_a, user_b, client: TestClient):
 
 async def test_token_returns_correct_user(user_a, user_b, client: TestClient):
     """Test that get_user_by_api_token returns the right user for each token."""
-    from beaverhabits.app.crud import get_user_by_api_token, reset_user_api_token
+    from castor.app.crud import get_user_by_api_token, reset_user_api_token
 
     token_a = await reset_user_api_token(user_a["user"])
     token_b = await reset_user_api_token(user_b["user"])
@@ -261,7 +261,7 @@ async def test_token_returns_correct_user(user_a, user_b, client: TestClient):
 
 async def test_user_a_cannot_see_user_b_habits(user_a, user_b, client: TestClient):
     """Test that API tokens are isolated: user A's token cannot see user B's habits."""
-    from beaverhabits.app.crud import reset_user_api_token
+    from castor.app.crud import reset_user_api_token
 
     token_a = await reset_user_api_token(user_a["user"])
     token_b = await reset_user_api_token(user_b["user"])
@@ -305,7 +305,7 @@ async def test_user_a_cannot_see_user_b_habits(user_a, user_b, client: TestClien
 
 async def test_reset_one_user_does_not_affect_other(user_a, user_b, client: TestClient):
     """Test that resetting user A's token doesn't break user B's token."""
-    from beaverhabits.app.crud import reset_user_api_token
+    from castor.app.crud import reset_user_api_token
 
     await reset_user_api_token(user_a["user"])
     token_b = await reset_user_api_token(user_b["user"])
@@ -323,7 +323,7 @@ async def test_reset_one_user_does_not_affect_other(user_a, user_b, client: Test
 
 async def test_delete_one_user_does_not_affect_other(user_a, user_b, client: TestClient):
     """Test that deleting user A's token doesn't break user B's token."""
-    from beaverhabits.app.crud import (
+    from castor.app.crud import (
         delete_user_api_token,
         reset_user_api_token,
     )

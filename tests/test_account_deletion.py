@@ -1,9 +1,9 @@
 import json
 import uuid
 
-from beaverhabits.app.db import User
-from beaverhabits.storage.user_db import DatabasePersistentDict, UserDatabaseStorage
-from beaverhabits.storage.user_file import FilePersistentDict, UserDiskStorage
+from castor.app.db import User
+from castor.storage.user_db import DatabasePersistentDict, UserDatabaseStorage
+from castor.storage.user_file import FilePersistentDict, UserDiskStorage
 
 
 async def test_disk_storage_deletion_removes_file_and_stops_backups(tmp_path):

@@ -122,8 +122,8 @@ def read_live_db() -> dict:
     write_inspect_script()
     r = sh_local(
         f"/usr/bin/docker cp {INSPECT_SCRIPT_PATH} "
-        f"beaverhabits:/tmp/batch4_db_inspect.py && "
-        f"/usr/bin/docker exec -u nobody beaverhabits "
+        f"castor:/tmp/batch4_db_inspect.py && "
+        f"/usr/bin/docker exec -u nobody castor "
         f"/opt/pysetup/.venv/bin/python /tmp/batch4_db_inspect.py"
     )
     assert r.returncode == 0, (
@@ -270,7 +270,7 @@ class TestLiveWebAuthnRoutes:
         401, not 200/204 and not 500.
 
         BusyBox wget in wg-easy doesn't support --method. Use python's
-        urllib from inside the beaverhabits container (which shares the
+        urllib from inside the castor container (which shares the
         wg-easy netns so 10.8.0.1:8080 is reachable)."""
         # Write the probe script to a file (python -c can't handle
         # try/except as a one-liner).
@@ -289,8 +289,8 @@ class TestLiveWebAuthnRoutes:
             "BATCH4_EOF\n"
         )
         r = sh_local(
-            "/usr/bin/docker cp /tmp/batch4_delete_probe.py beaverhabits:/tmp/ && "
-            "/usr/bin/docker exec beaverhabits /opt/pysetup/.venv/bin/python /tmp/batch4_delete_probe.py"
+            "/usr/bin/docker cp /tmp/batch4_delete_probe.py castor:/tmp/ && "
+            "/usr/bin/docker exec castor /opt/pysetup/.venv/bin/python /tmp/batch4_delete_probe.py"
         )
         assert r.returncode == 0, (
             f"DELETE probe failed: rc={r.returncode}\n{r.stdout!r}\n{r.stderr!r}"
@@ -314,13 +314,13 @@ class TestRpidConfiguration:
         Without it, WebAuthn registration/login is impossible."""
         probe_script = (
             "/opt/pysetup/.venv/bin/python -c "
-            "\"from beaverhabits.configs import settings; "
+            "\"from castor.configs import settings; "
             "print('RP_ID=' + str(settings.WEBAUTHN_RP_ID)); "
             "print('ORIGIN=' + str(settings.WEBAUTHN_ORIGIN)); "
             "print('RP_NAME=' + str(settings.WEBAUTHN_RP_NAME))\""
         )
         r = sh_local(
-            f"/usr/bin/docker exec beaverhabits {probe_script}"
+            f"/usr/bin/docker exec castor {probe_script}"
         )
         assert r.returncode == 0, f"settings probe failed: {r.stderr}"
         assert "RP_ID=" in r.stdout, f"no RP_ID in output: {r.stdout}"
@@ -341,10 +341,10 @@ class TestRpidConfiguration:
         override."""
         probe_script = (
             "/opt/pysetup/.venv/bin/python -c "
-            "\"from beaverhabits.configs import settings; "
+            "\"from castor.configs import settings; "
             "print(settings.WEBAUTHN_RP_ID)\""
         )
-        r = sh_local(f"/usr/bin/docker exec beaverhabits {probe_script}")
+        r = sh_local(f"/usr/bin/docker exec castor {probe_script}")
         rp_id = r.stdout.strip()
 
         # Check for env override in compose

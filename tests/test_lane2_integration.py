@@ -15,9 +15,9 @@ os.environ['TRUSTED_EMAIL_HEADER'] = ''
 os.environ['REQUIRE_ADMIN_FOR_REGISTRATION'] = 'false'
 
 import httpx
-import beaverhabits.main
-from beaverhabits.app import db, auth
-from beaverhabits.configs import settings
+import castor.main
+from castor.app import db, auth
+from castor.configs import settings
 
 
 class RouteTests(unittest.IsolatedAsyncioTestCase):
@@ -27,7 +27,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         await db.create_db_and_tables()
         self.user = await auth.user_create('integration@example.com', 'test-only-long-password')
         self.token = await auth.user_create_token(self.user)
-        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=beaverhabits.main.app), base_url='http://test')
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=castor.main.app), base_url='http://test')
 
     async def asyncTearDown(self):
         await self.client.aclose()

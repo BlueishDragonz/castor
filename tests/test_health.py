@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from beaverhabits.routes.metrics import init_metrics_routes
+from castor.routes.metrics import init_metrics_routes
 
 
 def test_health_get_ok():

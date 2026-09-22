@@ -2,12 +2,12 @@
 authors = [
     {name = "Henry Zhu", email = "daya0576@gmail.com"},
 ]
-name = "beaverhabits"
+name = "castor"
 dynamic = ["version"]
 requires-python = "<4.0,>=3.12"
 dependencies = [
     "nicegui[redis]>=3.13.0",
-    "pydantic-settings<3.0.0,>=2.2.1",
+    "pydantic-settings>=2.2.1,<3.0.0",
     "fastapi-users[sqlalchemy]>=15.0.0,<16.0.0",
     "webauthn>=3.0.0,<4.0.0",
     "user-agents>=2.2.0",
@@ -55,7 +55,7 @@ fly = [
 ]
 
 [project.scripts]
-main = "beaverhabits.routes:main"
+main = "castor.routes:main"
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]

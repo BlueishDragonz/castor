@@ -5,7 +5,7 @@ Fixtures are inert CSS/markers; no executable scripts or remote resources.
 import unittest
 from unittest.mock import patch
 
-from beaverhabits.css_sanitizer import MAX_CSS_LENGTH, MAX_NESTING, sanitize_css
+from castor.css_sanitizer import MAX_CSS_LENGTH, MAX_NESTING, sanitize_css
 
 
 class CssSanitizerTests(unittest.TestCase):
@@ -69,18 +69,18 @@ class CssSanitizerTests(unittest.TestCase):
         self.assertEqual(sanitize_css('.a {color: red;} .b {background: url();}'), '')
 
     def test_input_bound_checked_before_parser(self):
-        with patch('beaverhabits.css_sanitizer.tinycss2.parse_stylesheet') as parser:
+        with patch('castor.css_sanitizer.tinycss2.parse_stylesheet') as parser:
             self.assertEqual(sanitize_css(' ' * (MAX_CSS_LENGTH + 1)), '')
             parser.assert_not_called()
 
     def test_nesting_bound_checked_before_parser(self):
         css = '.a {width: ' + 'calc(' * (MAX_NESTING + 1) + '1px' + ')' * (MAX_NESTING + 1) + ';}'
-        with patch('beaverhabits.css_sanitizer.tinycss2.parse_stylesheet') as parser:
+        with patch('castor.css_sanitizer.tinycss2.parse_stylesheet') as parser:
             self.assertEqual(sanitize_css(css), '')
             parser.assert_not_called()
 
     def test_token_budget(self):
-        with patch('beaverhabits.css_sanitizer.MAX_TOKENS', 4):
+        with patch('castor.css_sanitizer.MAX_TOKENS', 4):
             self.assertEqual(sanitize_css('.a {color: red; margin: 1px;}'), '')
 
     def test_escaped_supported_names(self):

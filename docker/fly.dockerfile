@@ -36,7 +36,7 @@ EXPOSE 8080
 COPY --from=builder-base $PYSETUP_PATH $PYSETUP_PATH
 WORKDIR /app
 COPY start.sh .
-COPY beaverhabits ./beaverhabits
+COPY castor ./castor
 COPY statics ./statics
 COPY healthcheck.py .
 RUN chmod -R g+w /app && \

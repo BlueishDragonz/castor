@@ -25,11 +25,11 @@ from fastapi import FastAPI
 from fastapi_users import exceptions
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.jwt import generate_jwt, decode_jwt
-import beaverhabits.main  # initialize the application's circular import graph
-from beaverhabits.app import db, auth, reset_routes
-from beaverhabits.app.users import UserManager, get_jwt_strategy
-from beaverhabits.app.schemas import UserCreate
-from beaverhabits.app.app import init_auth_routes
+import castor.main  # initialize the application's circular import graph
+from castor.app import db, auth, reset_routes
+from castor.app.users import UserManager, get_jwt_strategy
+from castor.app.schemas import UserCreate
+from castor.app.app import init_auth_routes
 
 app = FastAPI()
 init_auth_routes(app)

@@ -15,10 +15,10 @@ os.environ.setdefault("JWT_SECRET", "local-test-only-not-a-real-secret")
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from beaverhabits.app import challenges
-from beaverhabits.app import webauthn_routes as routes
-from beaverhabits.app.db import Base, User, WebAuthnCredential
-from beaverhabits.app.users import UserManager
+from castor.app import challenges
+from castor.app import webauthn_routes as routes
+from castor.app.db import Base, User, WebAuthnCredential
+from castor.app.users import UserManager
 from fastapi_users.db import SQLAlchemyUserDatabase
 
 
@@ -50,7 +50,7 @@ class WebAuthnTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
         self.store_patch = patch.object(challenges, "async_session_maker", self.sessions)
         self.store_patch.start()
-        from beaverhabits.app import db
+        from castor.app import db
         self.audit_patch = patch.object(db, "async_session_maker", self.sessions)
         self.audit_patch.start()
         self.auth_patch = patch.object(routes, "user_from_token", AsyncMock(side_effect=lambda token: self.user if token == "session-token" else None))
@@ -188,8 +188,8 @@ class WebAuthnTests(unittest.IsolatedAsyncioTestCase):
             await other_engine.dispose()
 
     async def test_session_validation_uses_versioned_jwt_not_api_token(self):
-        from beaverhabits.app import auth
-        from beaverhabits.app.users import get_jwt_strategy
+        from castor.app import auth
+        from castor.app.users import get_jwt_strategy
         from contextlib import asynccontextmanager
         token = await get_jwt_strategy().write_token(self.user)
         self.client.cookies.clear()

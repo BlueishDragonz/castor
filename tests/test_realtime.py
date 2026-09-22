@@ -1,10 +1,10 @@
 import datetime
 
-from beaverhabits.events import TickChanged
-from beaverhabits.logger import logger
-from beaverhabits.realtime import ConnectionManager
-from beaverhabits.routes.api import _websocket_tick_text
-from beaverhabits.storage.dict import DictHabit
+from castor.events import TickChanged
+from castor.logger import logger
+from castor.realtime import ConnectionManager
+from castor.routes.api import _websocket_tick_text
+from castor.storage.dict import DictHabit
 
 
 class FakeWebSocket:

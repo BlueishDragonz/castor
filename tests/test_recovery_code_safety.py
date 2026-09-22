@@ -23,7 +23,7 @@ os.environ["SENTRY_DSN"] = ""
 
 import dotenv
 with patch.object(dotenv, "load_dotenv", return_value=False):
-    import beaverhabits.main as main
+    import castor.main as main
 
 import httpx
 from fastapi import FastAPI
@@ -31,8 +31,8 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from sqlalchemy import event, inspect, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.requests import Request
-from beaverhabits.app import db, rate_limits, reset_routes as routes
-from beaverhabits.app.users import UserManager
+from castor.app import db, rate_limits, reset_routes as routes
+from castor.app.users import UserManager
 
 PASSWORD = "replacement fixture passphrase"
 UTC = dt.timezone.utc
@@ -46,7 +46,7 @@ class RecoverySafetyTests(unittest.IsolatedAsyncioTestCase):
         self.patches = [patch.object(db, "engine", self.engine),
                         patch.object(db, "async_session_maker", self.sessions),
                         patch.object(rate_limits, "async_session_maker", self.sessions),
-                        patch("beaverhabits.app.audit.record", new_callable=AsyncMock)]
+                        patch("castor.app.audit.record", new_callable=AsyncMock)]
         for item in self.patches:
             item.start()
         await db.create_db_and_tables()
@@ -250,7 +250,7 @@ class RecoverySafetyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await self.state(row_id), ("unused", 5 if mutation == "version" else 4, mutation == "used"))
 
     async def test_actual_outer_auth_throttle_covers_recovery(self):
-        from beaverhabits.configs import settings
+        from castor.configs import settings
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
             with patch.object(settings, "AUTH_RATE_IP_PER_MINUTE", 1), patch.object(routes, "send_email") as mail:
                 first = await client.post("/auth/forgot-password", json={"email": "missing@example.com"})

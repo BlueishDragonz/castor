@@ -17,11 +17,11 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from pydantic import ValidationError
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from beaverhabits.app import db, rate_limits, audit
-from beaverhabits.app.schemas import UserUpdate
-from beaverhabits.app.users import UserManager, VersionedJWTStrategy
+from castor.app import db, rate_limits, audit
+from castor.app.schemas import UserUpdate
+from castor.app.users import UserManager, VersionedJWTStrategy
 
-from beaverhabits.app import security_actions as actions
+from castor.app import security_actions as actions
 
 PASSWORD = 'fixture original passphrase'
 NEW_PASSWORD = 'fixture replacement passphrase'
@@ -85,8 +85,8 @@ class SensitiveActionTests(unittest.IsolatedAsyncioTestCase):
     async def test_registered_users_route_rejects_session_only_sensitive_fields(self):
         import httpx
         from fastapi import FastAPI
-        from beaverhabits.app.schemas import UserRead
-        from beaverhabits.app.users import fastapi_users, get_user_manager, get_jwt_strategy
+        from castor.app.schemas import UserRead
+        from castor.app.users import fastapi_users, get_user_manager, get_jwt_strategy
 
         app = FastAPI()
         app.include_router(fastapi_users.get_users_router(UserRead, UserUpdate), prefix='/users')

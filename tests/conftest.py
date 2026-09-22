@@ -9,7 +9,7 @@ The per-user limit is unchanged; we only widen the per-IP bucket.
 """
 import pytest
 
-from beaverhabits.configs import settings
+from castor.configs import settings
 
 
 @pytest.fixture(autouse=True, scope="session")
