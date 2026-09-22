@@ -28,12 +28,12 @@ P0 multi-day grid       🟡 in flight
 P1 auth flows           ✅ shipped
 P1 settings             ✅ shipped (D14 backend gap deferred)
 P1 habit detail         🟡 in flight
-P1 import/export        🟡 in flight
+P1 import/export        ✅ shipped (backend POST /habits/import gap documented)
 P2 polish               not started
 P2 Private Circle       not started
 P3 decoupling           not started
 
-Last slice shipped: P1 settings (commit pending). Next: P1 habit detail or P1 import/export.
+Last slice shipped: P1 import/export (commit pending). Next: P1 habit detail (D5/D12).
 ```
 
 `pnpm exec astro check` reports 0 type errors. CI gate rejects on type errors.

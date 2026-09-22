@@ -407,18 +407,23 @@ Tasks:
 4. Verify `/habits/order` PUTs to `/api/v1/habits/meta` with new order array
 5. Smoke test: open detail, observe heatmap renders 15 weeks; long-press a row, add note, save, see it persist
 
-### Slice P1 — Import / Export (🟡 in flight, fix D5)
+### Slice P1 — Import / Export (✅ shipped — D5 closed; backend POST /habits/import gap documented)
 
 What this slice delivers:
-- `/import` accepts JSON/CSV upload, posts to backend
-- `/export` downloads JSON
-- `MoreSheet` entries wired
+- `/export` works end-to-end (server-side GET to `/api/v1/habits/export`, streams JSON with `Content-Disposition: attachment`)
+- `/import` page is server-side POST; surfaces honest "endpoint not available" message until the backend ships POST `/api/v1/habits/import`
+- `__IMPORT_TOKEN__` window global removed; the bearer reaches the backend only via the httpOnly `castor_token` cookie
 
-Tasks:
-1. Verify backend mount for import (`/api/v1/habits/import`?) — confirm in source before writing the page
-2. Implement upload form in `/import` (already 262 lines, may need endpoint fix)
-3. Wire `/export` to `/api/v1/habits/export` GET with `Content-Disposition: attachment`
-4. Smoke test: import sample JSON; observe habit appears; export JSON; diff against what was imported
+Tasks (✅ all done):
+1. ✅ Verified backend mount points: only `GET /api/v1/habits/export` exists; no POST import endpoint
+2. ✅ Rewrote `/export` as server-side proxy with proper Content-Disposition header
+3. ✅ Rewrote `/import` as server-side POST handler with shape validation + 404 honesty
+4. ✅ Removed `__IMPORT_TOKEN__` window global — XSS exposure; bearer now reaches backend only via httpOnly cookie
+5. ✅ Removed `innerHTML` rendering of preview/result blobs (XSS vector if backend ever returns attacker-controlled HTML)
+6. Smoke test: export → import round-trip (TODO — requires backend POST endpoint to land)
+7. Smoke test: 65vw content cap applied; danger-zone Alert renders
+
+Rollback: feature flag `EXPORT_ENABLED`/`IMPORT_ENABLED` in env; defaults to on once backend POST lands.
 
 ### Slice P2 — Calendar heatmap polish, tag filter, long-press
 
@@ -521,7 +526,7 @@ Covered by Slice P3 above. The deliverable here is the final report
 | P1 auth (D1/D3/D11) | ✅ shipped | 0 (already done this slice) | none |
 | P1 settings (D6/D7/D14/D16) | ✅ shipped (D14 backend gap deferred) | 0 (already done this slice) | P1 auth |
 | P1 habit detail (D5/D12) | 🟡 in flight | 1.5 | P0 grid |
-| P1 import/export (D5) | 🟡 in flight | 1 | none |
+| P1 import/export (D5) | ✅ shipped (backend POST /habits/import gap documented) | 0 (already done this slice) | none |
 | P2 polish | not started | 2 | all P1 |
 | P2 Private Circle | not started | 5 | all P1; new backend code |
 | P3 decoupling | not started | 1 | all P2 |

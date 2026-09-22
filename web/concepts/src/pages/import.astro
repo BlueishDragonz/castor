@@ -1,0 +1,183 @@
+---
+/**
+ * /import — restore habits from a previously-exported JSON snapshot.
+ *
+ * Two paths:
+ *   - Paste JSON in the textarea.
+ *   - Upload a .json file via the file input (read client-side, posted
+ *     as the same `json` field).
+ *
+ * The backend has no POST /api/v1/habits/import endpoint yet (see
+ * docs/plan/migration-plan.md P2 "polish"). The Astro side is wired
+ * and will round-trip the moment the endpoint ships. Until then, the
+ * page surfaces an honest "endpoint not available" message instead of
+ * a silent 404 from a client-side fetch — this matches the pattern
+ * used by SettingsClient for the missing /api/v1/user-configs.
+ *
+ * Security:
+ *   - The Authorization header is attached server-side via backendFetch
+ *     reading the castor_token cookie. The bearer never reaches JS,
+ *     so XSS can't steal it.
+ *   - Server-side JSON validation rejects malformed payloads with a
+ *     400 before forwarding. Schema validation lives on the backend.
+ *   - Import REPLACES all existing habits (matches upstream semantics
+ *     and is documented on the danger-zone alert).
+ */
+import Layout from '../layouts/Layout.astro';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Label } from '../components/ui/label';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
+import { Upload, AlertCircle } from 'lucide-react';
+import { backendFetch } from '../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+let errorDetail: string | null = null;
+let successDetail: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const pasted = (form.get('json') ?? '').toString().trim();
+
+  if (!pasted) {
+    errorDetail = 'Paste JSON in the textarea (or upload a file before submitting).';
+  } else {
+    // Lightweight shape validation: must be an array, or an object with
+    // a "habits" array. Backend will do the schema-level validation.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(pasted);
+    } catch (err) {
+      errorDetail = `JSON parse failed: ${(err as Error).message}`;
+    }
+
+    if (parsed !== undefined) {
+      const habits = Array.isArray(parsed)
+        ? parsed
+        : (typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { habits?: unknown[] }).habits))
+          ? (parsed as { habits: unknown[] }).habits
+          : null;
+
+      if (habits === null) {
+        errorDetail = 'Expected a JSON array of habits, or an object with a "habits" array.';
+      } else {
+        const res = await backendFetch(Astro.cookies, '/api/v1/habits/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ habits }),
+        });
+
+        if (res.ok) {
+          successDetail = `Imported ${habits.length} habit${habits.length === 1 ? '' : 's'}. Reload /habits to see them.`;
+        } else if (res.status === 404) {
+          // Honest about the gap until the backend ships the endpoint.
+          errorDetail =
+            'Import endpoint not available yet. The backend is ' +
+            'waiting for POST /api/v1/habits/import — see ' +
+            'docs/plan/migration-plan.md Phase 3 P2 polish.';
+        } else if (res.status === 401 || res.status === 403) {
+          errorDetail = 'Your session has expired. Sign in again and retry.';
+        } else {
+          try {
+            const data = (await res.json()) as { detail?: string } | null;
+            errorDetail = data?.detail ?? null;
+          } catch {
+            // body wasn't JSON
+          }
+          if (!errorDetail) errorDetail = `Import failed (HTTP ${res.status}).`;
+        }
+      }
+    }
+  }
+}
+---
+
+<Layout title="Import — Castor">
+  <main class="mx-auto max-w-[min(65vw,640px)] min-w-[640px] px-6 py-12 space-y-6 pb-24">
+    <header>
+      <h1 class="text-2xl font-semibold tracking-tight">Import</h1>
+      <p class="text-sm text-muted-foreground">
+        Restore habits from a JSON export. <strong>Replaces</strong> all
+        existing habits — there is no undo.
+      </p>
+    </header>
+
+    {errorDetail && (
+      <Alert variant="destructive">
+        <AlertTitle>Import failed</AlertTitle>
+        <AlertDescription>{errorDetail}</AlertDescription>
+      </Alert>
+    )}
+
+    {successDetail && (
+      <Alert>
+        <AlertDescription>{successDetail}</AlertDescription>
+      </Alert>
+    )}
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Paste JSON</CardTitle>
+        <CardDescription>
+          The output of /export, or any JSON file in the same shape.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form method="post" enctype="multipart/form-data" class="space-y-4">
+          <div class="space-y-2">
+            <Label htmlFor="import-file">Or upload a .json file</Label>
+            <input
+              type="file"
+              id="import-file"
+              name="file"
+              accept=".json,application/json"
+              class="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label htmlFor="import-json">JSON payload</Label>
+            <textarea
+              id="import-json"
+              name="json"
+              class="min-h-[240px] font-mono text-xs w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder='[{ "name": "Exercise", "records": [{ "day": "2024-01-15", "done": true }] }]'
+              spellcheck="false"
+            ></textarea>
+            <p class="text-xs text-muted-foreground">
+              If you upload a file, the textarea is ignored. Leave the
+              textarea empty and attach a file to import from disk.
+            </p>
+          </div>
+
+          <Button type="submit" variant="destructive" className="gap-2">
+            <Upload className="h-4 w-4" aria-hidden="true" />
+            Replace habits with this payload
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+
+    <Card className="border-destructive/50">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-destructive">
+          <AlertCircle className="h-5 w-5" aria-hidden="true" />
+          Danger zone
+        </CardTitle>
+        <CardDescription>
+          Import <strong>replaces</strong> all your existing habits.
+          Export first if you want a backup.
+        </CardDescription>
+      </CardHeader>
+    </Card>
+  </main>
+</Layout>

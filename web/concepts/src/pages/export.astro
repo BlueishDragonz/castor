@@ -1,0 +1,116 @@
+---
+/**
+ * /export — download a JSON snapshot of all the signed-in user's habits.
+ *
+ * The backend exposes GET /api/v1/habits/export which returns the
+ * full habit_list dict (habits + order + meta). The Astro page acts
+ * as a thin proxy:
+ *
+ *   1. Auth gate: redirect to /login if no session.
+ *   2. Server-side GET to the backend with the bearer attached via
+ *      backendFetch (the cookie carries the bearer; backendFetch
+ *      reads it and re-attaches as Authorization).
+ *   3. On 200: stream the body back with Content-Disposition set to
+ *      `attachment; filename=castor-export-YYYY-MM-DD.json` so the
+ *      browser saves it instead of trying to render it.
+ *   4. On error: render an Alert explaining the failure.
+ *
+ * Why server-side and not client-side fetch:
+ *   - The castor_token is httpOnly; client JS can't read it. A
+ *     client-side export would need a parallel JS-readable bearer
+ *     (regression).
+ *   - Content-Disposition is a server concern; setting it from JS
+ *     means building a Blob URL and forcing a download, which works
+ *     but adds two round-trips and a memory copy of the export.
+ */
+import Layout from '../layouts/Layout.astro';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '../components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
+import { Button } from '../components/ui/button';
+import { Download } from 'lucide-react';
+import { backendFetch } from '../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const today = new Date().toISOString().split('T')[0];
+const filename = `castor-export-${today}.json`;
+
+let errorDetail: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const res = await backendFetch(Astro.cookies, '/api/v1/habits/export', {
+    method: 'GET',
+  });
+
+  if (res.ok) {
+    const body = await res.text();
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  }
+
+  // Surface the backend's detail if it sent one, otherwise a generic
+  // message keyed off the status code.
+  if (res.status === 401 || res.status === 403) {
+    errorDetail = 'Your session has expired. Sign in again and retry.';
+  } else {
+    try {
+      const data = (await res.json()) as { detail?: string } | null;
+      errorDetail = data?.detail ?? null;
+    } catch {
+      // body wasn't JSON
+    }
+    if (!errorDetail) errorDetail = `Export failed (HTTP ${res.status}).`;
+  }
+}
+---
+
+<Layout title="Export — Castor">
+  <main class="mx-auto max-w-[min(65vw,640px)] min-w-[640px] px-6 py-12 space-y-6 pb-24">
+    <header>
+      <h1 class="text-2xl font-semibold tracking-tight">Export</h1>
+      <p class="text-sm text-muted-foreground">
+        Download all your habits and records as a JSON file.
+      </p>
+    </header>
+
+    {errorDetail && (
+      <Alert variant="destructive">
+        <AlertTitle>Export failed</AlertTitle>
+        <AlertDescription>{errorDetail}</AlertDescription>
+      </Alert>
+    )}
+
+    <Card>
+      <CardHeader>
+        <CardTitle>JSON export</CardTitle>
+        <CardDescription>
+          A single JSON file with every habit (name, period, records,
+          notes) and the order they appear on your home page. Use the
+          matching Import page to restore later.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form method="post">
+          <Button type="submit" className="gap-2">
+            <Download className="h-4 w-4" aria-hidden="true" />
+            Download castor-export-{today}.json
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  </main>
+</Layout>
