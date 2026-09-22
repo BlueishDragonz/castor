@@ -1,0 +1,90 @@
+---
+/**
+ * Public Terms of Service page.
+ *
+ * Migrated from NiceGUI @ui.page('/terms') (which read paddle_page.TERMS).
+ * In P3-B we deleted the NiceGUI mount; this Astro page replaces it.
+ *
+ * Content ownership: the user (castor maintainer) should review with a
+ * lawyer before shipping. The text below is the upstream beaverhabits
+ * text with product references rebranded to Castor; legal substance
+ * is unchanged.
+ */
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Terms of Service — Castor" description="Castor's terms of service.">
+  <article class="mx-auto max-w-3xl px-6 py-12 prose dark:prose-invert">
+    <header class="mb-10 not-prose">
+      <h1 class="text-3xl font-bold tracking-tight">Terms of Service</h1>
+      <p class="text-sm text-muted-foreground mt-2">Effective Date: 2026-09-22</p>
+    </header>
+
+    <h2>Acceptance of Terms</h2>
+    <p>
+      By accessing or using Castor, you agree to be bound by these Terms of Service.
+      If you do not agree with any part of these terms, please do not use our service.
+    </p>
+
+    <h2>Service Description</h2>
+    <p>
+      Castor is a self-hostable habit-tracking application that helps users track
+      habits without traditional goal-setting. When self-hosted, the operator of the
+      instance is the data controller for any data submitted to that instance.
+    </p>
+
+    <h2>User Responsibilities</h2>
+    <p>You agree to:</p>
+    <ul>
+      <li>Provide accurate and complete information when creating an account.</li>
+      <li>Maintain the security and confidentiality of your account credentials.</li>
+      <li>Notify the instance administrator immediately of any unauthorized use of your account.</li>
+    </ul>
+
+    <h2>Data and Privacy</h2>
+    <p>
+      Habit data, notes, and shared content belong to you. The instance administrator
+      (i.e. the person running this Castor server) has technical access to this data
+      to provide the service. See the <a href="/privacy">Privacy Policy</a> for details
+      on storage, retention, and deletion.
+    </p>
+
+    <h2>Refunds Policy</h2>
+    <p>
+      If a paid tier is offered by your instance administrator, any refund request
+      is handled by that administrator. Castor is open-source software and the
+      self-hosted version is provided free of charge.
+    </p>
+
+    <h2>Limitations of Liability</h2>
+    <p>
+      Castor is provided "as is", without warranty of any kind. In no event will
+      the authors or instance administrators be liable for any indirect, incidental,
+      or consequential damages arising from your use of the service.
+    </p>
+
+    <h2>Changes to Terms</h2>
+    <p>
+      The instance administrator may update these Terms of Service at any time.
+      Significant changes will be communicated to users via the primary email
+      address on file.
+    </p>
+
+    <h2>Governing Law</h2>
+    <p>
+      These Terms of Service shall be governed by and construed in accordance with
+      the laws of the jurisdiction where the instance administrator resides.
+    </p>
+
+    <h2>Contact Us</h2>
+    <p>
+      If you have any questions regarding these Terms of Service, please contact
+      your instance administrator. For open-source licensing questions, see the
+      project's GitHub repository.
+    </p>
+
+    <footer class="mt-16 not-prose">
+      <a href="/" class="text-sm text-muted-foreground hover:underline">← Back to home</a>
+    </footer>
+  </article>
+</Layout>

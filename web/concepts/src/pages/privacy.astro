@@ -1,0 +1,123 @@
+---
+/**
+ * Public Privacy Policy page.
+ *
+ * Migrated from NiceGUI @ui.page('/privacy') (which read paddle_page.PRIVACY).
+ * In P3-B we deleted the NiceGUI mount; this Astro page replaces it.
+ *
+ * Content ownership: the user (castor maintainer) should review with a
+ * lawyer before shipping. The text below is the upstream beaverhabits
+ * text with product references rebranded to Castor; legal substance
+ * is unchanged.
+ */
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Privacy Policy — Castor" description="How Castor handles your data.">
+  <article class="mx-auto max-w-3xl px-6 py-12 prose dark:prose-invert">
+    <header class="mb-10 not-prose">
+      <h1 class="text-3xl font-bold tracking-tight">Privacy Policy</h1>
+      <p class="text-sm text-muted-foreground mt-2">Effective Date: 2026-09-22</p>
+    </header>
+
+    <h2>Introduction</h2>
+    <p>
+      Castor is a self-hostable habit tracker. When you use Castor, your data lives
+      on the instance run by your administrator (most often: yourself). Your privacy
+      is important; this Privacy Policy outlines how data is collected, used, and
+      protected.
+    </p>
+
+    <h2>Information We Collect</h2>
+    <p>Castor stores the following information to provide the service:</p>
+    <ul>
+      <li>
+        <strong>Account information</strong>: email address, display name, hashed
+        password, and (optionally) WebAuthn / passkey public keys.
+      </li>
+      <li>
+        <strong>Habit data</strong>: habits you create, completion ticks, notes,
+        streak metadata, and tags.
+      </li>
+      <li>
+        <strong>Private Circles</strong>: if you create or join a circle, the
+        shared habits and members are visible to other members of that circle
+        according to the visibility you select.
+      </li>
+      <li>
+        <strong>Audit log</strong>: every login, password reset, and administrative
+        action is recorded with timestamp and IP for security review.
+      </li>
+    </ul>
+
+    <h2>How We Use Your Information</h2>
+    <p>Data is used only to provide the service:</p>
+    <ul>
+      <li>Authenticate you and protect your account.</li>
+      <li>Store and display your habits, streaks, and notes.</li>
+      <li>Share habits with Private Circle members at the visibility level you choose.</li>
+      <li>Detect abuse, support audit requirements, and notify you of security events.</li>
+    </ul>
+
+    <h2>Sharing Your Information</h2>
+    <p>
+      Castor does not sell, trade, or transfer personal information to third parties.
+      Data may be shared only:
+    </p>
+    <ul>
+      <li>With other members of a Private Circle, at the visibility you selected when sharing the habit.</li>
+      <li>With service providers used by your instance administrator (e.g. SMTP for password-reset emails). These providers receive only the data needed to perform the service.</li>
+      <li>When required by law.</li>
+    </ul>
+
+    <h2>Security of Your Information</h2>
+    <p>
+      Castor implements layered security:
+    </p>
+    <ul>
+      <li>Passwords are hashed with bcrypt.</li>
+      <li>Sessions use httpOnly, Secure, SameSite=Lax cookies with a 24-hour lifetime.</li>
+      <li>WebAuthn / passkey authentication uses challenge-based, origin-bound assertions.</li>
+      <li>Logout bumps a server-side token version, invalidating all outstanding bearer tokens.</li>
+      <li>POST endpoints enforce Origin and Referer header checks to mitigate CSRF.</li>
+      <li>HTTP responses include HSTS, CSP, X-Frame-Options, and other security headers.</li>
+    </ul>
+    <p>
+      No method of transmission over the internet or electronic storage is 100% secure;
+      we continuously improve defenses but cannot guarantee absolute security.
+    </p>
+
+    <h2>Data Retention and Deletion</h2>
+    <p>
+      You can request account deletion at any time from
+      <a href="/settings">Settings → Account → Delete account</a>. Deletion removes your
+      account, habits, notes, audit log entries, and circle memberships. Audit logs
+      may retain anonymized action records for security review.
+    </p>
+
+    <h2>Your Rights</h2>
+    <p>You have the right to:</p>
+    <ul>
+      <li>Access, rectify, or delete your personal information.</li>
+      <li>Export your data at any time from <a href="/export">Settings → Export</a>.</li>
+      <li>Withdraw consent and stop using the service.</li>
+    </ul>
+
+    <h2>Changes to This Privacy Policy</h2>
+    <p>
+      The instance administrator may update this Privacy Policy. Significant changes
+      will be communicated to users via email.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      Questions about this Privacy Policy should be directed to your instance
+      administrator. For open-source licensing questions, see the project's
+      GitHub repository.
+    </p>
+
+    <footer class="mt-16 not-prose">
+      <a href="/" class="text-sm text-muted-foreground hover:underline">← Back to home</a>
+    </footer>
+  </article>
+</Layout>
