@@ -24,6 +24,15 @@ const {
 
 // Theme defaults to "light" until /api/account/me reports otherwise.
 const theme = Astro.cookies.get('castor-theme')?.value ?? 'light';
+
+// Umami analytics — ported from beaverhabits/frontend/layout.py:48-51.
+// Conditional: when PUBLIC_UMAMI_ANALYTICS_ID is set, inject the
+// tracker script. PUBLIC_UMAMI_SCRIPT_URL overrides the default
+// cloud.umami.is host so self-hosters can point at their own.
+const umamiId = import.meta.env.PUBLIC_UMAMI_ANALYTICS_ID ?? '';
+const umamiScript = import.meta.env.PUBLIC_UMAMI_SCRIPT_URL
+  ?? 'https://cloud.umami.is/script.js';
+const umamiEnabled = !!umamiId;
 ---
 
 <!doctype html>
@@ -43,6 +52,15 @@ const theme = Astro.cookies.get('castor-theme')?.value ?? 'light';
     <link rel="manifest" href="/manifest.webmanifest" />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    {umamiEnabled && (
+      <script
+        defer
+        src={umamiScript}
+        data-website-id={umamiId}
+      ></script>
+    )}
+
     <title>{title}</title>
   </head>
   <body class="min-h-screen antialiased">
