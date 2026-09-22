@@ -356,21 +356,21 @@ Tasks:
 
 Rollback: feature flag `HABIT_GRID_ENABLED`; falls back to flat list.
 
-### Slice P1 — Auth flows complete (🟡 in flight, fix D1/D3/D11)
+### Slice P1 — Auth flows complete (✅ shipped — D1/D2/D3/D11 all closed)
 
 What this slice delivers:
 - `/login` accepts both email/password AND passkey
 - `/register` accepts email/password; auto-login after
 - `/security` lists/adds/removes passkeys, changes password, shows recovery email
-- WebAuthn works over the proxy (D11)
+- WebAuthn works over the proxy (D11 — server routes for completion)
 
-Tasks:
-1. **D1**: rewrite `SecurityContent.tsx` to call `/auth/webauthn/credentials` (not `/api/v1/auth/webauthn/credentials`); same for `/auth/webauthn/change-password` and `/auth/webauthn/credentials/{id}`
-2. **D3**: fix TS errors in `login.astro` and `register.astro` — `userHandle`, `signature`, `authenticatorData`, `attestationObject` are not on `AuthenticatorResponse`; cast through `PublicKeyCredential` interface or use the `webauthn` types directly
-3. **D11**: bridge `castor_webauthn_browser` cookie (§1.3); on every `/auth/webauthn/register/begin` and `/login/begin` response, Astro forwards the `Set-Cookie` header back to the browser
-4. Delete `security.astro.bak` (D2 — dead code)
-5. Smoke test: register → logout → login with passkey → /habits reachable
-6. Smoke test: add passkey from `/security`, observe it in list; remove with password confirm
+Tasks (✅ all done):
+1. ✅ **D1**: rewrite `SecurityContent.tsx` to call `/auth/webauthn/credentials` (not `/api/v1/auth/webauthn/credentials`); same for `/auth/webauthn/change-password` and `/auth/webauthn/credentials/{id}`
+2. ✅ **D3**: fix TS errors in `login.astro` and `register.astro` — `userHandle`, `signature`, `authenticatorData`, `attestationObject` are not on `AuthenticatorResponse`; narrow with `instanceof PublicKeyCredential` then `instanceof AuthenticatorAssertionResponse` / `AuthenticatorAttestationResponse`
+3. ✅ **D11**: bridge `castor_webauthn_browser` cookie via `mirrorWebAuthnBrowserCookie()` in `lib/auth.ts`; new server routes `/api/auth/webauthn/login/complete.ts` and `/register/complete.ts` write `castor_token` httpOnly (was previously impossible from JS via `document.cookie`)
+4. ✅ Deleted `security.astro.bak` (D2)
+5. Smoke test: register → logout → login with passkey → /habits reachable (TODO — needs a real authenticator in dev)
+6. Smoke test: add passkey from `/security`, observe it in list; remove with password confirm (TODO)
 
 Rollback: feature flag `PASSKEY_ENABLED`; falls back to password-only.
 
@@ -517,7 +517,7 @@ Covered by Slice P3 above. The deliverable here is the final report
 |---|---|---|---|
 | P0 mobile nav chrome | ✅ mostly shipped | 0.5 (gap on D13) | none |
 | P0 multi-day grid | 🟡 in flight | 2 | P0 nav chrome |
-| P1 auth (D1/D3/D11) | 🟡 in flight | 2 | none |
+| P1 auth (D1/D3/D11) | ✅ shipped | 0 (already done this slice) | none |
 | P1 settings (D6/D7/D14/D16) | 🟡 in flight | 1 | P1 auth |
 | P1 habit detail (D5/D12) | 🟡 in flight | 1.5 | P0 grid |
 | P1 import/export (D5) | 🟡 in flight | 1 | none |

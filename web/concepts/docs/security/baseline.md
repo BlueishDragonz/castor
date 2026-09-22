@@ -78,7 +78,8 @@ const isProd = () =>
 
 // castor_webauthn_browser: bridge for WebAuthn ceremonies
 // httpOnly, SameSite=Strict (no nav during ceremony), Secure when
-// behind HTTPS, Path=/, Max-Age=30d
+// behind HTTPS, Path=/, Max-Age=30d. Mirrored from the backend's
+// `beaver_webauthn` Set-Cookie on every backendFetch response.
 ```
 
 ### Dependency & supply chain

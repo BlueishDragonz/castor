@@ -1,14 +1,16 @@
 ---
 /**
  * /register — new account form.
- *
+ * 
  * Two-step server action: first POST /auth/register with the email +
  * password, then auto-login via /auth/login so the user lands on
  * /habits with a valid session.
- *
+ * 
  * Backend returns the new user record on register (HTTP 201). Email
  * validation is RFC 5322 strict — `.local` and other reserved TLDs
  * are rejected.
+ * 
+ * WebAuthn/Passkey support: shows passkey register button.
  */
 import Layout from '../layouts/Layout.astro';
 import { Button } from '../components/ui/button';
@@ -72,9 +74,7 @@ if (Astro.request.method === 'POST') {
     }
   }
 }
----
-
-<Layout title="Create account — Castor">
+---\n<Layout title="Create account — Castor">
   <main class="flex min-h-screen items-center justify-center px-4">
     <div class="w-full max-w-sm space-y-6">
       <div class="flex items-center gap-3">
@@ -122,10 +122,156 @@ if (Astro.request.method === 'POST') {
         <Button type="submit" className="w-full">Create account</Button>
       </form>
 
+      {/* WebAuthn / Passkey Registration */}
+      <div class="relative">
+        <div class="absolute inset-0 flex items-center">
+          <span class="w-full border-t" />
+        </div>
+        <div class="relative flex justify-center text-xs">
+          <span class="bg-background px-2 text-muted-foreground">Or continue with</span>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <button
+          type="button"
+          id="webauthn-register-btn"
+          class="flex w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2.5 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+        >
+          <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 1.89l5.46 2.43c2.36.99 4 3.76 4 6.78 0 4.42-3.58 8-8 8s-8-3.58-8-8c0-3.02 1.64-5.79 4-6.78L12 2.89zM12 6c-2.33 0-4.31 1.16-5.5 2.88 1.12 1.44 2.4 3.37 2.5 5.23h5.91c.09-1.86 1.38-3.79 2.5-5.23C16.31 7.16 14.33 6 12 6z"/>
+          </svg>
+          Register with Passkey
+        </button>
+      </div>
+
       <p class="text-center text-xs text-muted-foreground">
         Already have an account?{' '}
         <a href="/login" class="hover:underline">Sign in</a>
       </p>
     </div>
   </main>
+
+  <script>
+    // WebAuthn register button handler
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('webauthn-register-btn');
+      if (!btn) return;
+
+      const emailInput = document.getElementById('email') as HTMLInputElement;
+
+      btn.addEventListener('click', async () => {
+        const email = emailInput?.value?.trim();
+        if (!email) {
+          alert('Please enter your email first');
+          emailInput?.focus();
+          return;
+        }
+
+        try {
+          // Start WebAuthn registration
+          const response = await fetch('/auth/webauthn/register/begin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: email }),
+          });
+
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+            throw new Error(error.detail || 'Failed to start passkey registration');
+          }
+
+          const options = await response.json();
+          
+          // Convert challenge and user.id to ArrayBuffer
+          const publicKey = options.publicKey;
+          publicKey.challenge = base64urlToBuffer(publicKey.challenge);
+          publicKey.user.id = base64urlToBuffer(publicKey.user.id);
+          
+          if (publicKey.excludeCredentials) {
+            publicKey.excludeCredentials = publicKey.excludeCredentials.map((c: any) => ({
+              ...c,
+              id: base64urlToBuffer(c.id),
+            }));
+          }
+
+          const credential = await navigator.credentials.create({ publicKey });
+
+          if (!credential) {
+            throw new Error('No credential returned');
+          }
+
+          // navigator.credentials.create returns Credential | null; narrow to
+          // PublicKeyCredential first, then to its attestation response.
+          if (!(credential instanceof PublicKeyCredential)) {
+            throw new Error('Not a public-key credential');
+          }
+          if (!(credential.response instanceof AuthenticatorAttestationResponse)) {
+            throw new Error('Unexpected credential response type');
+          }
+          const pkCredential = credential;
+          const attestation = credential.response;
+
+          // Send credential to server via the Astro API route. The route
+          // forwards to the backend (which requires an existing session),
+          // mirrors beaver_webauthn Set-Cookie, and applies any rotated
+          // castor_token.
+          const regResponse = await fetch('/api/auth/webauthn/register/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: pkCredential.id,
+              rawId: bufferToBase64url(pkCredential.rawId),
+              response: {
+                clientDataJSON: bufferToBase64url(attestation.clientDataJSON),
+                attestationObject: bufferToBase64url(attestation.attestationObject),
+              },
+              type: pkCredential.type,
+              username: email,
+              name: email.split('@')[0],
+            }),
+          });
+
+          if (!regResponse.ok) {
+            const error = await regResponse.json().catch(() => ({ detail: 'Registration failed' }));
+            throw new Error(error.detail || 'Passkey registration failed');
+          }
+
+          // The API route's job is done; the session cookie was either
+          // already valid (password login set castor_token before this
+          // script ran) or rotated by the route. Either way, redirect
+          // to /habits.
+          window.location.href = '/habits';
+          
+        } catch (err) {
+          console.error('WebAuthn registration error:', err);
+          alert('Passkey registration failed: ' + (err as Error).message);
+        }
+      });
+    });
+
+    // Base64URL encoding/decoding helpers
+    function base64urlToBuffer(str: string): ArrayBuffer {
+      const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes.buffer;
+    }
+
+    function bufferToBase64url(buf: ArrayBuffer): string {
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+    }
+  </script>
 </Layout>

@@ -308,11 +308,11 @@ Each divergence must be resolved before the migration can claim
 | D4 | `habits/new.astro` uses `class=` on React `<input>` (3 sites) | P1 | TS errors |
 | D5 | `/import` page exists (262 lines) but no test against `/api/v1/habits/import` (or whatever endpoint exists) | P1 | Behaviour unknown |
 | D6 | `/settings` missing Help, Import/Export entries (now in More sheet — verify nav still works) | P1 | UX gap |
-| D7 | `auth.ts` cookie `secure=false` in dev; `secure=true` flip not yet done in any environment | P1 | Prod risk |
+| D7 | `auth.ts` cookie `secure=false` in dev; `secure=true` flip not yet done in any environment | ✅ Shipped — `isProd()` in `lib/auth.ts` reads `PUBLIC_BACKEND_URL` / `BACKEND_URL` / `TLS_TERMINATED` and flips `Secure` accordingly |
 | D8 | No PWA meta tags ported from `layout.py::pwa_headers` | P2 | UX gap |
 | D9 | Long-press event not ported from `intersection_observer.js`/`long-press-event.min.js` | P2 | UX gap |
 | D10 | No Umami analytics port (`UMAMI_ANALYTICS_ID`) | P3 | Observability |
-| D11 | No `beaver_webauthn` cookie bridge — passkey begin/complete will fail origin check across the proxy | P1 | Critical (page broken) |
+| D11 | Bridge `beaver_webauthn` → `castor_webauthn_browser` so WebAuthn ceremonies round-trip via Astro API routes; server-side `castor_token` httpOnly write (impossible from JS) | ✅ Shipped — `/api/auth/webauthn/login/complete.ts` and `/register/complete.ts`, `mirrorWebAuthnBrowserCookie()` in `lib/auth.ts` |
 | D12 | No "Best streaks" UI on `/habits/[id]` (computed but not rendered) | P2 | Parity gap |
 | D13 | No `tag_filter_component` chip UI in Astro grid (HabitGrid has props for it; chips not rendered) | P2 | Parity gap |
 | D14 | `clearSession` doesn't invalidate JWT server-side (token_version gate is server-side anyway, so this is fine — but logout should still bump version for symmetry) | P2 | Hygiene |
