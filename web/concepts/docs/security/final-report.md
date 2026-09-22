@@ -322,23 +322,30 @@ All four items were addressed in the post-report cleanup slice:
 
 ## 8. Conclusion
 
-Castor is now independent of beaverhabits. The Astro + shadcn/ui
-front-end replaces every NiceGUI page; the backend retains proven
-domain logic while losing 5,500+ lines of UI code that no longer
-serves the product. Security posture is preserved and improved (the
-migration fixed five distinct XSS exposures, added token-version
-logout, and verified httpOnly cookie handling). Private Circles
-provide the first feature unique to Castor.
+Castor is now independent of beaverhabits in code structure (the
+Python package has been renamed from `beaverhabits/` to `castor/`,
+the NiceGUI front-end has been deleted in favour of Astro +
+shadcn/ui, and the beaverhabits-brand strings have been
+rebranded). However, **end-to-end dogfooding uncovered regressions
+that the unit-test suite and astro check did not catch** — see
+`docs/security/dogfood-findings.md` for the full list.
 
-The Python package has been renamed from `beaverhabits/` to `castor/`
-in a follow-up commit (`29ccdb4`); the only externally visible
-reference that remains is the upstream GitHub URL in
-`castor/const.py`, kept as a fallback.
+The branch is **not yet ready to merge**. The four critical-path
+fixes required before re-declaring complete are:
 
-The branch is ready to merge. The CI workflow gates `astro check`,
-`astro build`, `pnpm audit`, and a public-route smoke test alongside
-the existing backend pytest run. All four items previously listed
-as open (D10 Umami, long-press notes-textarea, test_api_tokens fix,
-package rename) have been resolved; the only remaining pre-launch
-concern is a legal review of the Terms of Service and Privacy
-Policy drafts.
+1. Fix the `/auth/logout` token-version bump so that stolen JWTs
+   are actually invalidated (currently returns 204 without
+   persisting the bump; Bug #1 in the dogfood report).
+2. Fix the timezone bug in date comparisons (Bug #2): replace
+   `day.toISOString()` with a local-date formatter in HabitGrid
+   and Heatmap so ticks recorded in non-UTC timezones render
+   correctly.
+3. Fix the habit detail heatmap so cells are clickable (Bug #3):
+   route the cell form through `/habits/{id}/complete` (Astro BFF)
+   instead of POSTing directly to the backend with an embedded JWT.
+4. Investigate and fix the literal `\n` text node appearing at the
+   top of every page (Bug #4).
+
+Once those four are fixed and re-verified via a browser smoke test
+(Puppeteer or Playwright in CI), the migration will be ready to
+merge.
