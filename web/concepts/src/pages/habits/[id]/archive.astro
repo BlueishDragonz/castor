@@ -1,0 +1,40 @@
+---
+/**
+ * /habits/{id}/archive — set a habit's status to "archived".
+ *
+ * Server-side POST handler. The castor-main backend doesn't have a
+ * dedicated /archive endpoint; archive is just status='archived' on
+ * PUT /api/v1/habits/{id}. This route is the thin wrapper so the
+ * context sheet can hit a clean URL.
+ *
+ * On success: redirect to /habits (archived habits disappear from
+ * the active list).
+ *
+ * Security: backend requires current_active_user (JWT in cookie).
+ */
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect('/habits');
+}
+
+const res = await backendFetch(Astro.cookies, `/api/v1/habits/${id}`, {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ status: 'archived' }),
+});
+
+if (!res.ok) {
+  const errCode = res.status === 401 || res.status === 403 ? 'unauth'
+    : res.status === 404 ? 'not_found'
+    : 'archive_failed';
+  return Astro.redirect(`/habits/${id}?err=${errCode}`);
+}
+
+return Astro.redirect('/habits');
+---

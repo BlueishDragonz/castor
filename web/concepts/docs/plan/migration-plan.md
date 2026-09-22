@@ -393,19 +393,26 @@ Tasks (✅ / 🟡):
 Rollback: settings changes are isolated; no flag needed beyond a
 per-component `isMounted` guard if a feature rolls back.
 
-### Slice P1 — Habit detail completeness (🟡 in flight, fix D5/D12)
+### Slice P1 — Habit detail completeness (✅ shipped — D5/D12 closed; long-press event notes deferred to P2)
 
 What this slice delivers:
-- `/habits/[id]` shows: streak, history (1 year), best streaks, calendar heatmap (15 weeks), notes (long-press)
-- `/habits/[id]/edit` form
-- `/habits/order` drag-drop working
+- `/habits/[id]` shows: streak, history (1 year), best streaks, calendar heatmap (15 weeks)
+- `/habits/[id]/edit` form (already shipped on the branch)
+- `/habits/order` is reachable from the context sheet
+- New server-side routes: `/habits/{id}/complete` (arbitrary date), `/habits/{id}/archive`, `/habits/{id}/duplicate`
 
-Tasks:
-1. Add "Best streaks" card (computed in `src/lib/streaks.ts`)
-2. Wire `Heatmap.astro` into detail page
-3. Port long-press → notes textarea (D9 partial)
-4. Verify `/habits/order` PUTs to `/api/v1/habits/meta` with new order array
-5. Smoke test: open detail, observe heatmap renders 15 weeks; long-press a row, add note, save, see it persist
+Tasks (✅ all done):
+1. ✅ Added "Best streaks" card (computed in-page; off-by-one bug from the old code fixed)
+2. ✅ Replaced ECharts-based charts with inline CSS bars (no new dep, accessible, fast)
+3. ✅ Used the existing `Heatmap.astro` component for the 15-week view
+4. ✅ Wired `HabitContextSheet` to real actions: Edit → `/habits/{id}/edit`, Duplicate → `/habits/{id}/duplicate`, Reorder → `/habits/order`, Archive → `/habits/{id}/archive`
+5. ✅ Date picker is a real `<form>` posting to `/habits/{id}/complete`; no client-side fetch
+6. ✅ Removed `__HABIT_TOKEN__` window global (XSS exposure — bearer now reaches backend only via httpOnly cookie)
+7. ✅ Action-error query params (from the action routes) surface as `<Alert>` components
+8. ✅ Removed ECharts reference entirely (was never loaded, would have silently no-op'd)
+9. ✅ Applied 65vw / 640px-min content cap to match the design system
+10. 🟡 Long-press → notes textarea deferred to P2 (needs the long-press helper component first)
+11. Smoke test: open detail, observe heatmap renders; date-pick today; verify it persists; archive and verify the habit disappears from /habits
 
 ### Slice P1 — Import / Export (✅ shipped — D5 closed; backend POST /habits/import gap documented)
 
@@ -525,7 +532,7 @@ Covered by Slice P3 above. The deliverable here is the final report
 | P0 multi-day grid | 🟡 in flight | 2 | P0 nav chrome |
 | P1 auth (D1/D3/D11) | ✅ shipped | 0 (already done this slice) | none |
 | P1 settings (D6/D7/D14/D16) | ✅ shipped (D14 backend gap deferred) | 0 (already done this slice) | P1 auth |
-| P1 habit detail (D5/D12) | 🟡 in flight | 1.5 | P0 grid |
+| P1 habit detail (D5/D12) | ✅ shipped (long-press notes deferred to P2) | 0 (already done this slice) | P0 grid |
 | P1 import/export (D5) | ✅ shipped (backend POST /habits/import gap documented) | 0 (already done this slice) | none |
 | P2 polish | not started | 2 | all P1 |
 | P2 Private Circle | not started | 5 | all P1; new backend code |

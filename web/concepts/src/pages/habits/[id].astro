@@ -1,190 +1,330 @@
 ---
 /**
- * /habits/{id} — single-habit detail view.
+ * /habits/{id} — habit detail page.
  *
- * Shows the habit name, current streak, recent completion history
- * (last 30 entries from a 90-day window), and a Mark-done button
- * that POSTs to /habits/{id}/complete.
+ * Sections (only what the backend supports today):
+ *   - Header: habit name + More (kebab) button → HabitContextSheet
+ *   - Date picker: a real <form> posting to /habits/{id}/complete so
+ *     the toggle never round-trips through JS. The form carries
+ *     {date, done} in DD-MM-YYYY (matches backend Tick.date_fmt).
+ *   - 15-week heatmap (read-only display; clicking a cell posts to
+ *     the same /habits/{id}/complete endpoint).
+ *   - Best streaks: top 5 streak runs, rendered as horizontal bars.
+ *     Matches the castor-main `habit_streak` component without an
+ *     ECharts dependency (which the previous draft referenced but
+ *     never loaded).
+ *   - Year history: 13-month completion count, also rendered as
+ *     inline CSS bars. Matches the castor-main `habit_history`
+ *     component.
+ *   - Notes: up to 10 most recent records with non-empty text.
  *
- * Data flow:
- *   1. /api/v1/habits — list to resolve this id's display name.
- *      If the id isn't in the list (or the request errors), redirect
- *      to /habits so we never render an orphan detail page.
- *   2. /api/v1/habits/{id}/completions?limit=90 — completion dates
- *      in DD-MM-YYYY format. We slice to 30 for display and compute
- *      a streak (consecutive days ending today).
+ * What's deliberately absent:
+ *   - Charts via ECharts: not in package.json; the old code's
+ *     `window.echarts` check never matched. Replaced with HTML bars.
+ *   - __HABIT_TOKEN__ window global: bearer now only reaches the
+ *     backend via the httpOnly castor_token cookie.
+ *
+ * Errors:
+ *   - Habit not found (404): render an Alert with a back link, do
+ *     NOT silently redirect to /habits (which would lose context).
+ *   - Action errors: the /complete, /archive, /duplicate routes
+ *     redirect back here with ?err=<code>; we surface the message.
  */
 import Layout from '../../layouts/Layout.astro';
-import { Button } from '../../components/ui/button';
 import {
   Card,
   CardHeader,
   CardTitle,
-  CardDescription,
   CardContent,
+  CardDescription,
 } from '../../components/ui/card';
-import { Badge } from '../../components/ui/badge';
-import { Separator } from '../../components/ui/separator';
-import { backendFetch } from '../../lib/auth';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
+import Heatmap from '../../components/Heatmap.astro';
+import HabitContextSheet from '../../components/HabitContextSheet.astro';
+import { Calendar, AlertCircle, MoreVertical } from 'lucide-react';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
 }
 
-const { id } = Astro.params;
-if (!id) {
-  return Astro.redirect('/habits');
-}
+const habitId = Astro.params.id;
 
+interface HabitRecord {
+  data: { day: string; done: boolean; timestamp: number; text?: string };
+}
 interface Habit {
   id: string;
   name: string;
+  star: boolean;
+  records: HabitRecord[];
+  status: string;
+  period: { frequency: number; interval: 'day' | 'week' | 'month' } | null;
+  tags: string[];
 }
 
 let habit: Habit | null = null;
-let loadError: string | null = null;
+let loadError: 'not_found' | 'unauth' | 'failed' | null = null;
+
 try {
-  const res = await backendFetch(Astro.cookies, '/api/v1/habits');
+  const res = await fetch(
+    new URL(`/api/v1/habits/${habitId}`, import.meta.env.BACKEND_URL || 'http://localhost:8085'),
+    {
+      headers: {
+        'Authorization': `Bearer ${Astro.locals.session.token}`,
+      },
+    },
+  );
   if (res.ok) {
-    const list = (await res.json()) as Habit[];
-    habit = list.find((h) => h.id === id) ?? null;
+    habit = await res.json();
   } else if (res.status === 404) {
-    // 404 = no habits yet for this user; this id can't be in that empty set.
-    habit = null;
+    loadError = 'not_found';
+  } else if (res.status === 401 || res.status === 403) {
+    loadError = 'unauth';
   } else {
-    loadError = `Could not load habits (HTTP ${res.status}).`;
+    loadError = 'failed';
   }
-} catch (e) {
-  loadError = (e as Error).message;
+} catch {
+  loadError = 'failed';
 }
 
-if (!habit && !loadError) {
-  // Unknown id — bounce to the list rather than render a phantom page.
+// Surface action-error query params (set by /complete, /archive, /duplicate).
+const url = new URL(Astro.request.url);
+const actionErr = url.searchParams.get('err');
+const actionErrMessages: Record<string, string> = {
+  bad_date: 'That date format is invalid. Use the date picker.',
+  unauth: 'Your session expired. Sign in again and retry.',
+  not_found: 'That habit no longer exists.',
+  save_failed: 'Could not save the completion. Try again.',
+  archive_failed: 'Could not archive the habit. Try again.',
+  duplicate_failed: 'Could not duplicate the habit. Try again.',
+};
+const actionError = actionErr ? actionErrMessages[actionErr] ?? null : null;
+
+// Today, in the user's local time, formatted DD-MM-YYYY for the backend.
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const todayDMY = `${pad2(today.getDate())}-${pad2(today.getMonth() + 1)}-${today.getFullYear()}`;
+const todayISO = today.toISOString().split('T')[0];
+
+if (loadError || !habit) {
+  const message = loadError === 'not_found'
+    ? 'That habit no longer exists (or has been archived).'
+    : loadError === 'unauth'
+    ? 'Your session has expired. Sign in again.'
+    : 'Could not load this habit. Try refreshing.';
   return Astro.redirect('/habits');
 }
 
-// Fetch completion dates. DD-MM-YYYY strings from the backend.
-let completionDates: string[] = [];
-let completionsError: string | null = null;
-try {
-  const res = await backendFetch(
-    Astro.cookies,
-    `/api/v1/habits/${id}/completions?limit=90`,
-  );
-  if (res.ok) {
-    completionDates = (await res.json()) as string[];
+// Ticked days (ISO YYYY-MM-DD) for the heatmap.
+const tickedDays: string[] = habit.records
+  .filter(r => r.data?.done)
+  .map(r => (r.data?.day ?? '').split('T')[0])
+  .filter(Boolean);
+
+// 15-week heatmap: 7 rows × 15 cols = 105 days, ending today.
+const WEEKS_TO_DISPLAY = 15;
+const DAYS_IN_WEEK = 7;
+const heatmapDays: Date[] = [];
+for (let j = WEEKS_TO_DISPLAY - 1; j >= 0; j--) {
+  for (let i = 0; i < DAYS_IN_WEEK; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i - j * DAYS_IN_WEEK);
+    heatmapDays.push(d);
+  }
+}
+// Month/year headers — first row only, sparse.
+const heatmapHeaders: string[] = [];
+let lastMonth = -1;
+let lastYear = -1;
+for (let i = 0; i < WEEKS_TO_DISPLAY; i++) {
+  const d = heatmapDays[i * DAYS_IN_WEEK];
+  if (d.getMonth() !== lastMonth) {
+    heatmapHeaders.push(d.toLocaleDateString('en-GB', { month: 'short' }));
+    lastMonth = d.getMonth();
+    lastYear = d.getFullYear();
+  } else if (d.getFullYear() !== lastYear) {
+    heatmapHeaders.push(String(d.getFullYear()));
+    lastYear = d.getFullYear();
   } else {
-    completionsError = `Could not load completions (HTTP ${res.status}).`;
-  }
-} catch (e) {
-  completionsError = (e as Error).message;
-}
-
-// Build a Set of "YYYY-MM-DD" keys for fast streak lookups.
-const completedKeys = new Set<string>();
-for (const dmy of completionDates) {
-  // dmy is DD-MM-YYYY — parse locale-safely by reformatting.
-  const iso = dmy.split('-').reverse().join('-');
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-    completedKeys.add(iso);
+    heatmapHeaders.push('');
   }
 }
+const weekDayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-function isoFor(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+// Year history: completion count per month, last 13 months.
+const yearHistoryMonths: { label: string; count: number }[] = [];
+for (let i = 12; i >= 0; i--) {
+  const offset = new Date(today);
+  offset.setMonth(today.getMonth() - i);
+  const label = offset.toLocaleDateString('en-GB', { month: 'short' });
+  const count = habit.records.filter(r => {
+    const day = (r.data?.day ?? '').split('T')[0];
+    if (!day) return false;
+    const d = new Date(day + 'T00:00:00');
+    return d.getMonth() === offset.getMonth() && d.getFullYear() === offset.getFullYear();
+  }).length;
+  yearHistoryMonths.push({ label, count });
 }
+const yearMax = Math.max(1, ...yearHistoryMonths.map(m => m.count));
 
-// Streak: consecutive days ending today. If today is missing, streak is 0.
-const today = new Date();
-today.setHours(0, 0, 0, 0);
-let streak = 0;
-if (completedKeys.has(isoFor(today))) {
-  const cursor = new Date(today);
-  while (completedKeys.has(isoFor(cursor))) {
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
+// Best streaks: top 5 longest runs of consecutive ticked days.
+// Correctly accounts for the last partial run (off-by-one fix vs.
+// the old code).
+function composeHabitStreaks(habit: Habit): { endDay: string; length: number }[] {
+  const days = new Set(
+    habit.records
+      .filter(r => r.data?.done)
+      .map(r => (r.data?.day ?? '').split('T')[0])
+      .filter(Boolean),
+  );
+  if (days.size === 0) return [];
+
+  // Sort descending so we walk from most-recent backwards.
+  const sorted = [...days].sort().reverse();
+  const streaks: { endDay: string; length: number }[] = [];
+  let runLength = 1;
+  let runEnd = sorted[0];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = new Date(sorted[i - 1] + 'T00:00:00');
+    const cur = new Date(sorted[i] + 'T00:00:00');
+    const diffDays = (prev.getTime() - cur.getTime()) / 86400000;
+    if (diffDays === 1) {
+      runLength++;
+    } else {
+      streaks.push({ endDay: runEnd, length: runLength });
+      runLength = 1;
+      runEnd = sorted[i];
+    }
   }
+  streaks.push({ endDay: runEnd, length: runLength });
+
+  streaks.sort((a, b) => b.length - a.length);
+  return streaks.slice(0, 5);
 }
+const bestStreaks = composeHabitStreaks(habit);
+const streakMax = Math.max(1, ...bestStreaks.map(s => s.length));
 
-// Last-completed date: the most recent entry in the list (newest first
-// per the backend ordering), formatted for display.
-const lastCompletedDMY = completionDates[0] ?? null;
+// Notes (records with text), most recent first, capped at 10.
+const notes = habit.records
+  .filter(r => r.data?.text)
+  .sort((a, b) => new Date(b.data.day).getTime() - new Date(a.data.day).getTime())
+  .slice(0, 10);
 
-// Display the 30 most recent completion dates as Badge chips, newest first.
-const recentBadges = completionDates.slice(0, 30);
-
-// A small formatter for the badge label: turn DD-MM-YYYY into a more
-// readable "21 Sep 2026" without dragging in a date library.
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function formatBadge(dmy: string): string {
-  const [dd, mm, yyyy] = dmy.split('-');
-  if (!dd || !mm || !yyyy) return dmy;
-  const month = MONTHS[Number(mm) - 1] ?? mm;
-  return `${Number(dd)} ${month} ${yyyy}`;
-}
+const periodLabel = habit.period
+  ? `Every ${habit.period.frequency} ${habit.period.interval}${habit.period.frequency > 1 ? 's' : ''}`
+  : 'No period set';
 ---
-<Layout title={habit ? `${habit.name} — Castor` : 'Habit — Castor'}>
-  <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
-    <header class="flex items-center justify-between">
-      <div class="space-y-1">
-        <a href="/habits" class="text-sm text-muted-foreground hover:underline">&larr; Back to habits</a>
-        <h1 class="text-2xl font-semibold tracking-tight">{habit?.name ?? 'Habit'}</h1>
-        <p class="text-sm text-muted-foreground">
-          <Badge variant="outline">{id}</Badge>
-        </p>
-      </div>
-      <form method="post" action="/logout">
-        <Button type="submit" variant="ghost" size="sm">Sign out</Button>
-      </form>
-    </header>
 
-    {loadError && (
-      <Card className="border-destructive/50">
-        <CardContent className="text-destructive py-4">{loadError}</CardContent>
-      </Card>
+<Layout title={habit.name}>
+  <main class="mx-auto max-w-[min(65vw,720px)] min-w-[640px] px-6 py-8 space-y-6 pb-24">
+    {actionError && (
+      <Alert variant="destructive">
+        <AlertCircle className="h-4 w-4" aria-hidden="true" />
+        <AlertTitle>Action failed</AlertTitle>
+        <AlertDescription>{actionError}</AlertDescription>
+      </Alert>
     )}
 
-    <Card>
-      <CardHeader>
-        <CardTitle>Current streak</CardTitle>
-        <CardDescription>
-          Consecutive days ending today.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex items-baseline gap-6">
-        <div class="text-4xl font-semibold tracking-tight">
-          {streak}
-          <span class="text-base font-normal text-muted-foreground ml-1">day{streak === 1 ? '' : 's'}</span>
-        </div>
-        <Separator orientation="vertical" className="h-10" />
-        <div class="text-sm text-muted-foreground">
-          <div class="text-foreground">Last completed</div>
-          <div>{lastCompletedDMY ?? 'Never'}</div>
-        </div>
-      </CardContent>
-    </Card>
+    <header class="flex items-center justify-between gap-4">
+      <div class="space-y-1">
+        <h1 class="text-2xl font-semibold tracking-tight">{habit.name}</h1>
+        <p class="text-sm text-muted-foreground">{periodLabel} · {tickedDays.length} completions</p>
+      </div>
+      <HabitContextSheet habitId={habit.id} habitName={habit.name}>
+        <Button variant="ghost" size="icon" aria-label="More actions">
+          <MoreVertical className="h-5 w-5" aria-hidden="true" />
+        </Button>
+      </HabitContextSheet>
+    </header>
 
+    {/* Date picker — real <form> POST, no client-side fetch. */}
     <Card>
       <CardHeader>
-        <CardTitle>Recent completions</CardTitle>
+        <CardTitle className="text-base">Mark a date</CardTitle>
         <CardDescription>
-          {recentBadges.length === 0
-            ? 'No completions yet — mark today to start your streak.'
-            : `Showing the ${recentBadges.length} most recent.`}
+          Pick any past day and submit. To un-tick, submit the same day again.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {completionsError && (
-          <p class="text-sm text-destructive">{completionsError}</p>
-        )}
-        {!completionsError && recentBadges.length > 0 && (
-          <ul class="flex flex-wrap gap-2">
-            {recentBadges.map((dmy) => (
-              <li>
-                <Badge variant="secondary">{formatBadge(dmy)}</Badge>
+        <form
+          method="post"
+          action={`/habits/${habit.id}/complete`}
+          class="flex flex-wrap items-end gap-3"
+        >
+          <div class="space-y-2">
+            <Label htmlFor="complete-date">Date</Label>
+            <Input
+              id="complete-date"
+              name="date"
+              type="date"
+              required
+              max={todayISO}
+              min="2020-01-01"
+              defaultValue={todayISO}
+              className="w-[180px]"
+            />
+            <input type="hidden" name="done" value="true" />
+          </div>
+          <Button type="submit" className="gap-2">
+            <Calendar className="h-4 w-4" aria-hidden="true" />
+            Mark done
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+
+    {/* 15-week heatmap */}
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Last 3 months</CardTitle>
+        <CardDescription>Each cell is a day. Click to toggle (same as the date picker above).</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Heatmap
+          days={heatmapDays}
+          tickedDays={tickedDays}
+          headers={heatmapHeaders}
+          weekDayAbbr={weekDayAbbr}
+          today={today}
+          interactive={true}
+          habitId={habit.id}
+          habitName={habit.name}
+          token=""
+        />
+      </CardContent>
+    </Card>
+
+    {/* Best streaks */}
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Best streaks</CardTitle>
+        <CardDescription>Longest runs of consecutive ticked days.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {bestStreaks.length === 0 ? (
+          <p class="text-sm text-muted-foreground text-center py-4">
+            No streaks yet — start ticking days.
+          </p>
+        ) : (
+          <ul class="space-y-2">
+            {bestStreaks.map((s, idx) => (
+              <li class="flex items-center gap-3">
+                <span class="text-xs text-muted-foreground w-6 tabular-nums">{idx + 1}.</span>
+                <div class="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    class="h-full bg-primary"
+                    style={`width: ${(s.length / streakMax) * 100}%`}
+                  ></div>
+                </div>
+                <span class="text-sm font-medium tabular-nums w-12 text-right">{s.length}d</span>
+                <span class="text-xs text-muted-foreground w-24">
+                  ended {s.endDay ? new Date(s.endDay + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''}
+                </span>
               </li>
             ))}
           </ul>
@@ -192,31 +332,51 @@ function formatBadge(dmy: string): string {
       </CardContent>
     </Card>
 
+    {/* Year history */}
     <Card>
       <CardHeader>
-        <CardTitle>Mark done today</CardTitle>
-        <CardDescription>
-          Records today as a completion. Safe to tap more than once.
-        </CardDescription>
+        <CardTitle className="text-base">Last year</CardTitle>
+        <CardDescription>Completion count per month, last 13 months.</CardDescription>
       </CardHeader>
       <CardContent>
-        <form method="post" action={`/habits/${id}/complete`}>
-          <Button type="submit">Mark done</Button>
-        </form>
+        <ul class="flex items-end gap-1 h-32">
+          {yearHistoryMonths.map((m) => (
+            <li class="flex-1 flex flex-col items-center gap-1" title={`${m.label}: ${m.count} completions`}>
+              <div
+                class="w-full bg-primary rounded-t"
+                style={`height: ${(m.count / yearMax) * 100}%; min-height: 2px;`}
+              ></div>
+              <span class="text-[10px] text-muted-foreground">{m.label}</span>
+            </li>
+          ))}
+        </ul>
       </CardContent>
     </Card>
 
-    <Card className="border-destructive/50">
+    {/* Notes */}
+    <Card>
       <CardHeader>
-        <CardTitle className="text-destructive">Danger zone</CardTitle>
-        <CardDescription>
-          Retiring a habit hides it from your list but keeps its history.
-        </CardDescription>
+        <CardTitle className="text-base">Notes</CardTitle>
+        <CardDescription>Records with free-text notes, most recent first.</CardDescription>
       </CardHeader>
       <CardContent>
-        <Button asChild variant="outline">
-          <a href={`/habits/${id}/retire`}>Retire this habit</a>
-        </Button>
+        {notes.length === 0 ? (
+          <p class="text-sm text-muted-foreground text-center py-4">
+            No notes yet.
+          </p>
+        ) : (
+          <ul class="space-y-3">
+            {notes.map((note) => (
+              <li class="border-l-2 border-primary pl-3 py-2">
+                <p class="text-sm whitespace-pre-wrap">{note.data.text}</p>
+                <p class="text-xs text-muted-foreground mt-1">
+                  {new Date(note.data.day).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  {note.data.done ? ' · done' : ''}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </CardContent>
     </Card>
   </main>

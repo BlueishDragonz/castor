@@ -1,12 +1,20 @@
 ---
 /**
- * /habits/{id}/complete — mark a habit done for today.
+ * /habits/{id}/complete — toggle a habit done for a given date.
  *
- * Server-side POST handler: proxies to /api/v1/habits/{id}/completions
- * with today's date in ISO format, then redirects back to /habits.
+ * Server-side POST handler. Accepts a `date` form field in DD-MM-YYYY
+ * format (matches the backend Tick.date_fmt default). On success,
+ * redirects back to the habit detail page so the user sees their tick
+ * reflected without a full page-load flash.
  *
- * The completion endpoint's request body is documented as a `date`
- * string. We pass today's local date.
+ * The original /habits/{id}/complete.astro only handled "today". This
+ * rewrite makes it work for any date so the heatmap's interactive
+ * cells can post arbitrary past dates.
+ *
+ * Toggling semantics: the backend's POST /habits/{id}/completions
+ * is idempotent per (habit, date) — posting {done: true} twice is
+ * the same as posting once. To un-tick, the user hits the cell again
+ * with {done: false}.
  */
 import { backendFetch } from '../../../lib/auth';
 
@@ -19,25 +27,34 @@ if (!id) {
   return Astro.redirect('/habits');
 }
 
-// The backend's Tick schema defaults `date_fmt` to `%d-%m-%Y` (DD-MM-YYYY).
-// We must send the date in that format, not ISO YYYY-MM-DD.
-const today = new Date();
-const dd = String(today.getDate()).padStart(2, '0');
-const mm = String(today.getMonth() + 1).padStart(2, '0');
-const yyyy = today.getFullYear();
-const todayDMY = `${dd}-${mm}-${yyyy}`;
+let redirectTo = `/habits/${id}`;
 
-const res = await backendFetch(Astro.cookies, `/api/v1/habits/${id}/completions`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ date: todayDMY, done: true }),
-});
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const dateDMY = (form.get('date') ?? '').toString().trim();
+  const doneRaw = (form.get('done') ?? 'true').toString();
+  const done = doneRaw !== 'false' && doneRaw !== '0';
 
-if (!res.ok) {
-  // Surface backend error to the user via a redirect-with-query approach.
-  // For v1: just bounce back; a future toast component will replace this.
-  console.error(`mark complete failed: ${res.status}`);
+  // Validate the date format before forwarding; the backend will 400
+  // on malformed input but catching it here avoids the round-trip.
+  if (!/^\d{2}-\d{2}-\d{4}$/.test(dateDMY)) {
+    return Astro.redirect(`/habits/${id}?err=bad_date`);
+  }
+
+  const res = await backendFetch(Astro.cookies, `/api/v1/habits/${id}/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date: dateDMY, done }),
+  });
+
+  if (!res.ok) {
+    // Surface as a query param the page can render as an Alert.
+    const errCode = res.status === 401 || res.status === 403 ? 'unauth'
+      : res.status === 404 ? 'not_found'
+      : 'save_failed';
+    return Astro.redirect(`/habits/${id}?err=${errCode}`);
+  }
 }
 
-return Astro.redirect('/habits');
+return Astro.redirect(redirectTo);
 ---

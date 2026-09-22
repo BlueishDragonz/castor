@@ -1,0 +1,31 @@
+---
+/**
+ * HabitContextSheet — bottom sheet (mobile) or side drawer (desktop) for habit actions.
+ * Replaces dropdown menu for better mobile UX.
+ * Actions: Edit, Duplicate, Reorder, Archive.
+ *
+ * Astro wrapper around the React HabitContextSheet component. The
+ * caller provides:
+ *   - habitId + habitName for the sheet header and action URLs
+ *   - a trigger element via the default slot
+ *
+ * The four actions hit server-side POST routes (or navigations),
+ * not client-side fetch. That keeps the bearer out of JS and
+ * eliminates the XSS exposure the old draft had.
+ */
+import { HabitContextSheet } from './HabitContextSheet.tsx';
+
+interface Props {
+  habitId: string;
+  habitName: string;
+}
+const { habitId, habitName } = Astro.props;
+---
+
+<HabitContextSheet
+  client:load
+  habitId={habitId}
+  habitName={habitName}
+>
+  <slot />
+</HabitContextSheet>

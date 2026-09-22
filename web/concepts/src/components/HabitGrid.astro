@@ -1,0 +1,479 @@
+---
+/**
+ * HabitGrid — compact card rows matching main branch NiceGUI design.
+ * 
+ * Each habit = card row with:
+ *   - Habit name (link to detail page) with drawsheet (Edit, Duplicate, Reorder, Archive)
+ *   - 7 date columns with checkboxes
+ *   - Optional streak badge (settings.INDEX_SHOW_HABIT_STREAK)
+ *   - Optional total badge (settings.INDEX_SHOW_HABIT_COUNT)
+ * Sticky date headers (weekday + day number)
+ * Tag filter: pull-down chips at top-right, hidden by default, shown on scroll up
+ * Mobile: horizontal scroll for date columns, habit name sticky left
+ */
+import HabitCheckBox from './HabitCheckBox.astro';
+import { HabitContextSheet } from './HabitContextSheet.tsx';
+import { Badge } from './ui/badge';
+import { cn } from '@/lib/utils';
+
+interface Habit {
+  id: string;
+  name: string;
+  tags: string[];
+  tickedDays: string[]; // ISO dates like '2025-01-15'
+  period?: { frequency: number; interval: 'day' | 'week' | 'month' } | null;
+  status: string;
+}
+
+interface Props {
+  habits: Habit[];
+  days: Date[];
+  token: string;
+  showStreak?: boolean;   // Default: false (matches main branch setting)
+  showTotal?: boolean;    // Default: false (matches main branch setting)
+  showEveryDayStreaks?: boolean; // Default: false
+  nameColumns?: number;   // Default: 5
+  dateColumns?: number;   // Default: 7
+  dateReverse?: boolean;  // Default: false
+  enableTagFilter?: boolean;
+  tagSelectionMode?: 'single' | 'multi'; // Default: 'multi'
+  firstDayOfWeek?: number; // Default: 0 (Monday)
+  alignToday?: number | null; // Default: null (no alignment)
+  selectedTags?: string[];
+}
+
+const {
+  habits,
+  days,
+  token,
+  showStreak = false,
+  showTotal = false,
+  showEveryDayStreaks = false,
+  nameColumns = 5,
+  dateColumns = 7,
+  dateReverse = false,
+  enableTagFilter = true,
+  tagSelectionMode = 'multi',
+  firstDayOfWeek = 0,
+  alignToday = null,
+  selectedTags = [],
+} = Astro.props;
+
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+
+// Sort days: most recent first (today first)
+const sortedDays = [...days].sort((a, b) => b.getTime() - a.getTime());
+
+// Get all unique tags from habits
+const allTags = [...new Set(habits.flatMap(h => h.tags))].sort();
+
+// Filter habits by selected tags
+const filteredHabits = habits.filter(habit => {
+  if (selectedTags.length === 0) return true;
+  if (habit.tags.length === 0) {
+    return selectedTags.includes('__untagged__');
+  }
+  return habit.tags.some(tag => selectedTags.includes(tag));
+});
+
+// Calculate streak for a habit
+function calculateStreak(habit: Habit): number {
+  if (!habit.period) return 0;
+  
+  const tickedSet = new Set(habit.tickedDays);
+  let streak = 0;
+  
+  // Check consecutive days from most recent backwards
+  for (const day of sortedDays) {
+    const iso = day.toISOString().split('T')[0];
+    if (tickedSet.has(iso)) {
+      streak++;
+    } else if (day.getTime() <= today.getTime()) {
+      // Only break streak for past/present days, not future
+      break;
+    }
+  }
+  
+  return streak;
+}
+
+// Calculate total completions in the visible window
+function calculateTotal(habit: Habit): number {
+  const tickedSet = new Set(habit.tickedDays);
+  return sortedDays.filter(day => {
+    const iso = day.toISOString().split('T')[0];
+    return tickedSet.has(iso);
+  }).length;
+}
+
+// Format date for display
+function isToday(date: Date): boolean {
+  return date.getTime() === today.getTime();
+}
+
+function isPast(date: Date): boolean {
+  return date.getTime() <= today.getTime();
+}
+
+// Build URL with updated tag filter
+function buildTagUrl(tag: string | null, action: 'add' | 'remove' | 'clear'): string {
+  const params = new URLSearchParams(Astro.url.search);
+  const current = params.getAll('tag');
+  
+  if (action === 'clear') {
+    params.delete('tag');
+  } else if (action === 'add' && tag) {
+    if (!current.includes(tag)) {
+      params.append('tag', tag);
+    }
+  } else if (action === 'remove' && tag) {
+    const idx = current.indexOf(tag);
+    if (idx >= 0) {
+      current.splice(idx, 1);
+      params.set('tag', current.join(','));
+    }
+  }
+  
+  return `${Astro.url.pathname}?${params.toString()}`;
+}
+
+function isTagSelected(tag: string): boolean {
+  return selectedTags.includes(tag);
+}
+
+// Weekday abbreviations based on firstDayOfWeek
+const baseWeekDayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const weekDayAbbr = baseWeekDayAbbr.map((_, i) => 
+  baseWeekDayAbbr[(i + firstDayOfWeek) % 7]
+);
+
+---\n
+<!-- Pull-down Tag Filter (hidden by default, shown on scroll up) -->
+{enableTagFilter && allTags.length > 0 && (
+  <div    id="tag-filter"
+    class="fixed top-16 right-4 z-40 hidden transition-opacity duration-200"
+    role="group" 
+    aria-label="Filter habits by tag"
+    data-tag-filter
+  >
+    <div class="flex flex-wrap gap-1.5 justify-end w-[20rem] bg-background border border-border rounded-lg p-3 shadow-lg">
+      <a
+        href={buildTagUrl(null, 'clear')}
+        class={cn(
+          'px-2.5 py-1 text-xs font-medium rounded transition-colors shrink-0',
+          selectedTags.length === 0
+            ? 'bg-primary text-primary-foreground'
+            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+        )}
+        aria-pressed={selectedTags.length === 0}
+      >
+        All
+      </a>
+      {allTags.map(tag => (
+        <a
+          href={buildTagUrl(tag, isTagSelected(tag) ? 'remove' : 'add')}
+          class={cn(
+            'px-2.5 py-1 text-xs font-medium rounded transition-colors shrink-0',
+            isTagSelected(tag)
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+          )}
+          aria-pressed={isTagSelected(tag)}
+        >
+          #{tag}
+        </a>
+      ))}
+      {habits.some(h => h.tags.length === 0) && (
+        <a
+          href={buildTagUrl('__untagged__', isTagSelected('__untagged__') ? 'remove' : 'add')}
+          class={cn(
+            'px-2.5 py-1 text-xs font-medium rounded transition-colors shrink-0',
+            isTagSelected('__untagged__')
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+          )}
+          aria-pressed={isTagSelected('__untagged__')}
+        >
+          Untagged
+        </a>
+      )}
+    </div>
+  </div>
+)}
+
+<!-- Sticky Date Headers (matching main branch design) -->
+<div class="grid gap-1 sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border" 
+     style={`grid-template-columns: 120px repeat(${sortedDays.length}, 44px) ${showStreak ? '44px' : '0'} ${showTotal ? '44px' : '0'}`} 
+     aria-hidden="true">
+  {/* Habit name column header */}
+  <div class="sticky left-0 z-10 px-2 text-xs font-medium text-muted-foreground" style="grid-column: 1">
+    Habit
+  </div>
+  
+  {/* Weekday headers */}
+  {weekDayAbbr.map((weekday, i) => (
+    <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" 
+         style={{ minWidth: '44px' }}>
+      {weekday}
+    </div>
+  ))}
+  
+  {/* Day number headers */}
+  {sortedDays.map(day => (
+    <div class="text-center text-[10px] font-medium text-muted-foreground" 
+         style={{ minWidth: '44px' }}>
+      {day.getDate()}
+    </div>
+  ))}
+  
+  {/* Streak header */}
+  {showStreak && (
+    <div class="sticky right-0 z-10 text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '44px' }}>
+      Stk
+    </div>
+  )}
+  
+  {/* Total header */}
+  {showTotal && (
+    <div class="sticky right-0 z-10 text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '44px' }}>
+      Sum
+    </div>
+  )}
+</div>
+
+<!-- Habit Grid: compact card rows -->
+<div class="space-y-2" role="list" aria-label="Habits">
+  {filteredHabits.map(habit => {
+    const streak = calculateStreak(habit);
+    const total = calculateTotal(habit);
+    
+    return (
+      <>
+        <article class="border border-border rounded-lg bg-card p-3" role="listitem">
+          <div class="grid gap-1" style={`grid-template-columns: 120px repeat(${sortedDays.length}, 44px) ${showStreak ? '44px' : '0'} ${showTotal ? '44px' : '0'}`}>
+            {/* Habit name column - link with drawsheet */}
+                        <div class="sticky left-0 z-10 flex items-center gap-2 min-w-0 bg-card/95 backdrop-blur-sm border-r border-border pr-2" style="grid-column: 1">
+                          <a 
+                            href={`/habits/${habit.id}`}
+                            class="font-medium truncate block hover:underline text-foreground"
+                            role="heading" 
+                            aria-level="3"
+                            data-long-press-delay="150"
+                            data-habit-id={habit.id}
+                          >
+                            {habit.name}
+                          </a>
+                          {habit.tags.length > 0 && (
+                                                                    <span class="flex flex-wrap gap-1 shrink-0" aria-label={`Tags: ${habit.tags.join(', ')}`}>
+                                                                      {habit.tags.map(tag => (
+                                                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 shrink-0">
+                                                                          #{tag}
+                                                                        </Badge>
+                                                                      ))}
+                                                                    </span>
+                                                                  )}
+                                                  </div>
+            
+            {/* Date columns */}
+            {sortedDays.map(day => {
+              const isoDate = day.toISOString().split('T')[0];
+              const done = habit.tickedDays.includes(isoDate);
+              const dayIsToday = isToday(day);
+              const dayIsPast = isPast(day);
+              
+              return (
+                <div class="relative flex items-center justify-center border-r border-border border-b border-border/50 bg-background/50" 
+                     role="gridcell" 
+                     aria-label={`${dayIsToday ? 'Today' : day.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}: ${done ? 'Done' : 'Not done'}`}
+                     style={{ minWidth: '44px' }}>
+                  <HabitCheckBox
+                    habitId={habit.id}
+                    habitName={habit.name}
+                    date={day}
+                    done={done}
+                    isToday={dayIsToday}
+                    isPast={dayIsPast}
+                    token={token}
+                  />
+                </div>
+              );
+            })}
+            
+            {/* Streak badge */}
+            {showStreak && (
+              <div class="sticky right-0 z-10 flex items-center justify-center border-r border-border border-b border-border/50 bg-card/95 backdrop-blur-sm" style={{ width: '44px' }}>
+                {habit.period ? (
+                  <Badge variant="outline" className="w-full px-1.5 py-0.5 text-xs" aria-label={`Current streak: ${streak} days`}>
+                    {streak > 0 ? streak : '—'}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="w-full px-1.5 py-0.5 text-xs text-muted-foreground" aria-label="No period set">
+                    —
+                  </Badge>
+                )}
+              </div>
+            )}
+            
+            {/* Total badge */}
+            {showTotal && (
+              <div class="sticky right-0 z-10 flex items-center justify-center border-b border-border/50 bg-card/95 backdrop-blur-sm" style={{ width: '44px' }}>
+                <Badge variant="outline" className="w-full px-1.5 py-0.5 text-xs" aria-label={`Total completions in view: ${total}`}>
+                  {total}
+                </Badge>
+              </div>
+            )}
+          </div>
+        </article>
+       
+                {/* Context Sheet for this habit — uncontrolled sheet with
+                    its own trigger; long-press on the habit name triggers
+                    it (see the script below). */}
+                <HabitContextSheet
+                  client:load
+                  habitName={habit.name}
+                  habitId={habit.id}
+                >
+                  <button
+                    type="button"
+                    id={`sheet-${habit.id}-trigger`}
+                    aria-label={`Actions for ${habit.name}`}
+                    class="sr-only"
+                  >actions</button>
+                </HabitContextSheet>
+              </>
+    );
+  })}
+</div>
+
+{filteredHabits.length === 0 && habits.length > 0 && (
+  <div class="text-center py-12 text-muted-foreground">
+    <p>No habits match the current filter.</p>
+    <a
+      href={buildTagUrl(null, 'clear')}
+      class="inline-block mt-2 text-sm text-primary underline hover:no-underline"
+    >
+      Clear filters
+    </a>
+  </div>
+)}
+
+<script>
+  // Tag filter scroll behavior - show on scroll up, hide on scroll down
+  (() => {
+    const filter = document.querySelector('[data-tag-filter]');
+    if (!filter) return;
+    
+    let lastScrollY = window.scrollY;
+    let ticking = false;
+    
+    function updateFilter() {
+      const scrollY = window.scrollY;
+      const scrollUp = scrollY < lastScrollY;
+      const atTop = scrollY === 0;
+      
+      if (!filter) return;
+      
+      if (scrollUp && atTop) {
+        filter.classList.remove('hidden');
+      } else if (!scrollUp || !atTop) {
+        filter.classList.add('hidden');
+      }
+      
+      lastScrollY = scrollY;
+      ticking = false;
+    }
+    
+    window.addEventListener('scroll', () => {
+      if (!ticking) {
+        window.requestAnimationFrame(updateFilter);
+        ticking = true;
+      }
+    }, { passive: true });
+  })();
+  
+  // Long press / right click to open context sheet
+  (() => {
+    let pressTimer: ReturnType<typeof setTimeout> | null = null;
+    const PRESS_DELAY = 150;
+    
+    document.querySelectorAll('a[data-long-press-delay]').forEach(link => {
+      const habitId = link.getAttribute('data-habit-id');
+      if (!habitId) return;
+      
+      const sheetTrigger = document.getElementById(`sheet-${habitId}-trigger`);
+      
+      const startPress = (e: MouseEvent | TouchEvent) => {
+        if ('button' in e && e.button === 2) {
+          // Right click - open immediately
+          e.preventDefault();
+          sheetTrigger?.click();
+          return;
+        }
+        
+        pressTimer = setTimeout(() => {
+          sheetTrigger?.click();
+        }, PRESS_DELAY);
+      };
+      
+      const endPress = () => {
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      };
+      
+      link.addEventListener('mousedown', startPress as EventListener);
+      link.addEventListener('mouseup', endPress);
+      link.addEventListener('mouseleave', endPress);
+      link.addEventListener('touchstart', startPress as EventListener, { passive: true });
+      link.addEventListener('touchend', endPress);
+      link.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        sheetTrigger?.click();
+      });
+    });
+  })();
+</script>
+
+<style is:global>
+  /* Mobile horizontal scroll with sticky habit name */
+  @media (max-width: 768px) {
+    article > div {
+      -webkit-overflow-scrolling: touch;
+      overflow-x: auto;
+    }
+    
+    article > div > div:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 10;
+    }
+    
+    /* Reduce padding on mobile */
+    article {
+      padding: 0.75rem;
+    }
+  }
+  
+  /* Today column highlight */
+  [aria-label*="Today"] {
+    background-color: hsl(var(--primary) / 0.05);
+  }
+  
+  /* Ensure habit cards have proper contrast */
+  article {
+    background: hsl(var(--card));
+    border-color: hsl(var(--border));
+  }
+  
+  article > div > div:first-child {
+    background: hsl(var(--card) / 0.95);
+  }
+  
+  /* Sheet content styling */
+  [data-radix-dialog-content] {
+    background: hsl(var(--background));
+    border-color: hsl(var(--border));
+  }
+</style>

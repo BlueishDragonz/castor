@@ -1,0 +1,78 @@
+---
+/**
+ * /habits/{id}/duplicate — create a copy of the habit under a new id.
+ *
+ * Server-side POST handler. Reads the source habit via GET, then
+ * creates a new one via POST with the same name (suffixed "(copy)"),
+ * tags, and period. Records (history) are NOT duplicated — that's a
+ * product call; duplicating a habit should mean "I want to track
+ * this fresh without the historical baggage".
+ *
+ * On success: redirect to the new habit's detail page.
+ */
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect('/habits');
+}
+
+// 1. Fetch the source habit.
+const getRes = await backendFetch(Astro.cookies, `/api/v1/habits/${id}`, {
+  method: 'GET',
+});
+if (!getRes.ok) {
+  return Astro.redirect(`/habits/${id}?err=not_found`);
+}
+const source = (await getRes.json()) as {
+  name: string;
+  tags?: string[];
+  period?: { frequency: number; interval: string } | null;
+};
+
+// 2. Create the copy. The backend's CreateHabit only accepts {name};
+// tags and period need to be set on the resulting habit via PUT.
+// For v1 we copy name + suffix and let the user edit further on the
+// new habit's /edit page. A future iteration can chain the PUT.
+const createRes = await backendFetch(Astro.cookies, '/api/v1/habits', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: `${source.name} (copy)` }),
+});
+if (!createRes.ok) {
+  return Astro.redirect(`/habits/${id}?err=duplicate_failed`);
+}
+const created = (await createRes.json()) as { id: string };
+
+// 3. Copy tags + period via PUT if present. Best-effort: a PUT failure
+// here just leaves the copy with default period and no tags, which
+// the user can fix on the edit page.
+if ((source.tags && source.tags.length > 0) || source.period) {
+  await backendFetch(Astro.cookies, `/api/v1/habits/${created.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tags: source.tags ?? [],
+      ...(source.period
+        ? {
+            period: {
+              period_type:
+                source.period.interval === 'day' ? 'D'
+                : source.period.interval === 'week' ? 'W'
+                : source.period.interval === 'month' ? 'M'
+                : 'Y',
+              period_count: 1,
+              target_count: source.period.frequency ?? 1,
+            },
+          }
+        : {}),
+    }),
+  });
+}
+
+return Astro.redirect(`/habits/${created.id}`);
+---
