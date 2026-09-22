@@ -121,7 +121,7 @@ class Settings(BaseSettings):
 
     # WebAuthn / Passkeys
     WEBAUTHN_RP_ID: str = "localhost"
-    WEBAUTHN_RP_NAME: str = "Beaver Habits"
+    WEBAUTHN_RP_NAME: str = "Castor"
     WEBAUTHN_ORIGIN: str = "http://localhost:8080"
     WEBAUTHN_TIMEOUT: int = 60000  # 60 seconds
 

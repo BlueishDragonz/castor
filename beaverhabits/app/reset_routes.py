@@ -114,7 +114,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
             </svg>
         </div>
-        <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #111827;">Beaver Habits</h1>
+        <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #111827;">Castor</h1>
         <p style="margin: 8px 0 0; color: #6b7280;">dam good habits</p>
     </div>
     
@@ -133,14 +133,14 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
     <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;">
     
     <p style="margin: 0; font-size: 12px; color: #9ca3af; text-align: center;">
-        © 2025 Beaver Habits. All rights reserved.
+        © 2025 Castor. All rights reserved.
     </p>
 </body>
 </html>
 """
             await asyncio.to_thread(
                 send_email,
-                "Your Beaver Habits reset code",
+                "Your Castor reset code",
                 f"Your 12-digit reset code: {code}\nExpires in 10 minutes.",
                 [req.email],
                 html_body=code_html,

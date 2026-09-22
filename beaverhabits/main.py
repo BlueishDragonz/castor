@@ -15,7 +15,7 @@ from beaverhabits.routes.metrics import init_metrics_routes
 from beaverhabits.routes.routes import init_gui_routes
 from beaverhabits.scheduler import daily_backup_task
 
-logger.info("Starting BeaverHabits...")
+logger.info("Starting Castor...")
 
 
 @asynccontextmanager
