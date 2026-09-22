@@ -192,6 +192,11 @@ reviewable and rollback-able:
 | `6125161` | P3 terms/privacy | Astro static `/terms` + `/privacy` pages |
 | `739f42a` | P3 admin | Astro `/admin` + `/api/admin/backup` + backend `/api/v1/admin/{users,backup}` |
 | `acc62db` | P3 CI | GitHub Actions: astro check, build, audit, smoke |
+| `3641894` | P3 report | `web/concepts/docs/security/final-report.md` (initial draft) |
+| `59bf855` | Post-report: D10 Umami | Astro Layout conditional `<script>` for PUBLIC_UMAMI_ANALYTICS_ID |
+| `88eda51` | Post-report: test fix | test_api_tokens roundtrip + conftest widens IP auth rate limit |
+| `c2496da` | Post-report: long-press note | HabitContextSheet "Add note for today" textarea + complete.astro accepts text |
+| `29ccdb4` | Post-report: package rename | `beaverhabits/` → `castor/` (81 files; no logic/schema/API change) |
 
 Each commit is independently deployable; reverting any single commit
 does not break the others.
@@ -284,15 +289,23 @@ failure is unrelated to this migration and is left for a separate fix.)
 
 ---
 
-## 6. Open items
+## 6. Open items (subsequently closed)
 
-| Item | Severity | Owner | Notes |
-|---|---|---|---|
-| D10 — Umami analytics port | P3+ observability | TBD | needs self-hosted Umami instance |
-| Long-press notes-textarea on habit rows | small UX polish | P3+ | defer until P3 decoupling settled |
-| `test_api_tokens.py::test_create_api_token` failure | pre-existing | unblock in next sprint | unrelated to this migration |
-| `beaverhabits` package rename to `castor` | large cosmetic | next major bump | 1,000+ line diff; defer |
-| Privacy Policy / ToS legal review | before public launch | maintainer | text drafted by migration; needs lawyer |
+All four items were addressed in the post-report cleanup slice:
+
+| Item | Commit | Resolution |
+|---|---|---|
+| D10 — Umami analytics port | `59bf855` | Astro Layout now conditionally renders `<script defer src=… data-website-id=…>` when `PUBLIC_UMAMI_ANALYTICS_ID` is set. `PUBLIC_UMAMI_SCRIPT_URL` overrides the default `cloud.umami.is` host. |
+| Long-press notes-textarea on habit rows | `c2496da` | HabitContextSheet (the long-press drawer) now contains an "Add note for today" `<textarea>` + submit button. The form posts to `/habits/{id}/complete` with `date=today, done=true, text=<textarea>`. The Astro route forwards `text` to the backend's POST `/api/v1/habits/{id}/completions`, which already accepted it via the `Tick.text` field. |
+| `test_api_tokens.py::test_create_api_token` failure | `88eda51` | The test was asserting that `get_user_api_token` returns the raw token, but the function deliberately returns a masked display form because tokens are SHA-256 hashed before storage. Updated the test to verify the correct invariant: `get_user_by_api_token(raw_token)` resolves to the user, and `get_user_api_token` returns the masked form. Also widened `AUTH_RATE_IP_PER_MINUTE` to 10000 in `tests/conftest.py` (session-scoped autouse fixture) — `test_api_tokens.py` registers many users from the loopback IP and was tripping the 60/min default bucket, causing cross-test 429s. |
+| `beaverhabits` Python package rename to `castor` | `29ccdb4` | Directory renamed; pyproject.toml `name` updated; 81 files mechanically rewritten (imports + Docker entry points + container names + README + `castor/version.py` IDENTITY string). pytest: 178 passed, identical count to pre-rename. No logic, schema, or API changes. |
+
+### Items that remain by design
+
+- **Privacy Policy / ToS legal review** — text drafted by the migration
+  using upstream content, rebranded for Castor. Should be reviewed by
+  a lawyer before public launch. The maintainer controls
+  `web/concepts/src/pages/{terms,privacy}.astro`.
 
 ---
 
@@ -317,6 +330,15 @@ migration fixed five distinct XSS exposures, added token-version
 logout, and verified httpOnly cookie handling). Private Circles
 provide the first feature unique to Castor.
 
+The Python package has been renamed from `beaverhabits/` to `castor/`
+in a follow-up commit (`29ccdb4`); the only externally visible
+reference that remains is the upstream GitHub URL in
+`castor/const.py`, kept as a fallback.
+
 The branch is ready to merge. The CI workflow gates `astro check`,
 `astro build`, `pnpm audit`, and a public-route smoke test alongside
-the existing backend pytest run.
+the existing backend pytest run. All four items previously listed
+as open (D10 Umami, long-press notes-textarea, test_api_tokens fix,
+package rename) have been resolved; the only remaining pre-launch
+concern is a legal review of the Terms of Service and Privacy
+Policy drafts.
