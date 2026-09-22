@@ -10,6 +10,11 @@ from .webauthn_routes import logout_router, router as webauthn_router
 
 
 def init_auth_routes(app: FastAPI) -> None:
+    # Token-version-bumping logout. Mounted FIRST so it wins over the
+    # fastapi-users bearer-revoke /auth/logout below. (FastAPI route
+    # matching iterates in registration order; first match wins.)
+    app.include_router(logout_router)
+
     app.include_router(
         fastapi_users.get_auth_router(auth_backend), prefix="/auth", tags=["auth"]
     )
@@ -39,7 +44,3 @@ def init_auth_routes(app: FastAPI) -> None:
 
     # Private Circle routes (Phase 3 P2)
     app.include_router(circle_router, prefix="/api/v1", tags=["circles"])
-
-    # Token-version-bumping logout. Mounted AFTER the fastapi-users auth
-    # router so this /auth/logout shadows the bearer-revoke one.
-    app.include_router(logout_router)

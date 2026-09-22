@@ -25,7 +25,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from castor.app.auth import user_get_by_email, user_from_token
+from castor.app.auth import user_get_by_email, user_from_token, user_bump_token_version
+from castor.app.audit import record
 from castor.app.users import get_user_manager, UserManager
 from castor.app.dependencies import current_active_user
 from castor.configs import settings
@@ -580,9 +581,11 @@ async def auth_logout(user: User = Depends(current_active_user)) -> Response:
     endpoint additionally bumps token_version so even a stolen JWT copied
     before logout is rejected at the next request (VersionedJWTStrategy
     compares the JWT's 'ver' claim against the user's current version).
-    """
-    from .auth import user_bump_token_version
 
+    Mounted in app.py BEFORE fastapi_users.get_auth_router so it wins
+    the route-match for POST /auth/logout (FastAPI iterates routes in
+    registration order; first match wins).
+    """
     await user_bump_token_version(user)
     await record("logout", user_id=user.id)
     return Response(status_code=204)

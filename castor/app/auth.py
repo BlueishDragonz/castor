@@ -253,6 +253,15 @@ async def user_bump_token_version(user: User) -> User:
     until lifetime expires unless we bump). VersionedJWTStrategy.read_token
     already enforces version match, so a single UPDATE here retires every
     outstanding token for this account.
+
+    Note: do NOT call session.refresh(user) here. `user` is bound to the
+    dependency-injection session (current_active_user), not to this
+    function's session. A refresh would raise InvalidRequestError and
+    roll back the UPDATE — the very bug dogfood caught on 2026-09-23
+    (see docs/security/dogfood-findings.md bug #1). Callers should
+    treat the returned `user` as the pre-bump snapshot; the next
+    request will re-read from the DB via VersionedJWTStrategy.read_token
+    and pick up the new version.
     """
     from sqlalchemy import update
     async with get_async_session_context() as session:
@@ -262,5 +271,4 @@ async def user_bump_token_version(user: User) -> User:
                 .where(User.id == str(user.id))
                 .values(token_version=User.token_version + 1)
             )
-            await session.refresh(user)
-        return user
+    return user
