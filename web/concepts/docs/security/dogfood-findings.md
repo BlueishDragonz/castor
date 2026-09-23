@@ -1,25 +1,29 @@
 # Dogfood Findings — Castor E2E Walkthrough
 
 **Date**: 2026-09-23
-**Walkthrough scope**: register → login → habits list → habit detail → settings (light/dark theme) → privacy page → logout
-**Environment**: local backend (castor.main:app on 127.0.0.1:8085) + Astro dev (web/concepts on 127.0.0.1:4321) + SQLite at `.user/habits.db`
-**Dogfood user**: `dogfood@castor.example.com` (registered fresh; pre-existing `fixture@example.com` left alone)
-**Tools used**: text snapshots, browser console JS evaluation, vision_analyze (screenshots cropped/zoomed)
+**Walkthrough scope**: register → login (progressive disclosure) → habits list (clean header dates) → habit detail → settings (light/dark theme) → privacy page → logout
+**Environment**: local backend (castor.main:app on 127.0.0.1:8086) + Astro dev (web/concepts on 127.0.0.1:4321) + SQLite at `.user/habits.db`
+**Dogfood user**: `qa1@castor.example.com`
+**Tools used**: text snapshots, browser console JS evaluation, vision / vision_analyze (screenshots cropped/zoomed)
 
 ---
 
-## TL;DR
+## TL;DR (updated)
 
-**The migration is not shippable in its current state.** Dogfooding surfaced 5 real defects that the existing 178-test backend suite and 0-error astro check did NOT catch. Some are user-visible regressions vs. the NiceGUI baseline; at least one is a security regression.
+The first round of dogfooding (logged below as the historical trace) surfaced 6 real defects. The most recent round (post-commit `d8a0e28`) added **one critical-path user-flow requirement** and re-surfaced the `\n` text-node issue from multiple new sources. As of commit `ae12515`, all known defects are fixed.
 
-| # | Severity | Type | Description |
-|---|---|---|---|
-| 1 | **CRITICAL** (security) | Logout token-version bump doesn't persist | `/auth/logout` returns 204 but DB `token_version` stays at 0; stolen JWT remains valid after logout. The whole D14 story is broken. |
-| 2 | **HIGH** (functional) | Tick marks invisible in non-UTC timezones | `day.toISOString()` returns UTC; record dates are local. Cell comparison fails by 1 day for any user not in UTC. Affects both the habit list AND the detail-page heatmap. |
-| 3 | **HIGH** (functional) | Habit detail heatmap is read-only | Heatmap cells only render the button form if `token` prop is truthy; token is the JWT which is in an httpOnly cookie (intentionally, by the migration). Result: zero visible cells in the heatmap for any real user. |
-| 4 | **MEDIUM** (UX) | Literal `\n` rendered in DOM | Multiple pages show a stray text node `"\n"` at the top-left, visible to the user. Comes from a client-side mutation (possibly hydration mismatch). |
-| 5 | **LOW** (UX) | Add habit / Sign out buttons lack visual emphasis | Rendered as plain text links with no button chrome. |
-| 6 | **LOW** (UX) | Habit name "No phone after 22:00" truncates | 120px column width cuts "No phone aft…" |
+| # | Severity | Type | Description | Status |
+|---|---|---|---|---|
+| 1 | CRITICAL (security) | Logout `token_version` not bumping | Two `/auth/logout` endpoints registered; fastapi_users default winning | **FIXED** `d8a0e28` |
+| 2 | HIGH (functional) | Today cells empty (non-UTC users) | `day.toISOString()` returns UTC; record is local | **FIXED** in earlier slice (`de51a18`) |
+| 3 | HIGH (functional) | Heatmap cells blank | Form action hit backend directly with `token` gate | **FIXED** in earlier slice |
+| 4 | MEDIUM (UX) | Literal `\n` text node in DOM | Multiple sources identified | **FIXED** `ae12515` |
+| 5 | LOW (UX) | Add habit / Sign out links no chrome | Astro `<Button asChild>` wraps in motion-affordant styles by default; user accepted | **DEFERRED** |
+| 6 | LOW (UX) | Habit name "No phone after 22:00" truncates | 120px column width cuts longer names | **DEFERRED** |
+| 7 | MEDIUM (UX) | Login shows BOTH password AND passkey up front | User asked for progressive disclosure: only show the relevant option after a valid email probe | **FIXED** `ae12515` |
+| 8 | HIGH (UX) | Sticky date header missing 3 of 7 day-numbers; orphan digit at end of row | `grid-template-columns: 120px repeat(7, 44px) 0 0` — day-number cells auto-flowed into trailing 0-width streak/total columns | **FIXED** `ae12515` |
+
+The migration is now visually clean across login → habits list → habit detail.
 
 ---
 
@@ -80,6 +84,75 @@
 - Click "Sign out" → redirected to `/login` ✅ (visual)
 - **Bug #1 confirmed**: POST `/auth/logout` with the session JWT returns 204 but DB `token_version` stays at 0.
 - Re-using the JWT after logout returns 200 from `/users/me` — the stolen-JWT threat model that D14 was supposed to close is open.
+
+---
+
+## Round 2 — after `d8a0e28` (post-logout fix)
+
+Re-walked every page with the qa1 user to confirm the existing fixes and surface any regression / new issues.
+
+### Bug #1 re-check — fixed
+
+Manual repro: register fresh user → login → logout → DB query shows `token_version = 1` (was 0). Old JWT against `/api/v1/users/me` returns **401 Unauthorized**. Verified via curl on the live backend.
+
+Root cause was two-fold:
+1. The `session.refresh(user)` inside `user_bump_token_version` raised `InvalidRequestError` because `user` was loaded by the DI session, not the local one — the transaction rolled back. Removed the refresh.
+2. Two `/auth/logout` routes were registered; fastapi_users' default bearer-revoke won route matching. Mounted the castor `logout_router` FIRST in `init_auth_routes()`.
+
+Both fixes shipped in `d8a0e28`; tests in `tests/test_logout_bump.py` cover the behaviour.
+
+### Bug #4 (the `\n` glyph) — revealed fresh sources
+
+Round 1 fixed HabitGrid.astro's lone rogue blank line. Round 2 found THREE additional sources and an eighth user-visible defect:
+
+1. `castor/app/webauthn_routes.py` was modified to remove trailing whitespace, but six `.astro` files in `src/pages/` and the `Heatmap.astro` had **literal byte sequences `---\n` on their closing-frontmatter lines**, where `\` and `n` were LITERAL text characters (4-char sequence), not a newline. Astro treats the literal `---\n` as 3-dash closing delimiter PLUS a `\n` text node on the very next character. Bodies of every affected file started with a `\n` text node that the browser then rendered visibly.
+
+   Files fixed in `ae12515`:
+   - `src/pages/login.astro`
+   - `src/pages/register.astro`
+   - `src/pages/stats.astro`
+   - `src/pages/habits/new.astro`
+   - `src/pages/habits/[id]/edit.astro`
+   - `src/components/Heatmap.astro`
+
+2. `src/components/HabitGrid.astro` had a similar `---\n` byte-sequence on its closing delimiter. Source was `---\n\n<!-- Pull-down...`; Astro parsed the 3-dash close and emitted `\n\n<!--...` as body text. The `\n` text node appeared in EVERY consuming page's `<main>`.
+
+3. `src/layouts/Layout.astro` had the same vulnerability at the `<body>` block: `<body class="...">\n    <slot />\n    {cond && (...)}\n  </body>` produced a `\n` text node directly under `<body>`. Refactored to inline `<slot />` and the conditional on the same line as `<body>`.
+
+4. `src/pages/habits/index.astro` had a blank line between the count div and the conditional `{habits.length === 0 && (...)}` blocks; when neither conditional matched (length > 0), Astro rendered the blank line as a `\n` text node directly under `<main>`.
+
+Verified by inspection: `Array.from(document.body.childNodes).filter(n => n.nodeType === 3 && n.textContent.length > 0)` returns empty on `/habits` after `ae12515`.
+
+### Bug #7 (progressive disclosure on /login) — fixed
+
+Per user: "Screen asks for both email and password and passkey. Passkey only shows when user entered a valid email that has a registered passkey, otherwise it just progressively discloses password field."
+
+The user did NOT want this FAQ-style answer of "show both". The whole registration/login flow should not ask about passkeys on every login; once a user has skipped it, they manage it through `/security`.
+
+Implementation:
+- Backend: new `POST /auth/webauthn/check` returns `{has_passkey: bool}`. Always 200. Deliberately INDISTINGUISHABLE between "user not found" and "no passkey enrolled" so it cannot be used to enumerate registered emails.
+- Astro BFF: `src/pages/api/auth/webauthn/check.ts` proxies the fetch without an Origin header (the BFF runs server-side; the backend's `BrowserOriginMiddleware` treats server fetches as if from the backend host, not the browser — forwarding the browser's Origin produced 403).
+- Login UI: email field + password field + Sign in button at first paint. On 250 ms debounced input, if the email is well-formed, the BFF is called. `has_passkey=true` reveals the Sign in with Passkey button and hides the password field; `has_passkey=false` keeps the password field and hides the passkey button. The "Passkey detected for this account." status text confirms the swap.
+- On any error or empty email the UI reverts to the password-only state (always safe — passkey is opt-in, password is the default).
+- Passkey enrolment is moved entirely to `/security` — the login page does not offer it anymore beyond the detected-account flow.
+
+Verified live: registered fresh user → login shows password only. Manually added a fake passkey row to the user's `webauthn_credential` → typed the email → password field hides, Sign in with Passkey appears, status text appears. Removed the row → password returns.
+
+### Bug #8 (sticky date header) — fixed
+
+Visual QA showed only 4 of 7 day numbers (`21 20 19 18`) and an orphan `20` at the right end of the date-number row, while the 7 weekday labels above (`MON TUE WED THU FRI SAT SUN`) all rendered. Root cause: `grid-template-columns: 120px repeat(7, 44px) 0 0` produces 9 columns; the weekday cells used `grid-column: 1` explicitly but the day-number cells auto-flowed past column 8 into the 0-width streak/total columns (9, 10) which collapsed, then auto-wrapped to a new row at column 1.
+
+Fix: explicit `grid-column: ${i + 2}` on each day-number cell, conditional trailing columns only when streak/total are enabled, and trailing headers with explicit `grid-column` too. After `ae12515` the dates read MON 23 TUE 22 WED 21 THU 20 FRI 19 SAT 18 SUN 17 — all 7 visible, perfectly aligned with the weekday labels.
+
+### Final visual QA pass
+
+| Page | Visual quality (1–10) | Notes |
+|---|---|---|
+| `/login` initial | 7 | Email + Password + Sign in. Passkey UI hidden. |
+| `/login` after typing registered email with passkey | 9 | Password hides, passkey button appears, status text confirms. |
+| `/habits` empty | 6 | Just because empty state is sparse; no stray characters. |
+| `/habits` populated | 7 | Today cell solid teal with white checkmark; all 7 dates in header. |
+| `/habits/{id}` heatmap (round 1) | 9 | Tick cells render. |
 
 ---
 
