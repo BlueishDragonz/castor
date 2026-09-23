@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import hashlib
+import re
 import secrets
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi_users.exceptions import InvalidPasswordException
@@ -28,6 +29,15 @@ class ResetPasswordRequest(BaseModel):
     email: EmailStr
     code: str  # 12 digits
     new_password: str
+
+
+class CheckResetCodeRequest(BaseModel):
+    """Step 1 of the recovery flow: prove the user can read their email
+    by submitting the 12-digit code. Does NOT consume the code.
+    """
+
+    email: EmailStr
+    code: str  # 12 digits
 
 
 def _hash_code(code: str) -> str:
@@ -128,6 +138,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
         
         <p style="margin: 24px 0 0; font-size: 14px; color: #9ca3af;">This code expires in <strong>10 minutes</strong>.</p>
         <p style="margin: 16px 0 0; font-size: 14px; color: #9ca3af;">If you didn't request this, you can safely ignore this email.</p>
+        <p style="margin: 16px 0 0; font-size: 14px; color: #9ca3af;">Already on the sign-in page? Click the green continue button in the success message. Otherwise, copy the code above and open your reset page in the address bar. It usually lives at <code style="background: #e5e7eb; padding: 2px 6px; border-radius: 4px; color: #374151;">/reset-password</code>.</p>
     </div>
     
     <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;">
@@ -151,6 +162,67 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
             # Don't reveal email existence via error
 
     return {"message": "If the email exists, a reset code has been sent."}
+
+
+@router.post("/reset-password/check")
+async def check_reset_code(req: CheckResetCodeRequest, request: Request):
+    """Step 1 of the recovery flow — verify the code WITHOUT consuming it.
+
+    Lets the UI progress-disclose the new-password input only after the
+    user has proven they hold the email. Returns {"valid": true} on
+    success. On any failure (no row, expired, wrong code) returns a
+    generic 400 so callers cannot enumerate whether the email exists or
+    which codes have been issued.
+
+    Rate limited: 5 requests per minute per IP, 3 per 15 minutes per
+    email (same envelope as the reset endpoint so an attacker cannot
+    brute force via the verification surface).
+    """
+    if not re.fullmatch(r"\d{12}", req.code):
+        # Short-circuit before burning any rate-limit quota on garbage.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired code",
+        )
+
+    client_ip = _get_client_ip(request)
+
+    try:
+        await _rate_limit_check(f"reset_ip:{client_ip}", limit=5, window=60)
+        await _rate_limit_check(f"reset_email:{req.email}", limit=3, window=900)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, "Rate-limit store unavailable") from None
+
+    code_hash = _hash_code(req.code)
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    async with get_async_session_context() as session:
+        candidate = (
+            await session.execute(
+                select(PasswordResetCode.id, PasswordResetCode.user_id, PasswordResetCode.token_version)
+                .join(User, User.id == PasswordResetCode.user_id)
+                .where(
+                    PasswordResetCode.email == req.email,
+                    PasswordResetCode.code_hash == code_hash,
+                    PasswordResetCode.used.is_(False),
+                    PasswordResetCode.expires_at > now,
+                    PasswordResetCode.user_id.is_not(None),
+                    PasswordResetCode.token_version.is_not(None),
+                    User.email == req.email,
+                    User.is_active.is_(True),
+                    User.token_version == PasswordResetCode.token_version,
+                )
+                .order_by(PasswordResetCode.id)
+                .limit(1)
+            )
+        ).first()
+
+    if candidate is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+
+    return {"valid": True}
 
 
 @router.post("/reset-password")

@@ -1,0 +1,276 @@
+---
+/**
+ * /verify-reset — step 2 of the recovery flow. The user types the
+ * 12-digit code we mailed; the new-password field only renders after
+ * the code passes the backend's check endpoint.
+ *
+ * Two POST forms on this page:
+ *  - `action=verify` — calls POST /auth/reset-password/check. Sets
+ *    `state.codeAccepted=true` in local state when the backend says
+ *    yes; the page re-renders with the new-password form on top.
+ *  - `action=reset`  — calls POST /auth/reset-password. Consumes the
+ *    code and updates the password, then redirects to /login?reset=ok.
+ *
+ * The code itself is held in a hidden input from the moment it is
+ * verified. We never write the plaintext code into a session cookie
+ * or query string — it flows through HTML in single-step POSTs only.
+ *
+ * On 4xx from reset (race / consumed code / etc) the user is bounced
+ * back to /forgot-password with a generic message because their code
+ * may no longer be valid.
+ *
+ * Brand cluster is identical to the login FSM: solid `bg-primary`
+ * emblem, locked email display, friendly second-person prose.
+ *
+ * Public page — no session check.
+ */
+import Layout from '../layouts/Layout.astro';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Alert, AlertDescription } from '../components/ui/alert';
+import { backendFetch } from '../lib/auth';
+
+const emailQS = (Astro.url.searchParams.get('email') ?? '').trim().toLowerCase();
+
+// Page-local renderer state. The two stages behave differently and we
+// keep them in one discriminated object so the JSX stays simple.
+type PageState = {
+  stage: 'enter-code';
+  verifyError: string | null;
+  postedCode: string;
+};
+type AcceptedState = {
+  stage: 'password';
+  // The original code lives only in this hidden field on the form. We
+  // never echo it back to the user; we display a masked form.
+  acceptedCode: string;
+  maskedCode: string;
+};
+
+if (!emailQS) {
+  return Astro.redirect('/forgot-password');
+}
+
+let pageState: PageState | AcceptedState = {
+  stage: 'enter-code',
+  verifyError: null,
+  postedCode: '',
+};
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = (form.get('action') ?? '').toString();
+  const code = (form.get('code') ?? '').toString().trim();
+  const password = (form.get('password') ?? '').toString();
+
+  if (action === 'verify') {
+    if (!/^\d{12}$/.test(code)) {
+      pageState = {
+        stage: 'enter-code',
+        verifyError: 'The reset code must be exactly 12 digits.',
+        postedCode: code,
+      };
+    } else {
+      const res = await backendFetch(Astro.cookies, '/auth/reset-password/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailQS, code }),
+      });
+
+      if (res.ok) {
+        pageState = {
+          stage: 'password',
+          acceptedCode: code,
+          maskedCode: `${code.slice(0, 3)}${'•'.repeat(6)}${code.slice(-3)}`,
+        };
+      } else if (res.status === 429) {
+        pageState = {
+          stage: 'enter-code',
+          verifyError: 'Too many attempts just now. Please wait a minute and try again.',
+          postedCode: code,
+        };
+      } else {
+        pageState = {
+          stage: 'enter-code',
+          verifyError: 'That code does not look right. Check the email (and your spam folder), or request a fresh one.',
+          postedCode: code,
+        };
+      }
+    }
+  } else if (action === 'reset') {
+    if (password.length < 12) {
+      // Keep the user on the password step with the code intact so they
+      // can correct the length. The accepted code from this form is
+      // submitted as a hidden field, so read it back from form data.
+      pageState = {
+        stage: 'password',
+        acceptedCode: code,
+        maskedCode: `${code.slice(0, 3)}${'•'.repeat(6)}${code.slice(-3)}`,
+      };
+      // We tag the password-length error via a query param so the form
+      // can render the friendly Alert without a second state variant.
+      Astro.response.headers.set('x-pwlen', '1');
+      // Render via the same path with an extra header the renderer reads.
+      // (See the JSX `showPwLen` derivation below; the header is the
+      // simplest way to pass a hint without a cookie.)
+    } else if (!/^\d{12}$/.test(code)) {
+      // Code missing or malformed on the reset POST — likely a stale tab.
+      return Astro.redirect(`/forgot-password?email=${encodeURIComponent(emailQS)}`);
+    } else {
+      const res = await backendFetch(Astro.cookies, '/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: emailQS,
+          code,
+          new_password: password,
+        }),
+      });
+
+      if (res.ok) {
+        return Astro.redirect('/login?reset=ok');
+      }
+
+      // 400 / 429 / other — bounce to /forgot-password with a generic
+      // banner. The code may have been consumed by another tab or
+      // expired between verify and reset.
+      if (res.status === 429) {
+        return Astro.redirect(`/forgot-password?email=${encodeURIComponent(emailQS)}&throttle=1`);
+      }
+      return Astro.redirect(`/forgot-password?email=${encodeURIComponent(emailQS)}&expired=1`);
+    }
+  }
+}
+
+// Renderer-facing derived constants. Reading the response header keeps
+// the URL clean and lets the back/forward buttons work without leaking
+// the password-too-short reason into history.
+const showPwLen = Astro.response.headers.get('x-pwlen') === '1';
+---
+
+<Layout title="Reset your password — Castor">
+  <main class="flex min-h-screen items-center justify-center px-4">
+    <div class="w-full max-w-sm space-y-6">
+      <div class="flex items-center gap-3">
+        <div class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground bg-primary">
+          C
+        </div>
+        <div>
+          <h1 class="text-xl font-semibold leading-tight">Reset your password</h1>
+          <p class="text-xs text-muted-foreground">
+            {pageState.stage === 'enter-code'
+              ? 'enter the 12-digit code we sent to your email'
+              : 'almost done, set a new password to finish'}
+          </p>
+        </div>
+      </div>
+
+      {/* ── Locked email display, identical to login FSM ────── */}
+      <div class="space-y-2">
+        <Label htmlFor="email-display" className="flex items-center gap-1.5">
+          Email
+          <svg class="h-3.5 w-3.5 text-muted-foreground" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z" />
+          </svg>
+          <span class="text-xs font-normal text-muted-foreground">(confirmed)</span>
+        </Label>
+        <Input
+          id="email-display"
+          value={emailQS}
+          readOnly
+          aria-readonly="true"
+          aria-label="Email locked, change by requesting a fresh code"
+          className="bg-muted text-muted-foreground cursor-not-allowed opacity-90"
+        />
+      </div>
+
+      {/* ── Stage A: Enter the code ──────────────────────────── */}
+      {pageState.stage === 'enter-code' && (
+        <form method="post" class="space-y-4">
+          <input type="hidden" name="action" value="verify" />
+
+          {pageState.verifyError && (
+            <Alert variant="destructive">
+              <AlertDescription>{pageState.verifyError}</AlertDescription>
+            </Alert>
+          )}
+
+          <div class="space-y-2">
+            <Label htmlFor="code">Your 12-digit code</Label>
+            <Input
+              id="code"
+              name="code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={12}
+              pattern="[0-9]{12}"
+              required
+              autoFocus
+              placeholder="000000000000"
+              defaultValue={pageState.postedCode}
+            />
+            <p class="text-xs text-muted-foreground">
+              The code expires in 10 minutes. If you do not see the email, check your spam folder.
+            </p>
+          </div>
+
+          <Button type="submit" className="w-full">Verify the code</Button>
+        </form>
+      )}
+
+      {/* ── Stage B: Set a new password ─────────────────────── */}
+      {pageState.stage === 'password' && (
+        <form method="post" class="space-y-4" data-stage="reset">
+          <input type="hidden" name="action" value="reset" />
+          <input type="hidden" name="code" value={pageState.acceptedCode} />
+
+          {showPwLen && (
+            <Alert variant="destructive">
+              <AlertDescription>Use at least 12 characters for your password.</AlertDescription>
+            </Alert>
+          )}
+
+          <div class="space-y-2">
+            <Label>Code accepted</Label>
+            <div
+              class="rounded-md bg-muted px-3 py-2 text-sm font-mono tracking-widest text-muted-foreground"
+              aria-live="polite"
+            >
+              {pageState.maskedCode}
+            </div>
+            <p class="text-xs text-muted-foreground">
+              You are good to pick a new password now.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <Label htmlFor="password">Pick a new password (12+ characters)</Label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              required
+              minLength={12}
+              autoComplete="new-password"
+              autoFocus
+            />
+          </div>
+
+          <Button type="submit" className="w-full">Save my new password</Button>
+        </form>
+      )}
+
+      <p class="text-center text-xs text-muted-foreground">
+        Need a different email?{' '}
+        <a
+          href={emailQS ? `/forgot-password?email=${encodeURIComponent(emailQS)}` : '/forgot-password'}
+          class="hover:underline"
+        >
+          Send me a fresh code
+        </a>
+      </p>
+    </div>
+  </main>
+</Layout>
