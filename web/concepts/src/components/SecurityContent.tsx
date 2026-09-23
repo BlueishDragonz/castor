@@ -178,14 +178,14 @@ export function SecurityContent() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-[350px] px-4 py-6 space-y-4 pb-24">
+      <div className="mx-auto max-w-2xl px-4 py-6 space-y-4 pb-24">
         <div className="text-center text-muted-foreground">Loading...</div>
       </div>
     );
   }
 
   return (
-    <main className="mx-auto max-w-[350px] px-4 py-6 space-y-4 pb-24">
+    <main className="mx-auto max-w-2xl px-4 py-6 space-y-4 pb-24">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Security</h1>
       </header>

@@ -150,6 +150,16 @@
   --castor-copy-opacity: 0.72;
   --castor-transition-duration: 200ms;
   --castor-transition-easing: ease-out;
+
+  /*
+   * Default desktop content column width — matches /stats' max-w-2xl
+   * (42rem = 672px) so every page settles on the same column for
+   * visual consistency. Auth cards (login, register, forgot, verify)
+   * and narrow forms (new/edit habits, account/delete) opt out at a
+   * smaller `max-w-*` for their specific shape; everything else uses
+   * `max-w-2xl` directly.
+   */
+  --castor-content-width: 42rem;
 }
 
 [data-theme="dark"] {

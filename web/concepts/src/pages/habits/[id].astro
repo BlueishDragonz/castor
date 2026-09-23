@@ -45,6 +45,7 @@ import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
 import Heatmap from '../../components/Heatmap.astro';
 import HabitContextSheet from '../../components/HabitContextSheet.astro';
 import { Calendar, AlertCircle, MoreVertical } from 'lucide-react';
+import { localISO } from '@/lib/dates';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -108,7 +109,7 @@ const today = new Date();
 today.setHours(0, 0, 0, 0);
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const todayDMY = `${pad2(today.getDate())}-${pad2(today.getMonth() + 1)}-${today.getFullYear()}`;
-const todayISO = today.toISOString().split('T')[0];
+const todayISO = localISO(today);
 
 if (loadError || !habit) {
   const message = loadError === 'not_found'
@@ -221,7 +222,7 @@ const periodLabel = habit.period
 ---
 
 <Layout title={habit.name}>
-  <main class="mx-auto max-w-[min(65vw,720px)] min-w-[640px] px-6 py-8 space-y-6 pb-24">
+  <main class="mx-auto max-w-2xl px-6 py-8 space-y-6 pb-24">
     {actionError && (
       <Alert variant="destructive">
         <AlertCircle className="h-4 w-4" aria-hidden="true" />
@@ -293,8 +294,6 @@ const periodLabel = habit.period
           today={today}
           interactive={true}
           habitId={habit.id}
-          habitName={habit.name}
-          token=""
         />
       </CardContent>
     </Card>
