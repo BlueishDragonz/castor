@@ -44,10 +44,12 @@ async def lifespan(_: FastAPI):
     # Create new database and tables if they don't exist
     await create_db_and_tables()
 
+    from castor.demo_seed import init_demo_seed_task
     from castor.integrity import daily_integrity_task
     from castor.app.audit import audit_retention_task
     tasks = [asyncio.create_task(daily_integrity_task()),
-             asyncio.create_task(audit_retention_task())]
+             asyncio.create_task(audit_retention_task()),
+             asyncio.create_task(init_demo_seed_task())]
     if settings.ENABLE_DAILY_BACKUP:
         tasks.append(asyncio.create_task(daily_backup_task()))
     try:
@@ -66,6 +68,22 @@ async def health_check():
     """Always-available health check endpoint for container health checks."""
     return "OK"
 
+
+if settings.is_dev():
+    from castor.demo_seed import seed_demo_account
+
+    @app.post("/dev/reseed-demo", include_in_schema=False)
+    async def reseed_demo():
+        """Dev-only endpoint: re-create the demo account + 5 habits + tick history.
+
+        Idempotent: if the demo user already exists with the canonical password
+        and all 5 habits, this is a no-op. Returns a status dict.
+
+        Only available in dev environments (settings.ENV == "dev"). Refuses
+        in production.
+        """
+        result = await seed_demo_account()
+        return result
 
 # auth
 if settings.DEBUG:
