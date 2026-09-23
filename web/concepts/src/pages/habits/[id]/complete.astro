@@ -4,8 +4,9 @@
  *
  * Server-side POST handler. Accepts a `date` form field in DD-MM-YYYY
  * format (matches the backend Tick.date_fmt default). On success,
- * redirects back to the habit detail page so the user sees their tick
- * reflected without a full page-load flash.
+ * redirects back to the list (default) or to the page that initiated
+ * the tick — the detail page is no longer the default landing target,
+ * so clicking a tick on /habits feels like a toggle, not a navigation.
  *
  * The original /habits/{id}/complete.astro only handled "today". This
  * rewrite makes it work for any date so the heatmap's interactive
@@ -27,7 +28,17 @@ if (!id) {
   return Astro.redirect('/habits');
 }
 
-let redirectTo = `/habits/${id}`;
+// Default redirect target is the list (this is the home view). The
+// caller can override with a hidden `from` field (e.g. the detail
+// page's date picker posts `from=/habits/[id]` so the user stays on
+// the detail page after a manual date tick).
+const url = new URL(Astro.request.url);
+const fromParam = url.searchParams.get('from');
+let redirectTo = fromParam && fromParam.startsWith('/') ? fromParam : '/habits';
+// Don't redirect back to the same complete endpoint (would loop).
+if (redirectTo.startsWith(`/habits/${id}/complete`)) {
+  redirectTo = '/habits';
+}
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
@@ -35,6 +46,14 @@ if (Astro.request.method === 'POST') {
   const doneRaw = (form.get('done') ?? 'true').toString();
   const done = doneRaw !== 'false' && doneRaw !== '0';
   const textRaw = (form.get('text') ?? '').toString();
+
+  // The form-submitted `from` (body) takes precedence over the query
+  // string, so we don't get redirected to /habits when the caller
+  // explicitly posted from the detail page.
+  const fromBody = (form.get('from') ?? '').toString().trim();
+  if (fromBody && fromBody.startsWith('/') && !fromBody.startsWith(`/habits/${id}/complete`)) {
+    redirectTo = fromBody;
+  }
 
   // Validate the date format before forwarding; the backend will 400
   // on malformed input but catching it here avoids the round-trip.
@@ -60,9 +79,15 @@ if (Astro.request.method === 'POST') {
 
   if (!res.ok) {
     // Surface as a query param the page can render as an Alert.
-    const errCode = res.status === 401 || res.status === 403 ? 'unauth'
-      : res.status === 404 ? 'not_found'
-      : 'save_failed';
+    if (res.status === 401 || res.status === 403) {
+      // Cookie is stale (user was wiped, token expired). Clear and
+      // send the user to /login with a friendly message — landing on
+      // the detail page with an unauth error would just bounce again.
+      const { clearStaleSession } = await import('../../../lib/auth');
+      clearStaleSession(Astro.cookies);
+      return Astro.redirect('/login?expired=1');
+    }
+    const errCode = res.status === 404 ? 'not_found' : 'save_failed';
     return Astro.redirect(`/habits/${id}?err=${errCode}`);
   }
 }

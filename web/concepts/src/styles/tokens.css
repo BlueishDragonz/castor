@@ -221,4 +221,95 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/*
+ * Drawer / sheet motion. shadcn ships class tokens like
+ * `data-[state=open]:slide-in-from-right` but no keyframes —
+ * Tailwind v4 doesn't bundle tw-animate-css. We register the keyframes
+ * locally and bind them to the same data-state attribute selectors
+ * shadcn uses, so the existing className strings keep working.
+ *
+ * Combined with the SSR-flash guard in SheetContent (returns null
+ * until mounted), this gives us quick iOS-style motion without
+ * leaking inline SSR content.
+ */
+@keyframes castor-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes castor-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes castor-slide-in-from-right {
+  from { transform: translate3d(100%, 0, 0); }
+  to   { transform: translate3d(0, 0, 0); }
+}
+@keyframes castor-slide-out-to-right {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(100%, 0, 0); }
+}
+@keyframes castor-slide-in-from-left {
+  from { transform: translate3d(-100%, 0, 0); }
+  to   { transform: translate3d(0, 0, 0); }
+}
+@keyframes castor-slide-out-to-left {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-100%, 0, 0); }
+}
+@keyframes castor-slide-in-from-top {
+  from { transform: translate3d(0, -100%, 0); }
+  to   { transform: translate3d(0, 0, 0); }
+}
+@keyframes castor-slide-out-to-top {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(0, -100%, 0); }
+}
+@keyframes castor-slide-in-from-bottom {
+  from { transform: translate3d(0, 100%, 0); }
+  to   { transform: translate3d(0, 0, 0); }
+}
+@keyframes castor-slide-out-to-bottom {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(0, 100%, 0); }
+}
+
+[data-state="open"][class*="fade-in"] {
+  animation: castor-fade-in 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="closed"][class*="fade-out"] {
+  animation: castor-fade-out 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="open"][class*="slide-in-from-right"] {
+  animation: castor-slide-in-from-right 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+             castor-fade-in 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="closed"][class*="slide-out-to-right"] {
+  animation: castor-slide-out-to-right 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+             castor-fade-out 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="open"][class*="slide-in-from-left"] {
+  animation: castor-slide-in-from-left 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+             castor-fade-in 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="closed"][class*="slide-out-to-left"] {
+  animation: castor-slide-out-to-left 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+             castor-fade-out 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="open"][class*="slide-in-from-top"] {
+  animation: castor-slide-in-from-top 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+             castor-fade-in 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="closed"][class*="slide-out-to-top"] {
+  animation: castor-slide-out-to-top 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+             castor-fade-out 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="open"][class*="slide-in-from-bottom"] {
+  animation: castor-slide-in-from-bottom 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+             castor-fade-in 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+[data-state="closed"][class*="slide-out-to-bottom"] {
+  animation: castor-slide-out-to-bottom 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+             castor-fade-out 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
 /* Inter font is already self-hosted under castor-repo/statics/fonts/. */

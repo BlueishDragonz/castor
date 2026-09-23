@@ -257,6 +257,7 @@ const periodLabel = habit.period
           action={`/habits/${habit.id}/complete`}
           class="flex flex-wrap items-end gap-3"
         >
+          <input type="hidden" name="from" value={`/habits/${habit.id}`} />
           <div class="space-y-2">
             <Label htmlFor="complete-date">Date</Label>
             <Input

@@ -27,7 +27,6 @@ if (!Astro.locals.session) {
 }
 
 const { email } = Astro.locals.session;
-const token = Astro.locals.session.token;
 
 // Read habit display settings from cookies (set via /settings)
 const showStreak = Astro.cookies.get('habit_show_streak')?.value === 'true';
@@ -74,6 +73,7 @@ interface Habit {
   name: string;
   tags: string[];
   tickedDays: string[];
+  notesByDate: Record<string, string>;
   period?: { frequency: number; interval: 'day' | 'week' | 'month' } | null;
   status: string;
 }
@@ -115,16 +115,26 @@ try {
 
       habits = habitsWithRecords
         .filter((h: any) => h.status === 'active')
-        .map((h: any) => ({
-          id: h.id,
-          name: h.name,
-          tags: h.tags || [],
-          tickedDays: h.records
-            ?.filter((r: any) => r.data?.done)
-            ?.map((r: any) => r.data?.day?.split('T')[0]) || [],
-          period: h.period || null,
-          status: h.status,
-        }));
+        .map((h: any) => {
+          const records = h.records || [];
+          const notesByDate: Record<string, string> = {};
+          for (const r of records) {
+            const day = r.data?.day?.split('T')[0];
+            const text = (r.data?.text || '').trim();
+            if (day && text) notesByDate[day] = text;
+          }
+          return {
+            id: h.id,
+            name: h.name,
+            tags: h.tags || [],
+            tickedDays: records
+              ?.filter((r: any) => r.data?.done)
+              ?.map((r: any) => r.data?.day?.split('T')[0]) || [],
+            notesByDate,
+            period: h.period || null,
+            status: h.status,
+          };
+        });
     } else if (habitsRes.status === 404) {
       habits = [];
     } else if (habitsRes.status === 401 || habitsRes.status === 403) {
@@ -152,14 +162,6 @@ try {
           {habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
           <span class="text-muted-foreground/60"> · signed in as {email}</span>
         </p>
-      </div>
-      <div class="flex items-center gap-2">
-        <form method="post" action="/logout">
-          <Button type="submit" variant="ghost" size="sm">Sign out</Button>
-        </form>
-        <Button asChild>
-          <a href="/habits/new">+ Add habit</a>
-        </Button>
       </div>
     </header>
     {error && (

@@ -13,6 +13,14 @@
  *
  * Accessibility: each cell is a `<button role="switch">` so screen
  * readers announce the state and Enter/Space toggles it.
+ *
+ * Date encoding:
+ *   - `dateStr` (DD-MM-YYYY, backend tick format) uses local-time
+ *     getters via toLocaleDateString — always correct.
+ *   - `data-tick-date` (YYYY-MM-DD, used by HabitNoteRow for note
+ *     keys) MUST avoid `toISOString().split('T')[0]` because that
+ *     returns UTC and drifts by the timezone offset. We derive it
+ *     from local-time components via localISO().
  */
 interface Props {
   habitId: string;
@@ -26,6 +34,10 @@ interface Props {
 const { habitId, habitName, date, done, isToday, isPast } = Astro.props;
 
 const dateStr = date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+const y = date.getFullYear();
+const m = String(date.getMonth() + 1).padStart(2, '0');
+const d = String(date.getDate()).padStart(2, '0');
+const isoDate = `${y}-${m}-${d}`; // local YYYY-MM-DD
 const ariaLabel = isToday
   ? `Today, ${habitName}`
   : isPast
@@ -48,6 +60,10 @@ const ariaLabel = isToday
     aria-label={ariaLabel}
     disabled={!isPast && !isToday}
     data-done={done}
+    data-habit-id={habitId}
+    data-tick-date={isoDate}
+    data-tick-done={done ? 'true' : 'false'}
+    data-long-press-delay="200"
     class={[
       'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',

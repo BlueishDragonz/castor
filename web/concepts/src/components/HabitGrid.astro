@@ -13,7 +13,9 @@
  */
 import HabitCheckBox from './HabitCheckBox.astro';
 import { HabitContextSheet } from './HabitContextSheet.tsx';
+import { HabitNoteRow } from './HabitNoteRow.tsx';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 import { localISO } from '@/lib/dates';
 
@@ -22,6 +24,7 @@ interface Habit {
   name: string;
   tags: string[];
   tickedDays: string[]; // ISO dates like '2025-01-15'
+  notesByDate: Record<string, string>; // ISO date -> note text
   period?: { frequency: number; interval: 'day' | 'week' | 'month' } | null;
   status: string;
 }
@@ -202,32 +205,35 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 )}
 
 <!-- Sticky Date Headers (matching main branch design) -->
-<div class="grid gap-x-1 sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border pb-2"
-     style={`grid-template-columns: minmax(0, 1fr) repeat(${sortedDays.length}, 1.75rem) ${showStreak ? '2.75rem' : ''} ${showTotal ? '2.75rem' : ''}`.trimEnd()}
-     aria-hidden="true">
-  {/* Empty first cell — habit name lives in the row cards, no
-      subheader above it (the page heading already says "Habits"). */}
-  <div class="px-2" style="grid-column: 1">
-    {/* intentional spacer so the day cells align with the row cards' ticks */}
+<div class="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border pb-2 mt-6">
+  <div class="grid gap-x-1 px-2"
+       style={`grid-template-columns: minmax(0, 1fr) repeat(${sortedDays.length}, 1.75rem) ${showStreak ? '2.75rem' : '0'} ${showTotal ? '2.75rem' : '0'}`}
+       aria-hidden="true">
+    {/* Empty first cell — habit name lives in the row cards, no
+        subheader above it (the page heading already says "Habits"). */}
+    <div style="grid-column: 1">
+      {/* intentional spacer so the day cells align with the row cards' ticks */}
+    </div>
+    {/* Weekday + day number stacked, one column per day. Same horizontal
+        alignment as the row tick cells below (justify-center + items-center). */}
+    {sortedDays.map((day, i) => (
+      <div class="flex flex-col items-center justify-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider leading-tight"
+           style={{ gridColumn: `${i + 2}` }}>
+        <span>{weekDayAbbr[i]}</span>
+        <span class="text-[11px] font-semibold normal-case text-foreground/70">{day.getDate()}</span>
+      </div>
+    ))}
+    {showStreak && (
+      <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '2.75rem', gridColumn: `${sortedDays.length + 2}` }}>
+        Stk
+      </div>
+    )}
+    {showTotal && (
+      <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '2.75rem', gridColumn: `${sortedDays.length + (showStreak ? 3 : 2)}` }}>
+        Sum
+      </div>
+    )}
   </div>
-  {/* Weekday + day number stacked, one column per day, right-aligned */}
-  {sortedDays.map((day, i) => (
-    <div class="flex flex-col items-center justify-end text-[10px] font-medium text-muted-foreground uppercase tracking-wider leading-tight"
-         style={{ gridColumn: `${i + 2}` }}>
-      <span>{weekDayAbbr[i]}</span>
-      <span class="text-[11px] font-semibold normal-case text-foreground/70">{day.getDate()}</span>
-    </div>
-  ))}
-  {showStreak && (
-    <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '2.75rem', gridColumn: `${sortedDays.length + 2}` }}>
-      Stk
-    </div>
-  )}
-  {showTotal && (
-    <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '2.75rem', gridColumn: `${sortedDays.length + (showStreak ? 3 : 2)}` }}>
-      Sum
-    </div>
-  )}
 </div>
 
 <!-- Habit Grid: compact card rows -->
@@ -331,10 +337,32 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
                     class="sr-only"
                   >actions</button>
                 </HabitContextSheet>
+
+                {/* Notes dialog for this row — mounted per-habit, not per-tick.
+                    Triggered by long-press or right-click on a tick cell
+                    (custom event `castor:tick-longpress`). */}
+                <HabitNoteRow
+                  client:load
+                  habitId={habit.id}
+                  habitName={habit.name}
+                  initialNotesByDate={habit.notesByDate || {}}
+                  initialTickedDays={habit.tickedDays || []}
+                />
               </>
     );
   })}
 </div>
+
+<!-- "+ Add habit" sits below the last card instead of in the page header
+     so the calendar strip has breathing room and the row stays focused
+     on habit names + ticks. -->
+{filteredHabits.length > 0 && (
+  <div class="mt-6 flex justify-center">
+    <Button asChild variant="outline">
+      <a href="/habits/new">+ Add habit</a>
+    </Button>
+  </div>
+)}
 
 {filteredHabits.length === 0 && habits.length > 0 && (
   <div class="text-center py-12 text-muted-foreground">
@@ -387,13 +415,13 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
   (() => {
     let pressTimer: ReturnType<typeof setTimeout> | null = null;
     const PRESS_DELAY = 150;
-    
+
     document.querySelectorAll('a[data-long-press-delay]').forEach(link => {
       const habitId = link.getAttribute('data-habit-id');
       if (!habitId) return;
-      
+
       const sheetTrigger = document.getElementById(`sheet-${habitId}-trigger`);
-      
+
       const startPress = (e: MouseEvent | TouchEvent) => {
         if ('button' in e && e.button === 2) {
           // Right click - open immediately
@@ -401,19 +429,19 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
           sheetTrigger?.click();
           return;
         }
-        
+
         pressTimer = setTimeout(() => {
           sheetTrigger?.click();
         }, PRESS_DELAY);
       };
-      
+
       const endPress = () => {
         if (pressTimer) {
           clearTimeout(pressTimer);
           pressTimer = null;
         }
       };
-      
+
       link.addEventListener('mousedown', startPress as EventListener);
       link.addEventListener('mouseup', endPress);
       link.addEventListener('mouseleave', endPress);
@@ -422,6 +450,74 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
       link.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         sheetTrigger?.click();
+      });
+    });
+  })();
+
+  // Long press / right click on a tick cell — opens the notes dialog
+  // for that habit + date instead of submitting the toggle form.
+  // Cast from castor-main: a tick cell is a button, but a 200ms hold
+  // (or right-click) emits `castor:tick-longpress` so HabitNoteRow can
+  // pop the notes modal. A short click still falls through to the
+  // button's submit, which is the toggle path.
+  (() => {
+    let pressTimer: ReturnType<typeof setTimeout> | null = null;
+    let suppressNextClick = false;
+    const PRESS_DELAY = 200;
+
+    const openNotes = (btn: HTMLElement) => {
+      const habitId = btn.getAttribute('data-habit-id');
+      const date = btn.getAttribute('data-tick-date');
+      const doneStr = btn.getAttribute('data-tick-done') || 'false';
+      if (!habitId || !date) return;
+      document.dispatchEvent(new CustomEvent('castor:tick-longpress', {
+        detail: { habitId, date, done: doneStr === 'true' },
+      }));
+    };
+
+    const swallowNextClick = (btn: HTMLElement) => {
+      // The browser fires a `click` after `mouseup`. Capturing it lets
+      // us cancel the form submit that would otherwise flip the tick.
+      const onClick = (e: Event) => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        suppressNextClick = false;
+      };
+      btn.addEventListener('click', onClick, { once: true, capture: true });
+    };
+
+    document.querySelectorAll('[data-habit-checkbox] button[data-long-press-delay]').forEach(btn => {
+      const el = btn as HTMLElement;
+      const startPress = (e: MouseEvent | TouchEvent) => {
+        if ((el as HTMLButtonElement).disabled) return;
+        if ('button' in e && e.button === 2) {
+          e.preventDefault();
+          openNotes(el);
+          return;
+        }
+        suppressNextClick = false;
+        pressTimer = setTimeout(() => {
+          suppressNextClick = true;
+          swallowNextClick(el);
+          openNotes(el);
+        }, PRESS_DELAY);
+      };
+
+      const endPress = () => {
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      };
+
+      el.addEventListener('mousedown', startPress as EventListener);
+      el.addEventListener('mouseup', endPress);
+      el.addEventListener('mouseleave', endPress);
+      el.addEventListener('touchstart', startPress as EventListener, { passive: true });
+      el.addEventListener('touchend', endPress);
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        openNotes(el);
       });
     });
   })();
