@@ -42,15 +42,20 @@ const backupResult = Astro.url.searchParams.get('backup');
 ---
 
 <Layout title="Admin — Castor" description="Administrative actions.">
-  <main class="mx-auto max-w-2xl px-6 py-10">
-    <header class="mb-8 flex items-center justify-between">
+  <main class="mx-auto max-w-2xl px-6 py-12">
+    <header class="mb-8 flex items-center justify-between gap-4">
       <div>
         <h1 class="text-2xl font-bold">Admin</h1>
         <p class="text-sm text-muted-foreground mt-1">
           Account list and administrative actions.
         </p>
       </div>
-      <a href="/settings" class="text-sm text-muted-foreground hover:underline">← Settings</a>
+      <a
+        href="/habits"
+        class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        &larr; Back to habits
+      </a>
     </header>
 
     {backendError && (

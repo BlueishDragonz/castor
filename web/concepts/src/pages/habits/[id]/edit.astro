@@ -1,0 +1,252 @@
+---
+/**
+ * /habits/[id]/edit — Edit habit page matching main branch habit_edit_dialog.
+ * 
+ * Fields:
+ *   - Name (required)
+ *   - Period: Times / Every [N] [Day/Week/Month/Year]
+ *   - Completion status chips (custom or defaults)
+ *   - Tags
+ */
+import Layout from '../../../layouts/Layout.astro';
+import { Button } from '../../../components/ui/button';
+import { Input } from '../../../components/ui/input';
+import { Label } from '../../../components/ui/label';
+import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/card';
+import { Alert, AlertDescription } from '../../../components/ui/alert';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const token = Astro.locals.session.token;
+const habitId = Astro.params.id;
+
+interface Habit {
+  id: string;
+  name: string;
+  tags: string[];
+  period?: { frequency: number; interval: 'day' | 'week' | 'month' | 'year'; target_count?: number; period_count?: number } | null;
+  chips?: string[];
+}
+
+let habit: Habit | null = null;
+let error: string | null = null;
+let success = false;
+
+// Handle POST request
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const name = (form.get('name') ?? '').toString().trim();
+  const targetCount = parseInt((form.get('targetCount') ?? '1').toString(), 10);
+  const periodCount = parseInt((form.get('periodCount') ?? '1').toString(), 10);
+  const periodType = (form.get('periodType') ?? 'day').toString() as 'day' | 'week' | 'month' | 'year';
+  const chips = (form.get('chips') ?? '').toString().trim();
+  const tags = (form.get('tags') ?? '').toString().trim();
+
+  if (!name) {
+    error = 'Name is required';
+  } else {
+    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name,
+        period: {
+          frequency: targetCount,
+          interval: periodType,
+          period_count: periodCount,
+        },
+        chips: chips ? chips.split(',').map(c => c.trim()).filter(Boolean) : undefined,
+        tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+      }),
+    });
+
+    if (res.ok) {
+      success = true;
+      // Re-fetch habit
+      const habitRes = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (habitRes.ok) {
+        habit = await habitRes.json();
+      }
+    } else {
+      const err = await res.json().catch(() => ({ detail: 'Failed to update habit' }));
+      error = err.detail || `Failed to update habit (HTTP ${res.status})`;
+    }
+  }
+}
+
+if (!success) {
+  try {
+    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    
+    if (res.ok) {
+      habit = await res.json();
+    } else if (res.status === 404) {
+      error = 'Habit not found';
+    } else {
+      error = `Could not load habit (HTTP ${res.status})`;
+    }
+  } catch (e) {
+    error = (e as Error).message;
+  }
+}
+
+// Default chips from settings
+const DEFAULT_CHIPS = ['yes', 'no'];
+
+const PERIOD_TYPES = ['day', 'week', 'month', 'year'] as const;
+const PERIOD_LABELS: Record<string, string> = {
+  day: 'Day',
+  week: 'Week',
+  month: 'Month',
+  year: 'Year',
+};
+
+---
+<Layout title="Edit Habit — Castor">
+  <main class="mx-auto max-w-md px-4 py-12 space-y-6 pb-24">
+    <header class="flex items-center gap-4">
+      <a href={`/habits/${habitId}`} class="text-2xl hover:opacity-70">←</a>
+      <h1 class="text-xl font-semibold">Edit Habit</h1>
+    </header>
+
+    {error && (
+      <Alert variant="destructive">
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    )}
+
+    {success && (
+      <Alert variant="default">
+        <AlertDescription>Habit updated successfully. <a href={`/habits/${habitId}`} class="underline">View habit</a></AlertDescription>
+      </Alert>
+    )}
+
+    {habit && !error && !success && (
+      <form method="post" action={`/habits/${habitId}/edit`} class="space-y-6">
+        <input type="hidden" name="habitId" value={habitId} />
+        
+        <Card>
+          <CardHeader>
+            <CardTitle>Habit Details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div class="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                name="name"
+                value={habit.name}
+                required
+                maxLength={100}
+                placeholder="Habit name"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Period</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div class="grid grid-cols-3 gap-2 items-end">
+              <div class="space-y-2">
+                <Label htmlFor="targetCount">Times</Label>
+                <Input
+                  id="targetCount"
+                  name="targetCount"
+                  type="number"
+                  value={habit.period?.target_count || 1}
+                  min={1}
+                  max={366}
+                  required
+                  className="w-full"
+                />
+              </div>
+              <div class="flex items-center text-muted-foreground">/</div>
+              <div class="space-y-2">
+                <Label htmlFor="periodCount">Every</Label>
+                <Input
+                  id="periodCount"
+                  name="periodCount"
+                  type="number"
+                  value={habit.period?.period_count || 1}
+                  min={1}
+                  max={366}
+                  required
+                  className="w-full"
+                />
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label htmlFor="periodType">Interval</Label>
+              <select
+                id="periodType"
+                name="periodType"
+                class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                value={habit.period?.interval || 'day'}
+              >
+                {PERIOD_TYPES.map(type => (
+                  <option value={type}>
+                    {PERIOD_LABELS[type]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Completion Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p class="text-sm text-muted-foreground mb-2">
+              Comma-separated values. Use "yes"/"no" for defaults or custom like "done:✓,skip:⊘".
+            </p>
+            <Input
+              name="chips"
+              value={habit.chips?.join(', ') || DEFAULT_CHIPS.join(', ')}
+              placeholder="yes, no"
+              className="font-mono text-sm"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Tags</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p class="text-sm text-muted-foreground mb-2">
+              Comma-separated tags for filtering (e.g. "health, fitness").
+            </p>
+            <Input
+              name="tags"
+              value={habit.tags.join(', ')}
+              placeholder="health, fitness"
+            />
+          </CardContent>
+        </Card>
+
+        <div class="flex gap-2">
+          <Button type="button" variant="outline" onClick={() => window.location.href = `/habits/${habitId}`}>
+            Cancel
+          </Button>
+          <Button type="submit" className="flex-1">Save Changes</Button>
+        </div>
+      </form>
+    )}
+  </main>
+</Layout>

@@ -103,12 +103,20 @@ if (Astro.request.method === 'POST') {
 
 <Layout title="Import — Castor">
   <main class="mx-auto max-w-2xl px-6 py-12 space-y-6 pb-24">
-    <header>
-      <h1 class="text-2xl font-semibold tracking-tight">Import</h1>
-      <p class="text-sm text-muted-foreground">
-        Restore habits from a JSON export. <strong>Replaces</strong> all
-        existing habits — there is no undo.
-      </p>
+    <header class="flex items-center justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Import</h1>
+        <p class="text-sm text-muted-foreground">
+          Restore habits from a JSON export. <strong>Replaces</strong> all
+          existing habits — there is no undo.
+        </p>
+      </div>
+      <a
+        href="/habits"
+        class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        &larr; Back to habits
+      </a>
     </header>
 
     {errorDetail && (

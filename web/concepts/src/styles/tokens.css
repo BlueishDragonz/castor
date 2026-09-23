@@ -160,6 +160,16 @@
    * `max-w-2xl` directly.
    */
   --castor-content-width: 42rem;
+
+  /*
+   * Default top padding for content pages — matches /stats' py-12
+   * (3rem = 48px) so the h1 sits at the same offset from the viewport
+   * top on every page. Auth pages and forms opt out by using their
+   * own `py-*` value (e.g. `py-16` for breathing room above form
+   * inputs). Pages that still carry a legacy `py-6` / `py-8` / `py-10`
+   * should migrate to `py-12` so the title always lands at 48px.
+   */
+  --page-top-pad: 3rem;
 }
 
 [data-theme="dark"] {

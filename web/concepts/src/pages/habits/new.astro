@@ -1,7 +1,13 @@
 ---
 /**
- * /habits/new — add a new habit.
- *
+ * /habits/new — add a new habit with full form matching main branch habit_edit_dialog.
+ * 
+ * Fields:
+ * - Name (with inline tags using #tag syntax)
+ * - Period (Times / Every N / Interval: Day/Week/Month/Year)
+ * - Completion Status (chips like "yes, no" or custom)
+ * - Tags (comma-separated)
+ * 
  * POSTs JSON to /api/v1/habits and redirects to /habits on success.
  */
 import Layout from '../../layouts/Layout.astro';
@@ -16,35 +22,80 @@ if (!Astro.locals.session) {
 }
 
 let errorMessage: string | null = null;
+let formData = {
+  name: '',
+  targetCount: '1',
+  periodCount: '1',
+  periodType: 'day',
+  chips: 'yes, no',
+  tags: '',
+};
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const name = (form.get('name') ?? '').toString().trim();
+  
+  formData = {
+    name: (form.get('name') ?? '').toString().trim(),
+    targetCount: (form.get('targetCount') ?? '1').toString(),
+    periodCount: (form.get('periodCount') ?? '1').toString(),
+    periodType: (form.get('periodType') ?? 'day').toString(),
+    chips: (form.get('chips') ?? 'yes, no').toString(),
+    tags: (form.get('tags') ?? '').toString().trim(),
+  };
 
+  const name = formData.name;
+  
   if (!name) {
     errorMessage = 'Give your habit a name.';
+  } else if (!formData.targetCount.match(/^\d+$/) || parseInt(formData.targetCount) <= 0) {
+    errorMessage = 'Invalid target count.';
+  } else if (!formData.periodCount.match(/^\d+$/) || parseInt(formData.periodCount) <= 0) {
+    errorMessage = 'Invalid period count.';
   } else {
-    const res = await backendFetch(Astro.cookies, '/api/v1/habits', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    });
-
-    if (res.ok) {
-      return Astro.redirect('/habits');
-    }
-    if (res.status === 400 || res.status === 422) {
-      const detail = await res.json().catch(() => null);
-      errorMessage = detail?.detail ?? 'That name was not accepted.';
+    const targetCount = parseInt(formData.targetCount);
+    const periodCount = parseInt(formData.periodCount);
+    
+    // Validate period against max values
+    const maxTimes: Record<string, number> = { day: 1, week: 7, month: 31, year: 366 };
+    if (targetCount > (maxTimes[formData.periodType] || 1) * periodCount) {
+      errorMessage = 'Target count exceeds maximum for the selected period.';
     } else {
-      errorMessage = `Could not create habit (HTTP ${res.status}).`;
+      const period = {
+        frequency: targetCount,
+        interval: formData.periodType,
+        periodCount,
+      };
+
+      const habitData = {
+        name: name.split('#')[0].trim(), // Extract name without tags
+        period,
+        tags: name.split('#').slice(1).map(t => t.trim()).filter(Boolean).concat(
+          formData.tags.split(',').map(t => t.trim()).filter(Boolean)
+        ),
+        chips: formData.chips.split(',').map(c => c.trim()).filter(Boolean),
+      };
+
+      const res = await backendFetch(Astro.cookies, '/api/v1/habits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(habitData),
+      });
+
+      if (res.ok) {
+        return Astro.redirect('/habits');
+      }
+      if (res.status === 400 || res.status === 422) {
+        const detail = await res.json().catch(() => null);
+        errorMessage = detail?.detail ?? 'That name was not accepted.';
+      } else {
+        errorMessage = `Could not create habit (HTTP ${res.status}).`;
+      }
     }
   }
 }
 ---
-
 <Layout title="Add habit — Castor">
-  <main class="mx-auto max-w-md px-6 py-16 space-y-6">
+  <main class="mx-auto max-w-md px-6 py-12 space-y-6">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">Add a habit</h1>
       <p class="text-sm text-muted-foreground">one small thing, repeated daily.</p>
@@ -56,12 +107,99 @@ if (Astro.request.method === 'POST') {
       </Alert>
     )}
 
-    <form method="post" class="space-y-4">
+    <form method="post" class="space-y-6">
       <div class="space-y-2">
         <Label htmlFor="name">Habit name</Label>
-        <Input id="name" name="name" required maxLength={60} placeholder="e.g. Drink water" />
+        <Input
+          id="name"
+          name="name"
+          required
+          maxLength={60}
+          placeholder="e.g. Drink water #health #daily"
+          value={formData.name}
+        />
+        <p class="text-xs text-muted-foreground">
+          Add tags inline with <code>#tag</code> syntax (e.g. "Exercise #fitness #health")
+        </p>
       </div>
-      <div class="flex gap-3">
+
+      <fieldset class="space-y-4 border-t pt-4">
+        <legend class="text-sm font-medium">Period</legend>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="space-y-1.5">
+            <Label htmlFor="targetCount">Times</Label>
+            <Input
+              id="targetCount"
+              name="targetCount"
+              type="number"
+              min="1"
+              max="366"
+              value={formData.targetCount}
+              className="w-full"
+            />
+          </div>
+          <div class="space-y-1.5 flex items-end">
+            <Label className="text-muted-foreground px-2">/ Every</Label>
+          </div>
+          <div class="space-y-1.5">
+            <Label htmlFor="periodCount">Every</Label>
+            <Input
+              id="periodCount"
+              name="periodCount"
+              type="number"
+              min="1"
+              max="366"
+              value={formData.periodCount}
+              className="w-full"
+            />
+          </div>
+        </div>
+        <div class="space-y-1.5">
+          <Label htmlFor="periodType">Interval</Label>
+          <select
+            id="periodType"
+            name="periodType"
+            class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            value={formData.periodType}
+          >
+            <option value="day">Day</option>
+            <option value="week">Week</option>
+            <option value="month">Month</option>
+            <option value="year">Year</option>
+          </select>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Example: 1 time / Every 1 Day = daily habit. 3 times / Every 1 Week = 3× per week.
+        </p>
+      </fieldset>
+
+      <div class="space-y-2 border-t pt-4">
+        <Label htmlFor="chips">Completion Status</Label>
+        <Input
+          id="chips"
+          name="chips"
+          value={formData.chips}
+          placeholder="yes, no"
+          className="w-full"
+        />
+        <p class="text-xs text-muted-foreground">
+          Comma-separated values. Use "yes"/"no" for defaults or custom like "done:✓,skip:⊘"
+        </p>
+      </div>
+
+      <div class="space-y-2">
+        <Label htmlFor="tags">Additional Tags</Label>
+        <Input
+          id="tags"
+          name="tags"
+          value={formData.tags}
+          placeholder="health, fitness, morning"
+          className="w-full"
+        />
+        <p class="text-xs text-muted-foreground">Comma-separated tags for filtering (also supports #tag in name field).</p>
+      </div>
+
+      <div class="flex gap-3 pt-4">
         <Button type="submit">Create</Button>
         <Button variant="outline" asChild>
           <a href="/habits">Cancel</a>

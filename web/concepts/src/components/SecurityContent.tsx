@@ -185,9 +185,15 @@ export function SecurityContent() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-6 space-y-4 pb-24">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Security</h1>
+    <main className="mx-auto max-w-2xl px-4 py-12 space-y-4 pb-24">
+      <header className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Security</h1>
+        <a
+          href="/habits"
+          className="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          &larr; Back to habits
+        </a>
       </header>
 
       {/* Passkeys Section */}
