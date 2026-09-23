@@ -1,0 +1,22 @@
+---
+/**
+ * Security page — matches main branch security_page.py
+ * 
+ * Renders the React SecurityContent component as a client island
+ */
+import Layout from '../layouts/Layout.astro';
+import { SecurityContent } from '../components/SecurityContent.tsx';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const token = Astro.locals.session.token;
+---
+
+<Layout title="Security">
+  <script is:inline>
+    window.__SECURITY_TOKEN__ = '{token}';
+  </script>
+  <SecurityContent client:load />
+</Layout>
