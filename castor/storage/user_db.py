@@ -39,13 +39,30 @@ class DatabasePersistentDict(observables.ObservableDict):
 
         if not self._pending_backup:
             self._pending_backup = True
-            # Schedule the debounced backup
+            # Schedule the debounced backup.
+            #
+            # Castor runs under plain uvicorn (not nicegui's run loop), so
+            # `nicegui.core.loop` is normally None here. Fall back to the
+            # currently-running asyncio loop in that case so habit-list
+            # mutations actually flush to SQLite; without this fallback
+            # every POST/PUT/DELETE silently loses its write.
+            coro = self._debounced_backup()
+            task_name = f"debounced-backup-{self.user.email}"
             if core.loop and core.loop.is_running():
-                self._flush_task = background_tasks.create_lazy(
-                    self._debounced_backup(), name=f"debounced-backup-{self.user.email}"
-                )
+                self._flush_task = background_tasks.create_lazy(coro, name=task_name)
             else:
-                logger.error("No event loop for scheduling debounced backup")
+                try:
+                    running_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    logger.error(
+                        "No event loop for scheduling debounced backup "
+                        "for %s; data will not be persisted until the next "
+                        "mutation re-triggers a backup.",
+                        self.user.email,
+                    )
+                    self._pending_backup = False
+                    return
+                self._flush_task = running_loop.create_task(coro, name=task_name)
 
     async def _debounced_backup(self) -> None:
         """Wait for debounce window, then flush."""
