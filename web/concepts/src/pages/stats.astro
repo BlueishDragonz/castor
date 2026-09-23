@@ -1,15 +1,12 @@
 ---
 /**
- * /stats — aggregate completion stats per habit.
- *
- * SSR fetches the habit list and (in parallel) up to 10000 completion
- * dates per habit. Per habit we surface total completions, last-30-day
- * count, and a density bar (% of the last 30 days completed). At the
- * top we show overall counts: habits tracked, total completions, and
- * distinct active days in the last 30.
- *
- * Date math uses epoch-day buckets so completions from any timezone
- * line up to the same calendar day.
+ * /stats — per-habit streak cards with 15-week heatmaps.
+ * 
+ * Matches main branch stats_page.py design:
+ * - One card per active habit
+ * - Habit name as link to detail page
+ * - 15-week readonly heatmap
+ * - No aggregate progress bars
  */
 import Layout from '../layouts/Layout.astro';
 import {
@@ -19,133 +16,115 @@ import {
   CardDescription,
   CardContent,
 } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { Separator } from '../components/ui/separator';
-import { backendFetch } from '../lib/auth';
+import Heatmap from '../components/Heatmap.astro';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
 }
 
+const { email } = Astro.locals.session;
+
 interface Habit {
   id: string;
   name: string;
-}
-
-interface HabitStats {
-  id: string;
-  name: string;
-  totalCompletions: number;
-  last30Days: number;
-  percentDone: number;
+  records: Array<{
+    data: {
+      day: string;
+      done: boolean;
+      timestamp: number;
+      text?: string;
+    };
+  }>;
+  status: string;
+  period?: { frequency: number; interval: 'day' | 'week' | 'month' } | null;
 }
 
 let habits: Habit[] = [];
 let loadError: string | null = null;
 
 try {
-  const res = await backendFetch(Astro.cookies, '/api/v1/habits');
+  // Use the Astro API route which enriches habits with records + detail fields
+  const res = await fetch(new URL('/api/v1/habits', Astro.url.origin), {
+    headers: { 'Authorization': `Bearer ${Astro.locals.session.token}` },
+    credentials: 'include',
+  });
   if (res.ok) {
-    habits = (await res.json()) as Habit[];
+    const habitsList = (await res.json()) as Habit[];
+    habits = habitsList.filter((h) => h.status === 'active');
   } else if (res.status !== 404) {
     loadError = `Could not load habits (HTTP ${res.status}).`;
   }
-  // 404 = fresh user with no habit list. Empty state.
 } catch (e) {
   loadError = (e as Error).message;
 }
 
-// Date helpers — bucket by epoch day so DST/timezone shifts don't matter.
-const DAY_MS = 86_400_000;
-function parseDate(s: string): number | null {
-  // DD-MM-YYYY
-  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
-  if (!m) return null;
-  const day = Number(m[1]);
-  const month = Number(m[2]);
-  const year = Number(m[3]);
-  const d = new Date(Date.UTC(year, month - 1, day));
-  if (
-    d.getUTCFullYear() !== year ||
-    d.getUTCMonth() !== month - 1 ||
-    d.getUTCDate() !== day
-  ) {
-    return null;
-  }
-  return Math.floor(d.getTime() / DAY_MS);
+// Read calendar settings from cookies
+const firstDayOfWeek = parseInt(Astro.cookies.get('habit_first_day_of_week')?.value || '0', 10);
+const alignTodayStr = Astro.cookies.get('habit_align_today')?.value;
+const alignToday = alignTodayStr ? parseInt(alignTodayStr, 10) : null;
+
+// Calculate today and heatmap data (same as habit detail page)
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+
+// Apply alignToday if set
+let alignedToday = today;
+if (alignToday !== null) {
+  const daysUntilAlign = (alignToday - today.getDay() + 7) % 7;
+  alignedToday = new Date(today);
+  alignedToday.setDate(today.getDate() - daysUntilAlign);
+  alignedToday.setHours(0, 0, 0, 0);
 }
 
-const now = new Date();
-const todayEpoch = Math.floor(
-  Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / DAY_MS,
-);
-const cutoffEpoch = todayEpoch - 30; // exclusive-ish: anything ≥ cutoff is "in last 30"
+const WEEKS_TO_DISPLAY = 15;
+const DAYS_IN_WEEK = 7;
+const heatmapDays: Date[] = [];
+const lastWeekday = (firstDayOfWeek + 6) % 7; // Sunday as last day of week
+const daysDelta = (lastWeekday - alignedToday.getDay() + 7) % 7;
+const lastDateOfCalendar = new Date(alignedToday);
+lastDateOfCalendar.setDate(alignedToday.getDate() + daysDelta);
 
-// Fetch all completions in parallel; tolerate per-habit failures.
-const results = await Promise.all(
-  habits.map(async (h) => {
-    try {
-      const res = await backendFetch(
-        Astro.cookies,
-        `/api/v1/habits/${h.id}/completions?limit=10000`,
-      );
-      if (!res.ok) {
-        return { habit: h, dates: [] as string[], failed: true };
-      }
-      const dates = (await res.json()) as string[];
-      return { habit: h, dates, failed: false };
-    } catch {
-      return { habit: h, dates: [] as string[], failed: true };
-    }
-  }),
-);
-
-const habitStats: HabitStats[] = results.map(({ habit, dates, failed }) => {
-  let total = 0;
-  let last30 = 0;
-  for (const d of dates) {
-    const epoch = parseDate(d);
-    if (epoch === null) continue;
-    total += 1;
-    if (epoch >= cutoffEpoch && epoch <= todayEpoch) {
-      last30 += 1;
-    }
-  }
-  const percent = Math.min(100, Math.round((last30 / 30) * 100));
-  // For habits whose fetch failed, suppress numbers rather than lie.
-  return {
-    id: habit.id,
-    name: habit.name,
-    totalCompletions: failed ? 0 : total,
-    last30Days: failed ? 0 : last30,
-    percentDone: failed ? 0 : percent,
-  };
-});
-
-const distinctActiveDaysLast30 = new Set<number>();
-for (const { dates } of results) {
-  for (const d of dates) {
-    const epoch = parseDate(d);
-    if (epoch === null) continue;
-    if (epoch >= cutoffEpoch && epoch <= todayEpoch) {
-      distinctActiveDaysLast30.add(epoch);
-    }
+for (let i = 0; i < DAYS_IN_WEEK; i++) {
+  for (let j = WEEKS_TO_DISPLAY - 1; j >= 0; j--) {
+    const d = new Date(lastDateOfCalendar);
+    d.setDate(lastDateOfCalendar.getDate() - i - j * DAYS_IN_WEEK);
+    heatmapDays.push(d);
   }
 }
 
-const totalCompletionsAll = habitStats.reduce(
-  (sum, h) => sum + h.totalCompletions,
-  0,
+// Month headers for heatmap
+const heatmapHeaders: string[] = [];
+let lastMonth = -1;
+let lastYear = -1;
+for (const day of heatmapDays.slice(0, DAYS_IN_WEEK)) {
+  const curMonth = day.getMonth();
+  const curYear = day.getFullYear();
+  if (curMonth !== lastMonth) {
+    heatmapHeaders.push(day.toLocaleDateString('en-GB', { month: 'short' }));
+    lastMonth = curMonth;
+    continue;
+  }
+  if (curYear !== lastYear) {
+    heatmapHeaders.push(day.getFullYear().toString());
+    lastYear = curYear;
+    continue;
+  }
+  heatmapHeaders.push('');
+}
+
+const baseWeekDayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const weekDayAbbr = baseWeekDayAbbr.map((_, i) => 
+  baseWeekDayAbbr[(i + firstDayOfWeek) % 7]
 );
+
 ---
-
 <Layout title="Stats — Castor">
   <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
     <header class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-semibold tracking-tight">Stats</h1>
         <p class="text-sm text-muted-foreground">
-          signed in as {Astro.locals.session.email}
+          signed in as {email}
         </p>
       </div>
       <a
@@ -162,31 +141,6 @@ const totalCompletionsAll = habitStats.reduce(
       </Card>
     )}
 
-    {!loadError && habits.length > 0 && (
-      <Card>
-        <CardHeader>
-          <CardTitle>Overall</CardTitle>
-          <CardDescription>
-            Aggregate across all habits you are tracking.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div class="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant="secondary">
-              {habits.length} habit{habits.length === 1 ? '' : 's'} tracked
-            </Badge>
-            <Badge variant="outline">{totalCompletionsAll} total completions</Badge>
-            <Badge variant="outline">
-              {distinctActiveDaysLast30.size} active day
-              {distinctActiveDaysLast30.size === 1 ? '' : 's'} in the last 30
-            </Badge>
-          </div>
-        </CardContent>
-      </Card>
-    )}
-
-    {!loadError && habits.length > 0 && <Separator />}
-
     {!loadError && habits.length === 0 && (
       <Card>
         <CardHeader>
@@ -198,39 +152,44 @@ const totalCompletionsAll = habitStats.reduce(
       </Card>
     )}
 
-    <ul class="space-y-3">
-      {habitStats.map((h) => (
-        <li>
-          <Card>
-            <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
-              <CardTitle className="text-base">{h.name}</CardTitle>
-              <div class="flex items-center gap-2">
-                <Badge variant="outline">{h.totalCompletions} total</Badge>
-                <Badge variant="secondary">{h.last30Days} / 30 last 30d</Badge>
+    {!loadError && habits.length > 0 && (
+      <div class="space-y-4">
+        {habits.map((habit) => (
+          <Card key={habit.id} className="overflow-hidden">
+            <CardHeader className="pb-2">
+              <div class="flex items-center justify-between gap-4">
+                <CardTitle className="text-base">
+                  <a
+                    href={`/habits/${habit.id}`}
+                    class="hover:underline text-foreground"
+                  >
+                    {habit.name}
+                  </a>
+                </CardTitle>
+                {habit.period && (
+                  <span class="text-xs text-muted-foreground whitespace-nowrap">
+                    {habit.period.frequency}× per {habit.period.interval}
+                    {habit.period.frequency > 1 ? 's' : ''}
+                  </span>
+                )}
               </div>
             </CardHeader>
-            <CardContent>
-              <div
-                class="h-2 w-full overflow-hidden rounded-full"
-                style="background-color: var(--muted);"
-                role="progressbar"
-                aria-valuenow={h.percentDone}
-                aria-valuemin="0"
-                aria-valuemax="100"
-                aria-label={`${h.name}: ${h.percentDone}% of last 30 days`}
-              >
-                <div
-                  class="h-full rounded-full transition-[width]"
-                  style={`width: ${h.percentDone}%; background-color: var(--positive);`}
-                />
-              </div>
-              <p class="mt-2 text-xs text-muted-foreground">
-                {h.percentDone}% of the last 30 days
-              </p>
+            <CardContent className="pt-0">
+              <Heatmap
+                days={heatmapDays}
+                tickedDays={habit.records
+                  .filter((r) => r.data?.done)
+                  .map((r) => r.data?.day?.split('T')[0])
+                  .filter(Boolean)}
+                headers={heatmapHeaders}
+                weekDayAbbr={weekDayAbbr}
+                today={today}
+                interactive={false}
+              />
             </CardContent>
           </Card>
-        </li>
-      ))}
-    </ul>
+        ))}
+      </div>
+    )}
   </main>
 </Layout>
