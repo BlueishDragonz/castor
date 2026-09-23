@@ -1,0 +1,75 @@
+---
+/**
+ * Castor BottomNav — fixed bottom navigation bar for mobile.
+ *
+ * Renders 3 items: Home (/habits), Stats (/stats), More (opens MoreSheet).
+ * Only visible on mobile (max-width: 640px) via CSS media query.
+ * Uses shadcn/ui Button with lucide-react icons.
+ * Includes safe-area-inset-bottom padding for iOS.
+ */
+import { Home, BarChart2 } from 'lucide-react';
+import MoreSheet from './MoreSheet';
+---
+
+<style>
+  .bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    display: flex;
+    justify-content: space-around;
+    padding: env(safe-area-inset-bottom) 0 calc(env(safe-area-inset-bottom) + 0.5rem);
+    background: var(--background);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  @media (min-width: 641px) {
+    .bottom-nav {
+      display: none;
+    }
+  }
+
+  .nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.5rem;
+    color: var(--muted-foreground);
+    transition: color var(--castor-transition-duration) var(--castor-transition-easing);
+  }
+
+  .nav-item:hover,
+  .nav-item:focus-visible {
+    color: var(--primary);
+    outline: none;
+  }
+
+  .nav-item svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .nav-label {
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1;
+  }
+</style>
+
+<nav class="bottom-nav" role="navigation" aria-label="Main navigation">
+  <a href="/habits" class="nav-item" data-testid="nav-home">
+    <Home aria-hidden="true" />
+    <span class="nav-label">Home</span>
+  </a>
+
+  <a href="/stats" class="nav-item" data-testid="nav-stats">
+    <BarChart2 aria-hidden="true" />
+    <span class="nav-label">Stats</span>
+  </a>
+
+  <MoreSheet client:load />
+</nav>
