@@ -32,7 +32,6 @@ export default defineConfig({
     plugins: [tailwindcss()],
     server: {
       proxy: {
-        '/api/v1': { target: backend, changeOrigin: true, ws: true },
         '/auth': { target: backend, changeOrigin: true, ws: true },
         '/users': { target: backend, changeOrigin: true, ws: true },
         '/webauthn': { target: backend, changeOrigin: true, ws: true },
@@ -40,7 +39,7 @@ export default defineConfig({
         // (src/pages/forgot-password.astro, src/pages/reset-password.astro)
         // that POST server-side to BACKEND_URL via backendFetch(). Removing
         // these from the Vite proxy lets Astro serve the pages themselves.
-        // '/health is mounted at the FastAPI root (see beaverhabits/main.py:64),
+        // /health is mounted at the FastAPI root (see beaverhabits/main.py:64),
         // not under /api/v1, so we proxy the bare path too.
         '/health': { target: backend, changeOrigin: true, ws: false },
       },
