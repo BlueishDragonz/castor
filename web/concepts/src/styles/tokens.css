@@ -20,6 +20,91 @@
 
 @import "tailwindcss";
 
+/*
+ * Map shadcn-style design tokens (--background, --primary, etc.) into
+ * Tailwind v4's --color-* namespace so that utility classes like
+ * `bg-primary`, `text-muted-foreground`, `ring-ring` resolve at the
+ * CSS layer.
+ *
+ * Without this block, `bg-primary` would compile to
+ * `background-color: var(--color-primary)`, but no such variable is
+ * declared anywhere — only the legacy `--primary` (without the
+ * `color-` prefix). Tailwind v4 expects `--color-<name>` for its
+ * theme colours; v3 + tailwind.config.js had a `theme.extend.colors`
+ * mapping that did the bridge for us. Re-introducing the bridge via
+ * @theme is the v4-native equivalent.
+ *
+ * Each shadcn token becomes `--color-<name>: var(--<name>)`, so the
+ * utility class `bg-primary` -> `background-color: var(--color-primary)`
+ * -> `background-color: var(--primary)` -> resolves to the oklch value.
+ */
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-positive: var(--positive);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --radius-radius: var(--radius);
+}
+
+/*
+ * Tailwind v4 auto-discovers content from the cwd and any paths listed
+ * here. Castor's CSS lives at src/styles/tokens.css but the components
+ * that USE the utility classes (bg-primary/80, bg-muted/50, etc.) live
+ * throughout src/ — including .astro files and React .tsx client
+ * islands. The default scanner misses some of these (likely because
+ * they're inside template-literal cn() calls), so we (a) explicitly
+ * scan src/ for all source extensions, and (b) safelist the
+ * tailwindcss class names referenced inside cn() interpolations in
+ * the heatmap / habit-grid / etc. so the JIT compiler emits them
+ * even when it cannot statically resolve the string literal.
+ *
+ * If Tailwind ever fails to pick up a class used inside a dynamic
+ * template literal, add it to the @source inline() list below.
+ */
+@source "../**/*.{astro,ts,tsx,js,jsx}";
+
+/* Heatmap cells + buttons (cn() in HabitGrid.astro, Heatmap.astro) */
+@source inline("bg-primary");
+@source inline("bg-primary/80");
+@source inline("bg-primary/10");
+@source inline("bg-muted/50");
+@source inline("bg-muted/30");
+@source inline("bg-muted");
+@source inline("text-primary-foreground");
+@source inline("ring-primary");
+@source inline("hover:bg-muted");
+
+/* Habit grid + ring-borders used by shadcn card/button defaults */
+@source inline("border-border");
+@source inline("border-border/50");
+@source inline("bg-background/50");
+@source inline("bg-card");
+@source inline("text-card-foreground");
+@source inline("bg-accent");
+@source inline("text-accent-foreground");
+@source inline("text-muted-foreground");
+@source inline("text-destructive");
+@source inline("bg-destructive");
+@source inline("text-destructive-foreground");
+
 :root {
   /* ──── Brand palette (light) ─────────────────────────────────────── */
   --background: oklch(0.99 0.005 95);          /* near-white parchment */

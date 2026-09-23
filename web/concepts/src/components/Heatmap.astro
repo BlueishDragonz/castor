@@ -1,0 +1,190 @@
+---
+/**
+ * Heatmap — 15-week calendar heatmap component.
+ * 
+ * Used by both habit detail page (interactive) and stats page (readonly).
+ * Matches main branch CalendarHeatmap + habit_heat_map design.
+ */
+import { cn } from '@/lib/utils';
+import { localISO } from '@/lib/dates';
+
+interface Props {
+  days: Date[];           // 105 days (15 weeks × 7 days)
+  tickedDays: string[];   // ISO dates like '2025-01-15'
+  headers: string[];      // Month/year headers
+  weekDayAbbr: string[];  // ['Mon', 'Tue', ...]
+  today: Date;
+  interactive?: boolean;  // Default: false (readonly for stats)
+  habitId?: string;       // Required if interactive
+}
+
+const {
+  days,
+  tickedDays,
+  headers,
+  weekDayAbbr,
+  today,
+  interactive = false,
+  habitId,
+} = Astro.props;
+
+const tickedSet = new Set(tickedDays);
+const DAYS_IN_WEEK = 7;
+const WEEKS_TO_DISPLAY = 15;
+
+// Organize days by week (columns) and weekday (rows)
+// days array is organized: for each weekday, 15 weeks of dates
+// We need to transpose for display: rows = weekdays, columns = weeks
+const weekColumns: Date[][] = [];
+for (let w = 0; w < WEEKS_TO_DISPLAY; w++) {
+  const column: Date[] = [];
+  for (let d = 0; d < DAYS_IN_WEEK; d++) {
+    column.push(days[d * WEEKS_TO_DISPLAY + w]);
+  }
+  weekColumns.push(column);
+}
+
+function isToday(date: Date): boolean {
+  return date.getTime() === today.getTime();
+}
+
+function isPast(date: Date): boolean {
+  return date.getTime() <= today.getTime();
+}
+
+function isDone(date: Date): boolean {
+  const iso = localISO(date);
+  return tickedSet.has(iso);
+}
+
+function getCellColor(date: Date): string {
+  const done = isDone(date);
+  const past = isPast(date);
+  const todayFlag = isToday(date);
+  
+  if (!past) return 'bg-muted/30';
+  if (done) return 'bg-primary/80';
+  if (todayFlag) return 'bg-primary/10 ring-1 ring-primary';
+  return 'bg-muted/50';
+}
+
+function getCellAriaLabel(date: Date): string {
+  const done = isDone(date);
+  const label = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+  return `${label}: ${done ? 'Done' : 'Not done'}`;
+}
+
+---\n<div class="overflow-x-auto">
+  <table class="w-full border-collapse" role="grid" aria-label="Completion heatmap">
+    <thead>
+      <tr class="text-xs text-muted-foreground">
+        {headers.map((header, idx) => (
+          <th class="w-[20px] text-center py-1 px-0" style="min-width: 20px;" scope="col">
+            {header}
+          </th>
+        ))}
+        <th class="w-[22px] text-center py-1 px-0" style="min-width: 22px;" scope="col" aria-hidden="true"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {weekDayAbbr.map((weekday, rowIdx) => (
+        <tr class="gap-0">
+          {weekColumns.map((column, colIdx) => {
+            const date = column[rowIdx];
+            const done = isDone(date);
+            const past = isPast(date);
+            const todayFlag = isToday(date);
+            
+            return (
+              <td 
+                class="w-[20px] h-[20px] text-center align-middle py-0 px-0 relative"
+                style="min-width: 20px; height: 20px;"
+                role="gridcell"
+                aria-label={getCellAriaLabel(date)}
+              >
+                {past && (
+                  <>
+                    {interactive && habitId && (
+                      <form
+                        action={`/habits/${habitId}/complete`}
+                        method="POST"
+                        class="h-full w-full"
+                      >
+                        <input type="hidden" name="date" value={date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')} />
+                        <input type="hidden" name="done" value={String(!done)} />
+                        <button
+                          type="submit"
+                          class={cn(
+                            'h-full w-full rounded transition-colors',
+                            'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+                            done ? 'bg-primary/80 text-primary-foreground' : 'bg-muted/50 hover:bg-muted',
+                            todayFlag && 'ring-1 ring-primary'
+                          )}
+                          aria-label={getCellAriaLabel(date)}
+                          aria-pressed={done}
+                        >
+                          <span class="text-[9px] leading-none">{date.getDate()}</span>
+                        </button>
+                      </form>
+                    )}
+                    {!interactive && (
+                      <div
+                        class={cn(
+                          'h-full w-full rounded transition-colors text-[9px] leading-none flex items-center justify-center',
+                          done ? 'bg-primary/80 text-primary-foreground' : 'bg-muted/50',
+                          todayFlag && 'ring-1 ring-primary'
+                        )}
+                        aria-label={getCellAriaLabel(date)}
+                      >
+                        {date.getDate()}
+                      </div>
+                    )}
+                  </>
+                )}
+                {!past && (
+                  <div class="h-full w-[20px] bg-muted/30" aria-hidden="true" />
+                )}
+              </td>
+            );
+          })}
+          <td class="w-[22px] text-center text-[9px] text-muted-foreground" style="min-width: 22px;" aria-hidden="true">
+            {weekday}
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+<style is:global>
+  /* Heatmap table styling */
+  table[role="grid"] {
+    font-size: 0.625rem; /* 10px */
+  }
+  
+  table[role="grid"] th,
+  table[role="grid"] td {
+    padding: 0;
+    border: none;
+  }
+  
+  table[role="grid"] button {
+    padding: 0;
+    line-height: 1;
+    min-height: 20px;
+    min-width: 20px;
+  }
+  
+  /* Ensure cells are square */
+  table[role="grid"] td {
+    width: 20px;
+    height: 20px;
+  }
+  
+  /* Today column highlight. The `--primary` token is a full oklch()
+     value (Tailwind v4 + shadcn convention), so use the variable
+     directly. The old `hsl(var(--primary))` form was a v3 HSL-triple
+     triple and is no longer valid. */
+  table[role="grid"] .ring-primary {
+    box-shadow: 0 0 0 1px var(--primary);
+  }
+</style>

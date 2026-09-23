@@ -15,6 +15,7 @@ import HabitCheckBox from './HabitCheckBox.astro';
 import { HabitContextSheet } from './HabitContextSheet.tsx';
 import { Badge } from './ui/badge';
 import { cn } from '@/lib/utils';
+import { localISO } from '@/lib/dates';
 
 interface Habit {
   id: string;
@@ -84,7 +85,7 @@ function calculateStreak(habit: Habit): number {
   
   // Check consecutive days from most recent backwards
   for (const day of sortedDays) {
-    const iso = day.toISOString().split('T')[0];
+    const iso = localISO(day);
     if (tickedSet.has(iso)) {
       streak++;
     } else if (day.getTime() <= today.getTime()) {
@@ -100,7 +101,7 @@ function calculateStreak(habit: Habit): number {
 function calculateTotal(habit: Habit): number {
   const tickedSet = new Set(habit.tickedDays);
   return sortedDays.filter(day => {
-    const iso = day.toISOString().split('T')[0];
+    const iso = localISO(day);
     return tickedSet.has(iso);
   }).length;
 }
@@ -275,7 +276,7 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
             
             {/* Date columns */}
             {sortedDays.map(day => {
-              const isoDate = day.toISOString().split('T')[0];
+              const isoDate = localISO(day);
               const done = habit.tickedDays.includes(isoDate);
               const dayIsToday = isToday(day);
               const dayIsPast = isPast(day);
@@ -454,24 +455,28 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
     }
   }
   
-  /* Today column highlight */
-  [aria-label*="Today"] {
-    background-color: hsl(var(--primary) / 0.05);
-  }
-  
-  /* Ensure habit cards have proper contrast */
+  /* Today column highlight: rendered on the button itself via
+     `ring-2 ring-primary ring-offset-2` in HabitCheckBox. The gridcell
+     wrapper intentionally has no fill — keep it that way so the
+     `bg-primary` (and `bg-background`) classes on the button cascade
+     without an extra pale tint fighting them. */
+
+  /* Ensure habit cards have proper contrast.
+     NOTE: these rules previously used `hsl(var(--card))` etc., which
+     broke when --card migrated from a `H S L%` triple to a full
+     `oklch(...)` value in the Tailwind v4 token swap (D5). Use the
+     variable directly — it's already a valid CSS color. */
   article {
-    background: hsl(var(--card));
-    border-color: hsl(var(--border));
+    background: var(--card);
+    border-color: var(--border);
   }
-  
+
   article > div > div:first-child {
-    background: hsl(var(--card) / 0.95);
+    background: oklch(from var(--card) l c h / 0.95);
   }
-  
+
   /* Sheet content styling */
   [data-radix-dialog-content] {
-    background: hsl(var(--background));
-    border-color: hsl(var(--border));
+    background: var(--background);
   }
 </style>
