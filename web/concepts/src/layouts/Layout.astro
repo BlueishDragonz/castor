@@ -65,7 +65,14 @@ const umamiEnabled = !!umamiId;
   </head>
   <body class="min-h-screen antialiased">
     <slot />
-    <BottomNav client:load />
-    <DesktopMenu client:load />
+    {/* BottomNav and DesktopMenu are only rendered when there is a
+        session. /login, /register, /forgot-password, /reset-password
+        and the static landing page must not show nav chrome. */}
+    {Astro.locals.session && (
+      <>
+        <BottomNav />
+        <DesktopMenu client:load />
+      </>
+    )}
   </body>
 </html>
