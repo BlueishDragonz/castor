@@ -35,8 +35,7 @@ const umamiScript = import.meta.env.PUBLIC_UMAMI_SCRIPT_URL
 const umamiEnabled = !!umamiId;
 ---
 
-<!doctype html>
-<html lang="en" data-theme={theme}>
+<!doctype html><html lang="en" data-theme={theme}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -63,16 +62,8 @@ const umamiEnabled = !!umamiId;
 
     <title>{title}</title>
   </head>
-  <body class="min-h-screen antialiased">
-    <slot />
-    {/* BottomNav and DesktopMenu are only rendered when there is a
-        session. /login, /register, /forgot-password, /reset-password
-        and the static landing page must not show nav chrome. */}
-    {Astro.locals.session && (
-      <>
+  <body class="min-h-screen antialiased"><slot />{Astro.locals.session && (<>
         <BottomNav />
         <DesktopMenu client:load />
-      </>
-    )}
-  </body>
+      </>)}</body>
 </html>

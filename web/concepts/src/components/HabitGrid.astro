@@ -147,7 +147,7 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
   baseWeekDayAbbr[(i + firstDayOfWeek) % 7]
 );
 
----\n
+---
 <!-- Pull-down Tag Filter (hidden by default, shown on scroll up) -->
 {enableTagFilter && allTags.length > 0 && (
   <div    id="tag-filter"
@@ -202,40 +202,36 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 )}
 
 <!-- Sticky Date Headers (matching main branch design) -->
-<div class="grid gap-1 sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border" 
-     style={`grid-template-columns: 120px repeat(${sortedDays.length}, 44px) ${showStreak ? '44px' : '0'} ${showTotal ? '44px' : '0'}`} 
+<div class="grid gap-1 sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border"
+     style={`grid-template-columns: 120px repeat(${sortedDays.length}, 44px) ${showStreak ? '44px' : ''} ${showTotal ? '44px' : ''}`.trimEnd()}
      aria-hidden="true">
   {/* Habit name column header */}
   <div class="sticky left-0 z-10 px-2 text-xs font-medium text-muted-foreground" style="grid-column: 1">
     Habit
   </div>
-  
   {/* Weekday headers */}
   {weekDayAbbr.map((weekday, i) => (
-    <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" 
+    <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider"
          style={{ minWidth: '44px' }}>
       {weekday}
     </div>
   ))}
-  
-  {/* Day number headers */}
-  {sortedDays.map(day => (
-    <div class="text-center text-[10px] font-medium text-muted-foreground" 
-         style={{ minWidth: '44px' }}>
+  {/* Day number headers — explicit grid-column so the numbers line up under the weekday labels
+       above. Without this, auto-flow places them in the trailing 0-width streak/total columns
+       and they wrap to a second row, leaving FRI/SAT/SUN numbers missing. */}
+  {sortedDays.map((day, i) => (
+    <div class="text-center text-[10px] font-medium text-muted-foreground"
+         style={{ minWidth: '44px', gridColumn: `${i + 2}` }}>
       {day.getDate()}
     </div>
   ))}
-  
-  {/* Streak header */}
   {showStreak && (
-    <div class="sticky right-0 z-10 text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '44px' }}>
+    <div class="sticky right-0 z-10 text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '44px', gridColumn: `${sortedDays.length + 2}` }}>
       Stk
     </div>
   )}
-  
-  {/* Total header */}
   {showTotal && (
-    <div class="sticky right-0 z-10 text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '44px' }}>
+    <div class="sticky right-0 z-10 text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '44px', gridColumn: `${sortedDays.length + (showStreak ? 3 : 2)}` }}>
       Sum
     </div>
   )}

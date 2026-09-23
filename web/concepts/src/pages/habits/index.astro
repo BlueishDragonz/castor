@@ -134,7 +134,8 @@ try {
   console.error('[habits page] Error:', e);
   error = (e as Error).message;
 }
----\n<Layout title="Habits — Castor">
+---
+<Layout title="Habits — Castor">
   <main class="mx-auto max-w-full px-4 py-6 space-y-6 pb-24">
     <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <div>
@@ -150,19 +151,16 @@ try {
         </Button>
       </div>
     </header>
-
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <p class="text-sm text-muted-foreground">
         {habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
       </p>
     </div>
-
     {error && (
       <Card className="border-destructive/50">
         <CardContent className="text-destructive py-4">{error}</CardContent>
       </Card>
     )}
-
     {!error && habits.length === 0 && (
       <Card>
         <CardHeader>
@@ -174,7 +172,6 @@ try {
         </CardContent>
       </Card>
     )}
-
     {!error && habits.length > 0 && (
       <HabitGrid
         habits={habits}

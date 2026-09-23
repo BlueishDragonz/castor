@@ -339,6 +339,32 @@ async def webauthn_register_complete(
     return response
 
 
+@router.post("/check")
+async def webauthn_check(
+    request: WebAuthnLoginBeginRequest,
+    user_manager: UserManager = Depends(get_user_manager),
+):
+    """Lightweight probe used by the login page for progressive disclosure.
+
+    Returns ``{"has_passkey": true}`` if the email is registered AND has
+    at least one WebAuthn credential. Returns ``{"has_passkey": false}`` if
+    the email is unknown OR no passkeys are enrolled.
+
+    Critically, both cases return 200 so the endpoint cannot be used to
+    enumerate registered emails — the response is the same shape for both
+    "unknown" and "known but no passkeys".
+    """
+    # Always look the user up by email regardless of result so we use
+    # the same code path as the rest of auth and benefit from the
+    # eventual-consistency edge cases it handles. We then resolve to a
+    # bool without leaking existence.
+    user = await user_get_by_email(request.username)
+    if not user or not user.is_active:
+        return {"has_passkey": False}
+    credentials = await user_manager.get_webauthn_credentials(user)
+    return {"has_passkey": bool(credentials)}
+
+
 @router.post("/login/begin", response_model=WebAuthnLoginBeginResponse)
 async def webauthn_login_begin(
     request: WebAuthnLoginBeginRequest,
