@@ -1,24 +1,76 @@
 ---
 /**
- * /login — form posts to backend /auth/login (form-encoded).
+ * /login — strict 4-state progressive disclosure FSM.
  *
- * On 200: store the bearer in an httpOnly cookie via Astro.server
- * cookie API + redirect to /habits. On 4xx: render an Alert with the
- * backend's error detail.
+ * The single page handles all four presentation states; the URL query
+ * string is the FSM state. No JS hydration race: every transition is a
+ * server-side redirect, the email field is rendered by Astro.
  *
- * Already signed-in users get bounced to /habits on visit.
+ *   Stage 1 — EMAIL
+ *     Only the email field is shown, with a "Continue" button. The
+ *     standard /register link sits below. Initial paint.
  *
- * WebAuthn/Passkey: progressive disclosure.
- *   - Email field is always visible.
- *   - The credential check happens on the client when the email is
- *     well-formed; we POST /api/auth/webauthn/check for the result.
- *   - If the email has a registered passkey → show the "Sign in with
- *     passkey" button. Hide the password field.
- *   - Otherwise → show the password field. Hide the passkey button.
- *   - "Unknown user" is INDISTINGUISHABLE from "no passkey" by design
- *     — both show the password path (which falls back to a 401).
- *   - On /habits the user is offered to enroll a passkey via the
- *     Security page, never re-asked in the login flow itself.
+ *   Stage 2 — PROBE_RESULT   (server-side, no client JS needed)
+ *     On Continue submit, the server posts /auth/webauthn/check and
+ *     redirects to one of:
+ *
+ *       Stage 3a — PASSKEY
+ *         Email field disabled/pre-filled. Single "Login with Passkey"
+ *         button (WebAuthn ceremony runs client-side because
+ *         navigator.credentials needs the browser). Two secondary
+ *         links below: "Use a different email" + "Use password
+ *         instead".
+ *
+ *       Stage 3b — PASSWORD
+ *         Email field disabled/pre-filled. Password field, "Sign in"
+ *         button, "Use a different email" link, "Forgot password?"
+ *         link. No passkey UI at all (this branch exists regardless
+ *         of whether the user has a passkey — choose at the third
+ *         step, get only what they asked for).
+ *
+ *       Stage 3c — REGISTER  (when email is valid but no user exists)
+ *         Email field disabled/pre-filled. Password + Confirm
+ *         password fields, "Create account" button, "Use a different
+ *         email" link.
+ *
+ *   Stage 4 — POST-LOGIN OFFER
+ *     After a successful password login where the user has no
+ *     passkey, server-side redirects to ?stage=offer_passkey with
+ *     both the offer flag and the bearer cookie set. ONE question:
+ *
+ *         "Set up a passkey for faster sign-in next time?"
+ *             [Set up passkey]   [Skip for now]
+ *
+ *     "Set up passkey" navigates to /security which renders the
+ *     registration form. The /security page handler also flips
+ *     `passkey_offer_dismissed` to true on success.
+ *
+ *     "Skip for now" POSTs back to this page with action=skip_offer;
+ *     the server fires /auth/webauthn/offer/dismiss and redirects
+ *     to /habits. The user is NEVER asked again on subsequent
+ *     logins — enrolment is voluntary via /security.
+ *
+ * Persistence:
+ *   - Server-side: `users.passkey_offer_dismissed` (Boolean column).
+ *     Source of truth. Set on (a) any successful password login where
+ *     the user already had a passkey (no-op since the offer wouldn't
+ *     have shown), (b) "Skip for now" on the offer stage, (c) the
+ *     /security page when the user enrols.
+ *
+ *   - Backend probe endpoint includes the flag so the BFF does not
+ *     have to round-trip twice. Field name `passkey_offer_dismissed`.
+ *
+ * Email formats:
+ *   - Unknown email + valid format → stage=register (inline create).
+ *   - Unknown email + valid format + later "Continue" → returns to
+ *     stage=register on next submit.
+ *   - Invalid email format → stage=email with inline error message.
+ *
+ * WebAuthn ceremonies are client-only because navigator.credentials
+ * requires a browser. They POST to /api/auth/webauthn/login/{begin,
+ * complete}; complete mirrors the backend Set-Cookie into the
+ * CASTOR_TOKEN httpOnly cookie so the rest of the app can navigate
+ * without further auth.
  */
 import Layout from '../layouts/Layout.astro';
 import { Button } from '../components/ui/button';
@@ -27,40 +79,221 @@ import { Label } from '../components/ui/label';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { backendFetch, writeSession } from '../lib/auth';
 
-// Already signed in? Skip the form.
-if (Astro.locals.session) {
+const url = new URL(Astro.request.url);
+const stage = url.searchParams.get('stage') ?? 'email';
+const emailQS = (url.searchParams.get('email') ?? '').toString().trim();
+const errorQS = (url.searchParams.get('error') ?? '').toString();
+
+// Already signed in? Skip the form. BUT, on the offer_passkey stage
+// the user JUST authenticated (we wrote the cookie seconds earlier in
+// this same handler chain, or via a cross-handler redirect). Showing
+// them the offer is the whole point of that stage — never auto-bounce
+// signed-in users away from it.
+if (Astro.locals.session && stage !== 'offer_passkey') {
   return Astro.redirect('/habits');
 }
-
 let errorMessage: string | null = null;
+if (errorQS === 'bad_credentials') errorMessage = 'That password does not match this account.';
+else if (errorQS === 'pw_mismatch') errorMessage = 'Passwords do not match.';
+else if (errorQS === 'bad_request') errorMessage = 'Invalid submission.';
 
+// POST handlers. Every action is one of: check (step 1→2), password
+// (step 2/3b/3c), skip_offer (step 4).
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const username = (form.get('username') ?? '').toString();
-  const password = (form.get('password') ?? '').toString();
+  const action = (form.get('action') ?? '').toString();
+  const email = (form.get('email') ?? '').toString().trim().toLowerCase();
 
-  if (!username || !password) {
-    errorMessage = 'Email and password are required.';
-  } else {
-    // fastapi-users default BearerTransport expects form-encoded body.
-    const body = new URLSearchParams({ username, password });
-    const res = await backendFetch(Astro.cookies, '/auth/login', {
+  function isEmail(s: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+  }
+
+  if (!email || !isEmail(email)) {
+    return Astro.redirect(new URL(`/login?stage=email&error=bad_request`, url).toString());
+  }
+
+  if (action === 'check') {
+    // Step 1 → step 2: probe the account on the server. The probe
+    // returns {has_passkey, passkey_offer_dismissed}. The two binary
+    // axes give us three outcomes (no account, account without
+    // passkey, account with passkey). Inline registration on the
+    // /login page replaces a separate /register step.
+    try {
+      const probeRes = await backendFetch(Astro.cookies, '/auth/webauthn/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: email }),
+      });
+      const data = (await probeRes.json().catch(() => ({}))) as {
+        has_passkey?: boolean;
+      };
+      const nextStage =
+        data && typeof data.has_passkey === 'boolean' && data.has_passkey
+          ? 'passkey'
+          : 'password_or_register';
+      return Astro.redirect(
+        new URL(`/login?stage=${nextStage}&email=${encodeURIComponent(email)}`, url).toString()
+      );
+    } catch {
+      // Probe failure: fall back to password-or-register. The user
+      // lands on the password step; we cannot tell if they exist, so
+      // we treat them as a new account (which is the safer default —
+      // typing "Sign in" with wrong creds returns 401).
+      return Astro.redirect(
+        new URL(
+          `/login?stage=password_or_register&email=${encodeURIComponent(email)}`,
+          url
+        ).toString()
+      );
+    }
+  }
+
+  if (action === 'login_or_register') {
+    // Step 3b / 3c — single submit handler for both flows. The
+    // password is sufficient to authenticate. If the user does not
+    // exist, this becomes an inline create-and-login.
+    const password = (form.get('password') ?? '').toString();
+    const confirm = (form.get('confirm') ?? '').toString();
+    if (!password) {
+      return Astro.redirect(
+        new URL(
+          `/login?stage=password_or_register&email=${encodeURIComponent(email)}&error=bad_request`,
+          url
+        ).toString()
+      );
+    }
+    // We try `login` first; on 400/401 we fall through to `register`.
+    const body = new URLSearchParams({ username: email, password });
+    const loginRes = await backendFetch(Astro.cookies, '/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
     });
-
-    if (res.ok) {
-      const data = (await res.json()) as { access_token: string; token_type: string };
-      writeSession(Astro.cookies, data.access_token, username);
+    if (loginRes.ok) {
+      const data = (await loginRes.json()) as { access_token: string };
+      writeSession(Astro.cookies, data.access_token, email);
+      // Check whether the post-login offer should fire.
+      //
+      // The probe is server-side and sync; failure here never gates
+      // the user from proceeding. If anything goes wrong, we treat it
+      // the same as "user has a passkey" (safe default — never
+      // re-asked spuriously).
+      let offer = false;
+      try {
+        const probeRes = await backendFetch(Astro.cookies, '/auth/webauthn/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: email }),
+        });
+        if (probeRes.ok) {
+          const probeJson = (await probeRes.json().catch(() => null)) as {
+            has_passkey?: boolean;
+            passkey_offer_dismissed?: boolean;
+          } | null;
+          offer = !!(probeJson && probeJson.has_passkey === false && probeJson.passkey_offer_dismissed === false);
+        }
+      } catch {
+        // Probe failure → no offer, fall through to /habits.
+      }
+      if (offer) {
+        return Astro.redirect(
+          new URL(
+            `/login?stage=offer_passkey&email=${encodeURIComponent(email)}`,
+            url
+          ).toString()
+        );
+      }
       return Astro.redirect('/habits');
     }
-
-    if (res.status === 400 || res.status === 401) {
-      errorMessage = 'That email and password do not match an account.';
-    } else {
-      errorMessage = `Sign-in failed (HTTP ${res.status}). Try again.`;
+    if (loginRes.status === 400 || loginRes.status === 401) {
+      // User likely doesn't exist OR password wrong. We can't tell.
+      // Try to register; if both fail, surface bad credentials.
+      if (!confirm) {
+        // Password-only submit (no confirm) means the user is on the
+        // password step, not register. So bad credentials.
+        return Astro.redirect(
+          new URL(
+            `/login?stage=password_or_register&email=${encodeURIComponent(
+              email
+            )}&error=bad_credentials`,
+            url
+          ).toString()
+        );
+      }
+      if (password !== confirm) {
+        return Astro.redirect(
+          new URL(
+            `/login?stage=register&email=${encodeURIComponent(email)}&error=pw_mismatch`,
+            url
+          ).toString()
+        );
+      }
+      const registerBody = JSON.stringify({
+        email,
+        password,
+        is_active: true,
+        is_superuser: false,
+        is_verified: true,
+      });
+      const registerRes = await backendFetch(Astro.cookies, '/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: registerBody,
+      });
+      if (registerRes.status === 201 || registerRes.ok) {
+        const loginAfterRegister = await backendFetch(Astro.cookies, '/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        });
+        if (loginAfterRegister.ok) {
+          const data = (await loginAfterRegister.json()) as { access_token: string };
+          writeSession(Astro.cookies, data.access_token, email);
+          // Brand new account → show the offer once.
+          return Astro.redirect(
+            new URL(
+              `/login?stage=offer_passkey&email=${encodeURIComponent(email)}`,
+              url
+            ).toString()
+          );
+        }
+      }
+      return Astro.redirect(
+        new URL(
+          `/login?stage=register&email=${encodeURIComponent(email)}&error=bad_request`,
+          url
+        ).toString()
+      );
     }
+    return Astro.redirect(
+      new URL(
+        `/login?stage=password_or_register&email=${encodeURIComponent(email)}&error=bad_request`,
+        url
+      ).toString()
+    );
+  }
+
+  if (action === 'skip_offer') {
+    // Stage 4 — skip. Tell the backend to flip the flag, then head
+    // straight to /habits. We do not gate the redirect on the backend
+    // call's success; the cookie or column will catch up.
+    try {
+      await backendFetch(Astro.cookies, '/auth/webauthn/offer/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: email }),
+      });
+    } catch {
+      // Ignore — the page can show again, but the next step of any
+      // non-appended behaviour we don't care about.
+    }
+    return Astro.redirect('/habits');
+  }
+
+  if (action === 'enrol_passkey') {
+    // Stage 4 — enrol. Bounce to /security with the new user already
+    // authenticated. The /security page renders the registration form.
+    return Astro.redirect('/security?onboard=1');
   }
 }
 ---
@@ -68,10 +301,7 @@ if (Astro.request.method === 'POST') {
   <main class="flex min-h-screen items-center justify-center px-4">
     <div class="w-full max-w-sm space-y-6">
       <div class="flex items-center gap-3">
-        <div
-          class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground"
-          style="background: var(--castor-emblem-bg-primary); border-radius: var(--castor-emblem-radius);"
-        >
+        <div class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground bg-primary">
           C
         </div>
         <div>
@@ -86,191 +316,237 @@ if (Astro.request.method === 'POST') {
         </Alert>
       )}
 
-      <form method="post" class="space-y-4" id="login-form">
-        <div class="space-y-2">
-          <Label htmlFor="username">Email</Label>
-          <Input
-            id="username"
-            name="username"
-            type="email"
-            required
-            autoComplete="email"
-            placeholder="you@example.com"
-          />
-          <p
-            id="email-status"
-            class="text-xs text-muted-foreground min-h-4"
-            aria-live="polite"
-          >
+      {stage === 'email' && (
+        <form method="post" class="space-y-4">
+          <input type="hidden" name="action" value="check" />
+          <div class="space-y-2">
+            <Label htmlFor="username">Email</Label>
+            <Input
+              id="username"
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+              autoFocus
+              placeholder="you@example.com"
+            />
+          </div>
+          <Button type="submit" className="w-full">Continue</Button>
+        </form>
+      )}
+
+      {stage === 'passkey' && (
+        <>
+          <form method="post" class="space-y-4" id="passkey-form">
+            <input type="hidden" name="email" value={emailQS} />
+            <div class="space-y-2">
+              <Label htmlFor="email-display">Email</Label>
+              <Input
+                id="email-display"
+                type="email"
+                value={emailQS}
+                readOnly
+                aria-readonly="true"
+                aria-label="Email locked (change via 'Use a different email' link)"
+                className="bg-muted text-muted-foreground cursor-not-allowed"
+              />
+            </div>
+            <button
+              type="button"
+              id="webauthn-login-btn"
+              class="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            >
+              <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 1.89l5.46 2.43c2.36.99 4 3.76 4 6.78 0 4.42-3.58 8-8 8s-8-3.58-8-8c0-3.02 1.64-5.79 4-6.78L12 2.89zM12 6c-2.33 0-4.31 1.16-5.5 2.88 1.12 1.44 2.4 3.37 2.5 5.23h5.91c.09-1.86 1.38-3.79 2.5-5.23C16.31 7.16 14.33 6 12 6z" />
+              </svg>
+              Login with Passkey
+            </button>
+            <div id="passkey-error" class="text-xs text-destructive" aria-live="polite"></div>
+          </form>
+          <p class="text-center text-xs text-muted-foreground space-x-2">
+            <a href={`/login?stage=password_or_register&email=${encodeURIComponent(emailQS)}`} class="hover:underline">Use password</a>
+            <span class="opacity-50">·</span>
+            <a href="/login?stage=email" class="hover:underline">Use a different email</a>
           </p>
-        </div>
+        </>
+      )}
 
-        <div id="password-row" class="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-          />
-        </div>
+      {stage === 'password_or_register' && (
+        <>
+          <form method="post" class="space-y-4">
+            <input type="hidden" name="action" value="login_or_register" />
+            <div class="space-y-2">
+              <Label htmlFor="email-display">Email</Label>
+              <Input
+                id="email-display"
+                name="email"
+                type="email"
+                value={emailQS}
+                readOnly
+                aria-readonly="true"
+                aria-label="Email locked (change via 'Use a different email' link)"
+                className="bg-muted text-muted-foreground cursor-not-allowed"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                autoFocus
+                required
+              />
+            </div>
+            <Button type="submit" className="w-full">Sign in</Button>
+          </form>
+          <p class="text-center text-xs text-muted-foreground space-x-2">
+            <a href={`/forgot-password?email=${encodeURIComponent(emailQS)}`} class="hover:underline">Forgot password?</a>
+            <span class="opacity-50">·</span>
+            <a href={`/login?stage=register&email=${encodeURIComponent(emailQS)}`} class="hover:underline">Create account</a>
+            <span class="opacity-50">·</span>
+            <a href="/login?stage=email" class="hover:underline">Use a different email</a>
+          </p>
+        </>
+      )}
 
-        <Button type="submit" id="signin-button" className="w-full">
-          Sign in
-        </Button>
-      </form>
+      {stage === 'register' && (
+        <>
+          <form method="post" class="space-y-4">
+            <input type="hidden" name="action" value="login_or_register" />
+            <div class="space-y-2">
+              <Label htmlFor="email-display">Email</Label>
+              <Input
+                id="email-display"
+                name="email"
+                type="email"
+                value={emailQS}
+                readOnly
+                aria-readonly="true"
+                aria-label="Email locked (change via 'Use a different email' link)"
+                className="bg-muted text-muted-foreground cursor-not-allowed"
+              />
+            </div>
+            <p class="text-sm text-muted-foreground">
+              No account for this email yet. Create one:
+            </p>
+            <div class="space-y-2">
+              <Label htmlFor="password">Create a password</Label>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                autoFocus
+                required
+                minLength={12}
+              />
+            </div>
+            <div class="space-y-2">
+              <Label htmlFor="confirm">Confirm password</Label>
+              <Input
+                id="confirm"
+                name="confirm"
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={12}
+              />
+            </div>
+            <Button type="submit" className="w-full">Create account</Button>
+          </form>
+          <p class="text-center text-xs text-muted-foreground">
+            <a href="/login?stage=email" class="hover:underline">Use a different email</a>
+          </p>
+        </>
+      )}
 
-      <div id="passkey-row" class="hidden space-y-3">
-        <div class="relative">
-          <div class="absolute inset-0 flex items-center">
-            <span class="w-full border-t" />
+      {stage === 'offer_passkey' && (
+        <>
+          <div class="space-y-4 text-center">
+            <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+              <svg class="h-7 w-7 text-foreground" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 1.89l5.46 2.43c2.36.99 4 3.76 4 6.78 0 4.42-3.58 8-8 8s-8-3.58-8-8c0-3.02 1.64-5.79 4-6.78L12 2.89zM12 6c-2.33 0-4.31 1.16-5.5 2.88 1.12 1.44 2.4 3.37 2.5 5.23h5.91c.09-1.86 1.38-3.79 2.5-5.23C16.31 7.16 14.33 6 12 6z" />
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-base font-semibold">You're in</h2>
+              <p class="mt-2 text-sm text-muted-foreground">
+                Create a passkey for faster sign-in next time. No password to type — your device handles it.
+              </p>
+            </div>
           </div>
-          <div class="relative flex justify-center text-xs">
-            <span class="bg-background px-2 text-muted-foreground">Or continue with</span>
-          </div>
-        </div>
-        <button
-          type="button"
-          id="webauthn-login-btn"
-          class="flex w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2.5 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
-        >
-          <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 1.89l5.46 2.43c2.36.99 4 3.76 4 6.78 0 4.42-3.58 8-8 8s-8-3.58-8-8c0-3.02 1.64-5.79 4-6.78L12 2.89zM12 6c-2.33 0-4.31 1.16-5.5 2.88 1.12 1.44 2.4 3.37 2.5 5.23h5.91c.09-1.86 1.38-3.79 2.5-5.23C16.31 7.16 14.33 6 12 6z" />
-          </svg>
-          Sign in with Passkey
-        </button>
-      </div>
+          <form method="post" class="space-y-3">
+            <input type="hidden" name="action" value="enrol_passkey" />
+            <input type="hidden" name="email" value={emailQS} />
+            <Button type="submit" className="w-full">Set up passkey</Button>
+          </form>
+          <form method="post" class="space-y-3">
+            <input type="hidden" name="action" value="skip_offer" />
+            <input type="hidden" name="email" value={emailQS} />
+            <button
+              type="submit"
+              class="w-full rounded-md px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+            >
+              Skip — I'll use my password next time
+            </button>
+          </form>
+        </>
+      )}
 
-      <p class="text-center text-xs text-muted-foreground">
-        <a href="/forgot-password" class="hover:underline">Forgot password?</a>
-        <span class="mx-2 opacity-50">·</span>
-        <a href="/register" class="hover:underline">Create account</a>
-      </p>
+      {stage === 'email' && (
+        <p class="text-center text-xs text-muted-foreground">
+          New here? <a href="/login?stage=register&email=" class="hover:underline">Create an account</a>
+        </p>
+      )}
     </div>
   </main>
 
   <script>
-    let inflight: AbortController | null = null;
-
-    async function probe(email: string) {
-      const status = document.getElementById('email-status');
-      if (!status) return;
-
-      if (inflight) inflight.abort();
-      const ctrl = new AbortController();
-      inflight = ctrl;
-
-      try {
-        const res = await fetch('/api/auth/webauthn/check', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: email }),
-          signal: ctrl.signal,
-        });
-        if (ctrl.signal.aborted) return;
-        if (!res.ok) {
-          hideBoth(status);
-          return;
-        }
-        const data = (await res.json()) as { has_passkey?: boolean };
-        const passkeyRow = document.getElementById('passkey-row');
-        const passwordRow = document.getElementById('password-row');
-        if (data.has_passkey) {
-          if (passkeyRow) passkeyRow.classList.remove('hidden');
-          if (passwordRow) {
-            passwordRow.classList.add('hidden');
-            const pwInput = document.getElementById('password') as HTMLInputElement | null;
-            if (pwInput) pwInput.value = '';
-          }
-          status.textContent = 'Passkey detected for this account.';
-        } else {
-          if (passkeyRow) passkeyRow.classList.add('hidden');
-          if (passwordRow) passwordRow.classList.remove('hidden');
-          status.textContent = '';
-        }
-      } catch (e) {
-        if ((e as DOMException).name === 'AbortError') return;
-        hideBoth(status);
-      }
+    function base64urlToBuffer(str: string): ArrayBuffer {
+      const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64.padEnd(base64.length + (4 - str.length % 4) % 4, '=');
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes.buffer;
     }
 
-    function hideBoth(status: HTMLElement) {
-      const passkeyRow = document.getElementById('passkey-row');
-      const passwordRow = document.getElementById('password-row');
-      if (passkeyRow) passkeyRow.classList.add('hidden');
-      if (passwordRow) passwordRow.classList.remove('hidden');
-      status.textContent = '';
+    function bufferToBase64url(buf: ArrayBuffer): string {
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      const emailInput = document.getElementById('username') as HTMLInputElement | null;
-      if (!emailInput) return;
-
-      const resetToPasswordOnly = () => {
-        const status = document.getElementById('email-status');
-        if (status) status.textContent = '';
-        const passkeyRow = document.getElementById('passkey-row');
-        const passwordRow = document.getElementById('password-row');
-        if (passkeyRow) passkeyRow.classList.add('hidden');
-        if (passwordRow) passwordRow.classList.remove('hidden');
-      };
-
-      const onChange = () => {
-        const email = emailInput.value.trim();
-        const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-        if (!valid) {
-          resetToPasswordOnly();
-          return;
-        }
-        void probe(email);
-      };
-
-      let timer: number | null = null;
-      emailInput.addEventListener('input', () => {
-        if (timer !== null) window.clearTimeout(timer);
-        timer = window.setTimeout(onChange, 250);
-      });
-      if (emailInput.value) onChange();
-
+      const params = new URLSearchParams(window.location.search);
+      const email = params.get('email') || '';
       const btn = document.getElementById('webauthn-login-btn') as HTMLButtonElement | null;
       btn?.addEventListener('click', async () => {
-        const email = emailInput.value?.trim();
-        if (!email) {
-          emailInput.focus();
-          return;
-        }
-
-        const submit = document.getElementById('signin-button') as HTMLButtonElement | null;
-        if (submit) {
-          submit.disabled = true;
-          submit.textContent = 'Awaiting passkey…';
-        }
-
+        if (!email) return;
         try {
-          const response = await fetch('/auth/webauthn/login/begin', {
+          const beginRes = await fetch('/auth/webauthn/login/begin', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: email }),
           });
-          if (!response.ok) {
-            const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-            throw new Error(error.detail || 'Failed to start passkey login');
+          if (!beginRes.ok) {
+            const err = await beginRes.json().catch(() => ({ detail: 'Failed to start passkey login' }));
+            throw new Error(err.detail || 'Failed to start passkey login');
           }
-          const options = await response.json();
-          const publicKey = options.publicKey;
-          publicKey.challenge = base64urlToBuffer(publicKey.challenge);
-          publicKey.allowCredentials = publicKey.allowCredentials?.map((c: any) => ({
-            ...c,
-            id: base64urlToBuffer(c.id),
-          }));
-          const credential = await navigator.credentials.get({ publicKey });
+          const options = await beginRes.json();
+          const pk = options.publicKey;
+          pk.challenge = base64urlToBuffer(pk.challenge);
+          pk.allowCredentials = (pk.allowCredentials || []).map((c: any) => ({ ...c, id: base64urlToBuffer(c.id) }));
+          const credential = await navigator.credentials.get({ publicKey: pk });
           if (!credential) throw new Error('No credential returned');
           if (!(credential instanceof PublicKeyCredential)) throw new Error('Not a public-key credential');
           if (!(credential.response instanceof AuthenticatorAssertionResponse)) throw new Error('Unexpected credential response type');
           const pkCredential = credential;
           const assertion = credential.response;
-
-          const authResponse = await fetch('/api/auth/webauthn/login/complete', {
+          const completeRes = await fetch('/api/auth/webauthn/login/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -288,45 +564,16 @@ if (Astro.request.method === 'POST') {
               username: email,
             }),
           });
-          if (!authResponse.ok) {
-            const error = await authResponse.json().catch(() => ({ detail: 'Authentication failed' }));
-            throw new Error(error.detail || 'Passkey login failed');
+          if (!completeRes.ok) {
+            const err = await completeRes.json().catch(() => ({ detail: 'Passkey login failed' }));
+            throw new Error(err.detail || 'Passkey login failed');
           }
-
           window.location.href = '/habits';
-        } catch (err) {
-          console.error('WebAuthn login error:', err);
-          if (submit) {
-            submit.disabled = false;
-            submit.textContent = 'Sign in';
-          }
-          const status = document.getElementById('email-status');
-          if (status) status.textContent = `Passkey login failed: ${(err as Error).message}`;
+        } catch (e) {
+          const status = document.getElementById('passkey-error');
+          if (status) status.textContent = `Passkey login failed: ${(e as Error).message}`;
         }
       });
     });
-
-    function base64urlToBuffer(str: string): ArrayBuffer {
-      const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
-      const binary = atob(padded);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return bytes.buffer;
-    }
-
-    function bufferToBase64url(buf: ArrayBuffer): string {
-      const bytes = new Uint8Array(buf);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      return btoa(binary)
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=/g, '');
-    }
   </script>
 </Layout>

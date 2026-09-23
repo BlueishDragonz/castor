@@ -35,6 +35,12 @@ class TimestampMixin:
 
 class User(TimestampMixin, SQLAlchemyBaseUserTableUUID, Base):
     token_version: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    # True once we've shown the post-login "Set up a passkey?" offer (or the user
+    # dismissed it). We never re-show it after this flips. User can still enrol
+    # voluntarily via /security.
+    passkey_offer_dismissed: Mapped[bool] = mapped_column(
+        default=False, server_default="0", nullable=False
+    )
 
     habit_list: Mapped["HabitListModel"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -169,6 +175,16 @@ async def create_db_and_tables():
         columns = await conn.run_sync(lambda sync: {c["name"] for c in inspect(sync).get_columns("user")})
         if "token_version" not in columns:
             await conn.execute(text('ALTER TABLE "user" ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0'))
+        if "passkey_offer_dismissed" not in columns:
+            await conn.execute(text(
+                'ALTER TABLE "user" ADD COLUMN passkey_offer_dismissed BOOLEAN NOT NULL DEFAULT FALSE'
+            ))
+        # Existing users that have at least one passkey registered
+        # should be treated as "dismissed" — they've already onboarded.
+        await conn.execute(text(
+            'UPDATE "user" SET passkey_offer_dismissed = TRUE '
+            'WHERE id IN (SELECT DISTINCT user_id FROM webauthn_credential)'
+        ))
         reset_columns = await conn.run_sync(
             lambda sync: {c["name"] for c in inspect(sync).get_columns("password_reset_code")}
         )

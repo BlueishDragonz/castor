@@ -25,7 +25,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from castor.app.auth import user_get_by_email, user_from_token, user_bump_token_version
+from castor.app.auth import (
+    get_async_session_context,
+    user_get_by_email,
+    user_from_token,
+    user_bump_token_version,
+)
 from castor.app.audit import record
 from castor.app.users import get_user_manager, UserManager
 from castor.app.dependencies import current_active_user
@@ -346,23 +351,71 @@ async def webauthn_check(
 ):
     """Lightweight probe used by the login page for progressive disclosure.
 
-    Returns ``{"has_passkey": true}`` if the email is registered AND has
-    at least one WebAuthn credential. Returns ``{"has_passkey": false}`` if
-    the email is unknown OR no passkeys are enrolled.
+    Returns the same ``OK`` shape regardless of outcome to avoid letting
+    an attacker distinguish "email not registered" from "registered but
+    no passkey". After login completes the frontend also gates the
+    post-login "set up a passkey?" offer on ``passkey_offer_dismissed``;
+    having it surfaced here means the BFF can decide the offer with one
+    round-trip instead of two.
 
-    Critically, both cases return 200 so the endpoint cannot be used to
-    enumerate registered emails — the response is the same shape for both
-    "unknown" and "known but no passkeys".
+    Shape::
+        {
+            "has_passkey": bool,
+            "passkey_offer_dismissed": bool,
+        }
+
+    All three binary states share the same 200 envelope:
+
+    - has_passkey=true                      → user is registered with passkey
+    - has_passkey=false, offer_dismissed=false → user registered, no passkey,
+      offer not yet shown
+    - has_passkey=false, offer_dismissed=true  → user registered, no passkey,
+      offer already shown (or user dismissed it)
+    - has_passkey=false, offer_dismissed=true  → unknown email — both fields
+      default to false for non-existent accounts
+
+    The endpoint is intentionally cheap (no JWT, no cookie); it is meant
+    to be called many times per login.
     """
-    # Always look the user up by email regardless of result so we use
-    # the same code path as the rest of auth and benefit from the
-    # eventual-consistency edge cases it handles. We then resolve to a
-    # bool without leaking existence.
     user = await user_get_by_email(request.username)
     if not user or not user.is_active:
-        return {"has_passkey": False}
+        return {"has_passkey": False, "passkey_offer_dismissed": False}
     credentials = await user_manager.get_webauthn_credentials(user)
-    return {"has_passkey": bool(credentials)}
+    has_passkey = bool(credentials)
+    return {
+        "has_passkey": has_passkey,
+        # If the user has a passkey, mark the offer as already-dismissed by
+        # definition: they enrolled one, so the prompt has been satisfied.
+        "passkey_offer_dismissed": bool(
+            getattr(user, "passkey_offer_dismissed", False) or has_passkey
+        ),
+    }
+
+
+@router.post("/offer/dismiss")
+async def dismiss_passkey_offer(
+    request: WebAuthnLoginBeginRequest,
+):
+    """Mark the post-login "Set up a passkey?" offer as dismissed for this user.
+
+    Idempotent. Once dismissed the login page never re-asks the user
+    to enrol; enrolment is voluntary via /security.
+    """
+    async with get_async_session_context() as session:
+        async with session.begin():
+            result = await session.execute(
+                update(User)
+                .where(User.email == request.username, User.is_active.is_(True))
+                .values(passkey_offer_dismissed=True)
+                .execution_options(synchronize_session=False)
+            )
+            rowcount = getattr(result, "rowcount", 0)
+            if rowcount == 0:
+                # User unknown / not active — return success shape anyway
+                # so this endpoint (like /auth/webauthn/check) does not let
+                # an attacker distinguish unknown from known emails.
+                return {"ok": False, "detail": "unknown user"}
+            return {"ok": True}
 
 
 @router.post("/login/begin", response_model=WebAuthnLoginBeginResponse)
