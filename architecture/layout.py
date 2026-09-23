@@ -1,0 +1,258 @@
+import time
+from contextlib import contextmanager
+
+from nicegui import background_tasks, ui
+
+from beaverhabits import views
+from beaverhabits.app.auth import user_logout
+from beaverhabits.configs import settings
+from beaverhabits.frontend import css, icons
+from beaverhabits.frontend.components import (
+    bh_card,
+    habit_edit_dialog,
+    menu_header,
+    menu_icon_button,
+    menu_icon_item,
+    redirect,
+    separator,
+)
+from beaverhabits.frontend.javascript import PREVENT_CONTEXT_MENU
+from beaverhabits.frontend.menu import add_menu, sort_menu, stats_date_pick_menu
+from beaverhabits.plan import plan
+from beaverhabits.storage.meta import (
+    get_root_path,
+    is_page_demo,
+    page_path,
+    page_title,
+)
+from beaverhabits.storage.storage import Habit, HabitList
+from beaverhabits.version import IDENTITY
+
+
+def pwa_headers():
+    # Extend background to iOS notch
+    ui.add_head_html(
+        """
+        <link rel="apple-touch-icon" href="/statics/images/apple-touch-icon-v4.png">
+
+        <meta name="apple-mobile-web-app-title" content="Beaver">
+        <meta name="application-name" content="Beaver">
+
+        <meta name="theme-color" content="#F9F9F9" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+        """
+    )
+
+    # Experimental PWA
+    if settings.ENABLE_IOS_STANDALONE:
+        # Hiding Safari User Interface Components
+        ui.add_head_html('<meta name="mobile-web-app-capable" content="yes">')
+        ui.add_head_html('<link rel="manifest" href="/statics/pwa/manifest.json">')
+
+
+def custom_headers():
+    # Get current page info
+    page_url = "https://beaverhabits.com" + page_path()
+
+    # SEO meta tags
+    ui.add_head_html(
+        f"""
+        <!-- Basic Meta Tags -->
+        <meta name="description" content="A minimal habit tracking app without Goals. Track your daily habits with a simple, privacy-focused interface.">
+        <meta name="keywords" content="habit tracker, habit tracking, self-hosted, productivity, daily habits, habit building, open source">
+        <meta name="author" content="daya0576">
+        <meta name="robots" content="index, follow">
+        <link rel="canonical" href="{page_url}">
+
+        <!-- Open Graph / Facebook -->
+        <meta property="og:type" content="website">
+        <meta property="og:url" content="{page_url}">
+        <meta property="og:title" content="Beaver Habit Tracker">
+        <meta property="og:description" content="A minimal habit tracking app without Goals. Track your daily habits with privacy and simplicity.">
+        <meta property="og:image" content="https://beaverhabits.com/statics/images/apple-touch-icon-v4.png">
+        <meta property="og:site_name" content="Beaver Habit Tracker">
+
+        <!-- Twitter -->
+        <meta name="twitter:card" content="summary_large_image">
+        <meta name="twitter:url" content="{page_url}">
+        <meta name="twitter:title" content="Beaver Habit Tracker">
+        <meta name="twitter:description" content="A minimal habit tracking app without Goals. Track your daily habits with privacy and simplicity.">
+        <meta name="twitter:image" content="https://beaverhabits.com/statics/images/apple-touch-icon-v4.png">
+
+        <!-- Structured Data (JSON-LD) -->
+        <script type="application/ld+json">
+        {{
+            "@context": "https://schema.org",
+            "@type": "WebApplication",
+            "name": "Beaver Habit Tracker",
+            "url": "https://beaverhabits.com",
+            "description": "A minimal habit tracking app without Goals",
+            "applicationCategory": "ProductivityApplication",
+            "operatingSystem": "Web, iOS, Android",
+            "offers": {{
+                "@type": "Offer",
+                "price": "0",
+                "priceCurrency": "USD"
+            }},
+            "author": {{
+                "@type": "Person",
+                "name": "daya0576",
+                "url": "https://github.com/daya0576"
+            }}
+        }}
+        </script>
+        """
+    )
+
+    # Long-press event
+    ui.add_head_html('<script src="/statics/libs/long-press-event.min.js"></script>')
+
+    # Analytics
+    if settings.UMAMI_ANALYTICS_ID:
+        ui.add_head_html(
+            f'<script defer src="{settings.UMAMI_SCRIPT_URL}" data-website-id="{settings.UMAMI_ANALYTICS_ID}"></script>'
+        )
+
+    # Prevent white flash on page load
+    ui.add_css(css.WHITE_FLASH_PREVENT)
+    ui.add_css(css.TEXTAREA_CSS)
+    # Self-hosted Inter font (added in Batch 2, replaces Quasar's default Roboto)
+    ui.add_css(css.FONT_CSS)
+    # Beaver Habits Design System (promoted from security page)
+    ui.add_css(css.BH_DESIGN_CSS)
+
+    # Preserve native desktop/tablet menus; suppress long-press callouts on phones.
+    from nicegui import context
+    from beaverhabits.frontend.device import is_mobile
+
+    request = context.client.request
+    user_agent = request.headers.get("user-agent", "") if request else ""
+    if is_mobile(user_agent):
+        ui.add_body_html(f"<script>{PREVENT_CONTEXT_MENU}</script>")
+
+    # custom css styles
+    views.apply_theme_style()
+
+
+def show_help_dialog():
+    with ui.context.client.content:
+        with ui.dialog() as dialog:
+            with bh_card(variant="dialog").classes("w-[360px]"):
+                title = IDENTITY.replace("/", " ")
+                title = title.split("@")[0] if "@" in title else title
+                ui.label(title).classes("text-lg font-bold")
+                ui.separator()
+
+                items = {
+                    "Documentation": "https://github.com/daya0576/beaverhabits/wiki",
+                    "Supporter": "https://www.beaverhabits.com/pricing",
+                    "YouTube": "https://www.youtube.com/@beaverhabits",
+                    "Bugs & Feature Requests": "https://github.com/daya0576/beaverhabits/issues",
+                }
+
+                with ui.grid(columns=2).classes("gap-2"):
+                    for name, link in items.items():
+                        ui.link(name, link, new_tab=True)
+
+        dialog.props('backdrop-filter="blur(4px)"')
+        dialog.open()
+
+
+@ui.refreshable
+def menu_component():
+    """Dropdown menu for the top-right corner of the page."""
+    with ui.menu().props('role="menu" transition-duration="50"'):
+        add_menu()
+        separator()
+
+        with menu_icon_item("Tools", auto_close=False, icon="sym_o_construction").classes("pr-1"):
+            with ui.item_section().props("side").classes("pl-[1px]"):
+                ui.icon(icons.CHEVRON_RIGHT)
+            with ui.menu().props('anchor="top end" self="top start" auto-close'):
+                # Stats for all habtis
+                menu_icon_item("Reorder", lambda: redirect("order"), icon="sym_o_swap_vert")
+                separator()
+
+                # Export & import
+                menu_icon_item("Export", lambda: redirect("export"), icon="sym_o_download")
+                separator()
+                imp = menu_icon_item("Import", lambda: redirect("import"), icon="sym_o_upload")
+                if is_page_demo():
+                    imp.classes("disabled")
+                separator()
+
+                # Stats for all habtis
+                menu_icon_item("Stats", lambda: redirect("stats"), icon="sym_o_bar_chart")
+                separator()
+
+        separator()
+
+        # Security (passkey management, password change)
+        menu_icon_item("Security", lambda: redirect("security"), icon="sym_o_shield")
+        separator()
+
+        # About page
+        menu_icon_item("Help", show_help_dialog, icon="sym_o_help")
+        separator()
+
+        # Login & Logout
+        menu_icon_item("Logout", lambda: user_logout() and ui.navigate.to("/login"), icon="sym_o_logout")
+
+
+@contextmanager
+def layout(
+    title: str | None = None,
+    habit: Habit | None = None,
+    habit_list: HabitList | None = None,
+    page_ui: ui.refreshable | None = None,
+):
+    # Standard headers
+    custom_headers()
+    pwa_headers()
+
+    # Detect phone-class UA; gate mobile-only chrome on this.
+    # `context.client.request` is populated for HTTP requests, including
+    # the initial page load before the WS handshake.
+    # These imports are lazy to break the layout<->bottom_nav circular import:
+    # bottom_nav.py imports `redirect` from layout (line 7), so layout must
+    # not import bottom_nav at module level.
+    from nicegui import context
+    from beaverhabits.frontend.device import is_mobile
+    _ua = context.client.request.headers.get("user-agent", "") if context.client.request else ""
+    mobile = is_mobile(_ua)
+
+    # Center the content on small screens
+    extra_pad = "pb-20" if mobile else ""
+    with ui.column().classes(f"mx-auto mx-0 {extra_pad}"):
+
+        # Layout wrapper
+        with ui.row().classes("w-full gap-x-1"):
+            title, target = title or page_title(), get_root_path()
+            menu_header(title, target=target)
+            ui.space()
+
+            if habit:
+                edit_dialog = habit_edit_dialog(habit)
+                edit_btn = menu_icon_button("sym_r_pen_size_3", tooltip="Edit habit")
+                edit_btn.on_click(edit_dialog.open)
+            elif habit_list and "add" in page_path():
+                with menu_icon_button("sym_o_swap_vert", tooltip="Sort"):
+                    sort_menu(habit_list)
+            elif "stats" in page_path() and page_ui:
+                with menu_icon_button("sym_o_expand_content", tooltip="Date"):
+                    stats_date_pick_menu()
+
+            # Mobile users see a single Reorder icon in the top-right (where the
+            # hamburger used to sit). Desktop/tablet keep the hamburger (full menu:
+            # Add, Tools, Security, Help, Logout).
+            if mobile:
+                menu_icon_button("sym_o_swap_vert", click=lambda: redirect("order"), tooltip="Reorder habits")
+            else:
+                with menu_icon_button("sym_o_menu"):
+                    menu_component()
+
+        yield
+
+        if mobile:
+            from beaverhabits.frontend.bottom_nav import bottom_nav
+            bottom_nav()

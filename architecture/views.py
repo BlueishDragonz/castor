@@ -1,0 +1,385 @@
+import asyncio
+import datetime
+import json
+import random
+import re
+from dataclasses import dataclass
+from typing import Sequence
+
+from fastapi import HTTPException
+from nicegui import app, ui
+
+from beaverhabits.app import crud
+from beaverhabits.app.auth import (
+    user_check_token,
+    user_create,
+    user_create_reset_token,
+    user_create_token,
+    user_archive,
+    user_get_by_email,
+    user_reset_password,
+)
+from beaverhabits.app.crud import get_customer_list, get_user_count, get_user_list
+from beaverhabits.app.db import User
+from beaverhabits.configs import settings
+from beaverhabits.core.backup import backup_to_telegram
+from beaverhabits.frontend.components import redirect
+from beaverhabits.logger import logger
+from beaverhabits.storage import get_user_dict_storage, session_storage
+from beaverhabits.storage.dict import DAY_MASK, DictHabitList
+from beaverhabits.storage.meta import GUI_ROOT_PATH
+from beaverhabits.storage.storage import Habit, HabitList, HabitListBuilder, HabitStatus
+from beaverhabits.utils import generate_short_hash, send_email
+
+user_storage = get_user_dict_storage()
+
+
+def dummy_empty_habit_list() -> DictHabitList:
+    return DictHabitList({"habits": []})
+
+
+def dummy_habit_list(days: list[datetime.date]):
+    pick = lambda: random.randint(0, 4) == 0
+    items = [
+        {
+            "id": generate_short_hash(name),
+            "name": name,
+            "records": [
+                {"day": day.strftime(DAY_MASK), "done": True} for day in days if pick()
+            ],
+        }
+        for name in ("Order pizz", "Running", "Table Tennis", "Clean", "Call mom")
+    ]
+    return DictHabitList({"habits": items})
+
+
+def get_session_habit_list() -> HabitList | None:
+    return session_storage.get_user_habit_list()
+
+
+async def get_session_habit(habit_id: str) -> Habit | None:
+    habit_list = get_session_habit_list()
+    if habit_list is None:
+        return None
+
+    habit = await habit_list.get_habit_by(habit_id)
+    if habit is None:
+        return None
+
+    return habit
+
+
+def get_or_create_session_habit_list(days: list[datetime.date]) -> HabitList:
+    if (habit_list := get_session_habit_list()) is not None:
+        return habit_list
+
+    session_storage.save_user_habit_list(dummy_habit_list(days))
+
+    habit_list = get_session_habit_list()
+    if habit_list is None:
+        raise Exception("Panic! Failed to load habit list")
+    return habit_list
+
+
+async def get_user_habit_list(user: User) -> HabitList:
+    try:
+        return await user_storage.get_user_habit_list(user)
+    except Exception:
+        raise HTTPException(
+            status_code=404,
+            detail="The habit list data may be broken or missing, please contact the administrator.",
+        )
+
+
+async def get_user_habit(user: User, habit_id: str) -> Habit:
+    habit_list = await get_user_habit_list(user)
+
+    habit = await habit_list.get_habit_by(habit_id)
+    if habit is None:
+        raise HTTPException(status_code=404, detail="Habit not found")
+
+    return habit
+
+
+async def remove_user_habit(user: User, habit: Habit) -> None:
+    habit_list = await get_user_habit_list(user)
+    await habit_list.remove(habit)
+
+
+async def get_or_create_user_habit_list(user: User, habit_list: HabitList) -> HabitList:
+    try:
+        return await get_user_habit_list(user)
+    except HTTPException:
+        logger.warning(f"Failed to load habit list for user {user.email}")
+
+    logger.info(f"Creating dummy habit list for user {user.email}")
+    await user_storage.init_user_habit_list(user, habit_list)
+
+    return await get_user_habit_list(user)
+
+
+async def delete_user_account(user: User) -> None:
+    """Delete personal data and retain only an anonymous, disabled tombstone."""
+    await user_storage.delete_user_habit_list(user)
+    await crud.delete_user_api_token(user)
+    await crud.delete_user_identity(user.email)
+    await crud.delete_user_owned_data(user)
+    await user_archive(user)
+
+
+async def export_user_habit_list(habit_list: HabitList, user_identify: str) -> bool:
+    habits = HabitListBuilder(habit_list).status(HabitStatus.ACTIVE).build()
+
+    # json to binary
+    now = datetime.datetime.now()
+    if not isinstance(habit_list, DictHabitList):
+        return False
+
+    export_d = {
+        "user_email": user_identify,
+        "exported_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "habits": [habit.to_dict() for habit in habits],
+    }
+    binary_data = json.dumps(export_d).encode()
+    file_name = f"beaverhabits_{now.strftime('%Y_%m_%d')}.json"
+    ui.download(binary_data, file_name)
+    return True
+
+
+async def validate_max_user_count():
+    if await get_user_count() >= settings.MAX_USER_COUNT > 0:
+        raise HTTPException(status_code=404, detail="User limit reached")
+
+
+async def login_user(user: User) -> None:
+    token = await user_create_token(user)
+    if token is not None:
+        app.storage.user.update({"auth_token": token})
+        logger.info(f"User {user.email} logged in successfully, token: {token[:4]}***")
+
+    await cache_user_configs(user)
+
+
+async def register_user(email: str, password: str | None = None) -> User:
+    logger.info(f"Registering user {email}...")
+    user = await user_create(email=email, password=password)
+    # Create a dummy habit list for the new users
+    days = [datetime.date.today() - datetime.timedelta(days=i) for i in range(30)]
+    habit_list = dummy_habit_list(days)
+    await get_or_create_user_habit_list(user, habit_list)
+    logger.info(f"User {email} registered successfully")
+    return user
+
+
+async def is_gui_authenticated() -> bool:
+    if settings.is_trusted_env():
+        return True
+
+    if await user_check_token(app.storage.user.get("auth_token", None)):
+        return True
+
+    return False
+
+
+async def get_activated_users() -> Sequence[User]:
+    users = await get_user_list()
+    if not settings.ENABLE_PLAN:
+        return users
+
+    customers = await get_customer_list()
+    emails = [customer.email for customer in customers if customer.activated]
+    logger.debug(f"Activated users: {emails}")
+
+    return [user for user in users if user.email in emails]
+
+
+async def backup_all_users():
+    for user in await get_activated_users():
+        logger.info(f"Backing up habit list for user {user.email}...")
+        habit_list = await get_user_habit_list(user)
+        if habit_list is None:
+            logger.warning(f"Failed to load habit list for user {user.email}")
+            continue
+
+        backup = habit_list.backup
+        if not backup.telegram_bot_token or not backup.telegram_chat_id:
+            logger.warning(f"User {user.email} has no backup settings")
+            continue
+
+        try:
+            backup_to_telegram(
+                backup.telegram_bot_token, backup.telegram_chat_id, habit_list
+            )
+        except Exception as e:
+            logger.error(f"Failed to backup habit list for user {user.email}: {e}")
+        else:
+            logger.info(f"Successfully backed up habit list for user {user.email}")
+
+
+async def forgot_password(email: str) -> None:
+    from beaverhabits.app.rate_limits import consume
+
+    # GUI callbacks bypass the HTTP /auth/ limiter. The former decorator had a
+    # per-process cache keyed by raw args; use the persistent recovery budget.
+    email = email.strip().lower()
+    admitted = None  # None = unknown (store failure), True/False = consume verdict
+    try:
+        # Admit one request per email per window; a throttled retry must never
+        # display the success notice — no email is sent when denied here.
+        admitted = await consume("recovery", f"forgot_email:{email}", 1, 900)
+        if admitted:
+            user = await user_get_by_email(email)
+            if user is not None and user.is_active:
+                token = user_create_reset_token(user)
+                if token:
+                    # SMTP is synchronous. Await its bounded socket operations;
+                    # cancelling a one-second await cannot cancel the mail thread.
+                    await asyncio.to_thread(
+                        send_email,
+                        "Reset your password",
+                        f"Click the link to reset your password: {settings.APP_URL}/reset-password?token={token}",
+                        [user.email],
+                    )
+    except Exception:
+        # Neither exception text nor recipients/message bodies belong in logs.
+        logger.warning("Recovery request could not be completed")
+    if admitted is False:
+        # P0-2: honest throttle notice; never claim an email was sent.
+        ui.notify("Too many recovery requests. Please wait a few minutes and try again.", color="warning")
+        return
+    ui.notify(
+        "If the account can be recovered, reset instructions will be emailed. Please check your inbox.",
+        color="positive",
+    )
+
+
+async def reset_password(user: User, password: str) -> None:
+    from fastapi_users import exceptions
+
+    try:
+        new_user = await user_reset_password(user, password)
+    except exceptions.InvalidResetPasswordToken:
+        # The only link/token outcome the service actually raises: invalid,
+        # expired, inactive account, stale version, and replay all land here.
+        ui.notify("This reset link is invalid or expired. Please request a new one.", color="negative")
+        return
+    except exceptions.InvalidPasswordException:
+        ui.notify("Password does not meet the requirements. Use at least 12 characters.", color="negative")
+        return
+    except Exception:
+        logger.warning("Password reset could not be completed")
+        ui.notify("We could not confirm whether your password changed. Sign in with your new password first; if it does not work, request a new recovery link.", color="negative")
+        return
+    if new_user is None:
+        ui.notify("Password could not be reset. Please request a new reset link.", color="negative")
+        return
+
+    ui.notify("Password reset successfully", color="positive")
+
+    await login_user(new_user)
+    redirect(GUI_ROOT_PATH)
+
+
+@dataclass
+class UserConfigs:
+    custom_css: str | None = None
+    default_chips: list[str] | None = None
+    default_chips_mapping: dict[str, str] | None = None
+
+
+async def get_user_configs(user: User) -> UserConfigs:
+    configs = await crud.get_user_configs(user) or {}
+    return UserConfigs(
+        custom_css=configs.get("css", None),
+        default_chips=configs.get("default_chips", None),
+        default_chips_mapping=configs.get("default_chips_mapping", None),
+    )
+
+
+async def cache_user_configs(user: User) -> None:
+    configs = await get_user_configs(user)
+    app.storage.user.update(
+        {
+            "custom_css": configs.custom_css or "",
+            "default_chips": configs.default_chips or [],
+            "default_chips_mapping": configs.default_chips_mapping or {},
+        }
+    )
+
+
+from beaverhabits.css_sanitizer import sanitize_css
+
+
+async def update_custom_css(user: User, css: str) -> None:
+    css = sanitize_css(css)
+    app.storage.user["custom_css"] = css
+
+    await crud.update_user_configs(
+        user,
+        {
+            "css": css,
+        },
+    )
+
+
+def get_default_chips() -> list[str]:
+    return app.storage.user.get(
+        "default_chips", settings.DEFAULT_COMPLETION_STATUS_LIST
+    )
+
+
+def get_default_chips_mapping() -> dict[str, str]:
+    return app.storage.user.get("default_chips_mapping", {})
+
+
+async def update_default_chips(
+    user: User | None, chips: list[str], mapping: dict[str, str]
+) -> None:
+    app.storage.user["default_chips"] = chips
+    app.storage.user["default_chips_mapping"] = mapping
+
+    if user:
+        await crud.update_user_configs(
+            user,
+            {
+                "default_chips": chips,
+                "default_chips_mapping": mapping,
+            },
+        )
+
+
+def apply_theme_style() -> None:
+    try:
+        custom_css = app.storage.user.get("custom_css", "")
+    except Exception as e:
+        logger.error(f"Failed to get custom CSS: {e}")
+        return None
+
+    if custom_css:
+        ui.add_head_html(f"<style>{sanitize_css(custom_css)}</style>")
+        logger.info(f"Applied custom CSS...")
+
+
+async def promote_user_to_pro(email: str, pro: bool = True) -> None:
+    customer = await crud.get_or_create_user_identity(email, email, "", {})
+    await crud.update_user_identity(customer.email, {}, activate=pro)
+
+
+async def set_user_cookies(user: User) -> None:
+    """Set user-related cookies for cross-app usage via JavaScript."""
+    if settings.ENABLE_PLAN is False:
+        return
+
+    async def set_cookies_task():
+        # Set email cookie (add more properties as needed)
+        ui.run_javascript(
+            f'document.cookie = "email={user.email}; path=/; SameSite=Lax";'
+        )
+
+        customer = await crud.get_user_identity(user.email)
+        is_pro = customer.activated if customer else False
+        ui.run_javascript(
+            f'document.cookie = "is_pro={str(is_pro).lower()}; path=/; SameSite=Lax";'
+        )
+
+    ui.timer(0.1, set_cookies_task, once=True)
