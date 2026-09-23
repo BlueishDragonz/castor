@@ -327,6 +327,18 @@ async def webauthn_register_complete(
     strategy = get_jwt_strategy()
     token = await strategy.write_token(user)
 
+    # Registration implies the post-login "set up a passkey?" offer is
+    # satisfied (success path). Without this, a user who enrolled via
+    # /security would still see the offer on next sign-in.
+    from castor.app.db import User as _User, get_async_session_context  # type: ignore
+    async with get_async_session_context() as session:
+        async with session.begin():
+            await session.execute(
+                update(_User).where(_User.id == user.id).values(
+                    passkey_offer_dismissed=True
+                )
+            )
+
     logger.info(f"WebAuthn credential registered for user {user.email}")
 
     # Set auth cookie with Strict + Secure in production
