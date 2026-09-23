@@ -61,22 +61,43 @@ export interface SheetContentProps
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   SheetContentProps
->(({ side = 'right', className, children, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(sheetVariants({ side }), 'duration-300', className)}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </SheetPortal>
-));
+>(({ side = 'right', className, children, ...props }, ref) => {
+  // SSR guard: DialogPrimitive.Portal renders its children inline when
+  // there is no document (server), and Astro uses `client:load` so the
+  // DesktopMenu is rendered server-side too. That used to print every
+  // menu item into the SSR HTML of /habits (Reorder habits, Import,
+  // Export, Statistics, Security, Settings, Log out). On lg viewports
+  // the trigger's parent `hidden lg:block` wrapper could not hide them,
+  // so the page flashed the menu list near the top-right corner for
+  // several frames between SSR and hydration. Returning null while
+  // `mounted` is false stops the tree from rendering entirely; the
+  // client hydration step flips mounted=true on the next tick, the
+  // portal mounts into document.body, and the menu appears in its
+  // final portal location with no inline copy to flash first.
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+  if (!mounted) {
+    return null;
+  }
+  return (
+    <SheetPortal>
+      <SheetOverlay />
+      <DialogPrimitive.Content
+        ref={ref}
+        className={cn(sheetVariants({ side }), 'duration-300', className)}
+        {...props}
+      >
+        {children}
+        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </SheetPortal>
+  );
+});
 SheetContent.displayName = DialogPrimitive.Content.displayName;
 
 const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
