@@ -41,6 +41,14 @@ class User(TimestampMixin, SQLAlchemyBaseUserTableUUID, Base):
     passkey_offer_dismissed: Mapped[bool] = mapped_column(
         default=False, server_default="0", nullable=False
     )
+    # Backup email for account recovery. ``recovery_email`` is the address
+    # proposed by the user; ``recovery_email_verified`` flips to True only
+    # after a successful 6-digit-code round-trip. Both nullable; absence
+    # means the user has not opted into account recovery.
+    recovery_email: Mapped[str | None] = mapped_column(nullable=True, index=True)
+    recovery_email_verified: Mapped[bool] = mapped_column(
+        default=False, server_default="0", nullable=False
+    )
 
     habit_list: Mapped["HabitListModel"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -137,6 +145,29 @@ class WebAuthnCredential(TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(nullable=True)
 
 
+class RecoveryEmailChallenge(TimestampMixin, Base):
+    """Time-limited email-ownership proof for the recovery email flow.
+
+    The user proposes a backup address; we mail a 6-digit code. They
+    reply with the code; we flip ``user.recovery_email`` plus its
+    ``verified`` flag in a single transaction.
+
+    The code is SHA-256-hashed at rest, expires in 15 minutes, and is
+    consumed once. The (user_id, token_version) pair is recorded so a
+    parallel sign-out invalidates in-flight challenges.
+    """
+
+    __tablename__ = "recovery_email_challenge"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    email: Mapped[str] = mapped_column(index=True)
+    code_hash: Mapped[str]
+    expires_at: Mapped[datetime.datetime]
+    used: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    user_id = mapped_column(GUID, ForeignKey("user.id"), index=True)
+    token_version: Mapped[int | None] = mapped_column(nullable=True)
+
+
 class PasswordResetCode(TimestampMixin, Base):
     """12-digit reset code with SHA-256 hash, 10-minute TTL, single-use."""
 
@@ -178,6 +209,17 @@ async def create_db_and_tables():
         if "passkey_offer_dismissed" not in columns:
             await conn.execute(text(
                 'ALTER TABLE "user" ADD COLUMN passkey_offer_dismissed BOOLEAN NOT NULL DEFAULT FALSE'
+            ))
+        if "recovery_email" not in columns:
+            await conn.execute(text(
+                'ALTER TABLE "user" ADD COLUMN recovery_email VARCHAR NULL'
+            ))
+            await conn.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_user_recovery_email ON "user" (recovery_email)'
+            ))
+        if "recovery_email_verified" not in columns:
+            await conn.execute(text(
+                'ALTER TABLE "user" ADD COLUMN recovery_email_verified BOOLEAN NOT NULL DEFAULT FALSE'
             ))
         # Existing users that have at least one passkey registered
         # should be treated as "dismissed" — they've already onboarded.

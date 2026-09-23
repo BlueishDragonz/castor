@@ -29,6 +29,7 @@ Removed in P3-B:
 import datetime
 import functools
 import hashlib
+import os
 import smtplib
 import time
 from functools import wraps
@@ -140,7 +141,17 @@ def timeit(threshold: float):
 
 
 def send_email(subject: str, body: str, recipients: list[str], html_body: str | None = None):
-    """Send email with optional HTML body for branding."""
+    """Send email with optional HTML body for branding.
+
+    Local-outbox mode (development/CI without SMTP credentials):
+        Set SMTP_DEV_LOCAL_OUTBOX=/path/to/dir before launching the
+        backend and the email is written to a file in that directory
+        instead of being sent. Files are named with the recipient,
+        timestamp, and a sha256 of the body to make finding recent
+        codes easy in tests. Used heavily in migration-branch's
+        forgot/reset/recovery-email integration tests; harmless in
+        production (the env var is unset in deployed environments).
+    """
     sender = settings.SMTP_EMAIL_USERNAME
     password = settings.SMTP_EMAIL_PASSWORD
 
@@ -163,6 +174,22 @@ def send_email(subject: str, body: str, recipients: list[str], html_body: str | 
         msg["Subject"] = subject
         msg["From"] = sender
         msg["To"] = ", ".join(recipients)
+
+    outbox = os.environ.get("SMTP_DEV_LOCAL_OUTBOX")
+    if outbox:
+        os.makedirs(outbox, exist_ok=True)
+        body_hash = hashlib.sha256(msg.as_string().encode()).hexdigest()[:10]
+        recipient_tag = recipients[0].replace("@", "_at_").replace(".", "_")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        filename = f"{timestamp}_{recipient_tag}_{body_hash}.eml"
+        path = os.path.join(outbox, filename)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(msg.as_string())
+        # Also write a plaintext summary so test scripts can read codes
+        # via grep without parsing MIME.
+        with open(path + ".summary.txt", "w", encoding="utf-8") as fh:
+            fh.write(f"To: {recipients[0]}\nSubject: {subject}\n\n{body}\n")
+        return path
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp_server:
         smtp_server.login(sender, password)

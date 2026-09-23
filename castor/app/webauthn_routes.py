@@ -1,13 +1,22 @@
 import base64
+import asyncio
+import hashlib
 import json
 import re
 import secrets
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import update
+from sqlalchemy import select, update
+from castor.app.audit import record
 from castor.app.challenges import ChallengeStore
-from castor.app.db import User, WebAuthnCredential
+from castor.app.db import User, WebAuthnCredential, get_async_session_context
+from castor.app.rate_limits import consume, retry_after
+from castor.logger import logger
+from castor.utils import send_email
 from typing import Optional
 from uuid import UUID
+from fastapi import Depends
+from pydantic import BaseModel, EmailStr
 
 import webauthn
 from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
@@ -648,6 +657,261 @@ async def webauthn_delete_credential(
     except SecurityActionError as exc:
         raise HTTPException(exc.status_code, exc.message) from None
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Recovery email — propose + verify a backup address for account recovery.
+#
+# The flow mirrors password reset: a 6-digit code is mailed, hashed at rest,
+# expires in 15 minutes, and is consumed once. Because the user is signed
+# in, the action is gated by an active session (not by code-possession).
+# A sign-out invalidates in-flight challenges via token_version.
+# ---------------------------------------------------------------------------
+
+RECOVERY_CODE_TTL_MINUTES = 15
+
+
+class RecoveryEmailRequest(BaseModel):
+    email: EmailStr
+
+
+class RecoveryEmailVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str  # 6 digits, validated client-side
+    remove: bool = False  # explicit removal path
+
+
+def _hash_recovery_code(code: str) -> str:
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
+def _generate_recovery_code() -> str:
+    return f"{secrets.randbelow(10**6):06d}"
+
+
+async def _recovery_rate_limit_check(key: str, limit: int, window: int) -> None:
+    """Reuses the ``recovery`` namespace from forgot/reset flow."""
+    try:
+        admitted = await consume("recovery", key, limit, window)
+    except Exception:
+        raise HTTPException(503, "Rate-limit store unavailable") from None
+    if not admitted:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Try again later.",
+            headers={"Retry-After": retry_after(window)},
+        )
+
+
+def _recovery_email_html(code: str) -> str:
+    """Branded email template for the 6-digit recovery-email code."""
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="text-align: center; padding: 30px 0;">
+        <div style="display: inline-block; width: 64px; height: 64px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 16px; margin-bottom: 16px;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="margin: 16px;">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+        </div>
+        <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #111827;">Castor</h1>
+        <p style="margin: 8px 0 0; color: #6b7280;">dam good habits</p>
+    </div>
+
+    <div style="background: #f9fafb; border-radius: 12px; padding: 32px; margin: 24px 0;">
+        <h2 style="margin: 0 0 16px; font-size: 20px; font-weight: 600; color: #111827;">Confirm your recovery email</h2>
+        <p style="margin: 0 0 24px; color: #4b5563;">You are adding a backup email we can use to help you recover your account. Use this 6-digit code:</p>
+
+        <div style="background: #111827; color: #f9fafb; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; font-size: 32px; font-weight: 700; letter-spacing: 6px; text-align: center; padding: 20px; border-radius: 8px; margin: 24px 0; user-select: all;">
+            {code}
+        </div>
+
+        <p style="margin: 24px 0 0; font-size: 14px; color: #9ca3af;">This code expires in <strong>15 minutes</strong>.</p>
+        <p style="margin: 16px 0 0; font-size: 14px; color: #9ca3af;">If you didn't request this, you can safely ignore this email.</p>
+    </div>
+
+    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;">
+
+    <p style="margin: 0; font-size: 12px; color: #9ca3af; text-align: center;">
+        &copy; 2025 Castor. All rights reserved.
+    </p>
+</body>
+</html>
+"""
+
+
+@router.post("/recovery-email")
+async def set_recovery_email(
+    payload: RecoveryEmailRequest,
+    request: Request,
+    user: User = Depends(registration_user),
+):
+    """Step 1 of recovery-email setup. Mails a 6-digit code to ``payload.email``
+    and persists a hashed challenge. Identical emails sent twice are idempotent —
+    the new code replaces the old.
+
+    Returns ``{ pending: true, email, expires_at }``.
+    """
+    # Cap per-user churn: at most one in-flight code at a time, but allow
+    # re-requesting after expiry. The (user, email, ip) triple shares one bucket
+    # so a flood cannot consume a different user's budget.
+    client_ip = request.client.host if request.client else "unknown"
+    await _recovery_rate_limit_check(
+        f"recovery_request_ip:{client_ip}", limit=5, window=300
+    )
+    await _recovery_rate_limit_check(
+        f"recovery_request_user:{user.id}", limit=5, window=300
+    )
+
+    proposed = payload.email.strip().lower()
+    code = _generate_recovery_code()
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=RECOVERY_CODE_TTL_MINUTES
+    )
+
+    from castor.app.db import RecoveryEmailChallenge as _Challenge
+
+    async with get_async_session_context() as session:
+        async with session.begin():
+            # Insert a fresh row. Existing unused rows for the same user are
+            # tombstoned by ``used=True`` so a fresh code wins; replay against
+            # an old code fails the eligibility filter below.
+            await session.execute(
+                update(_Challenge)
+                .where(
+                    _Challenge.user_id == user.id,
+                    _Challenge.used.is_(False),
+                )
+                .values(used=True)
+                .execution_options(synchronize_session=False)
+            )
+            session.add(
+                _Challenge(
+                    email=proposed,
+                    code_hash=_hash_recovery_code(code),
+                    expires_at=expires_at,
+                    user_id=user.id,
+                    token_version=user.token_version,
+                )
+            )
+
+    try:
+        await asyncio.to_thread(
+            send_email,
+            "Your Castor recovery email code",
+            f"Your 6-digit recovery email code: {code}\nExpires in 15 minutes.",
+            [proposed],
+            html_body=_recovery_email_html(code),
+        )
+    except Exception:
+        logger.warning("Recovery email delivery failed")
+
+    return {
+        "pending": True,
+        "email": proposed,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+@router.post("/recovery-email/verify")
+async def verify_recovery_email(
+    payload: RecoveryEmailVerifyRequest,
+    user: User = Depends(registration_user),
+):
+    """Step 2 of recovery-email setup. The user pastes the 6-digit code.
+
+    On success, atomically:
+      - selects the unused, unexpired, matching challenge row,
+      - flips ``user.recovery_email`` + ``recovery_email_verified``,
+      - marks the challenge ``used=True``.
+
+    On ``remove=True``, the user is clearing an existing recovery email
+    — no code required (current session is the proof of intent).
+    """
+    if payload.remove:
+        if not user.recovery_email:
+            # Already gone — idempotent removal.
+            return {"recovery_email": None, "recovery_email_verified": False}
+        # Rate-limit destructive actions
+        await _recovery_rate_limit_check(
+            f"recovery_remove_user:{user.id}", limit=5, window=300
+        )
+        from castor.app.db import RecoveryEmailChallenge as _Challenge
+        async with get_async_session_context() as session:
+            async with session.begin():
+                await session.execute(
+                    update(User).where(User.id == user.id).values(
+                        recovery_email=None, recovery_email_verified=False
+                    )
+                )
+                # Tombstone any in-flight challenges for this user
+                await session.execute(
+                    update(_Challenge)
+                    .where(
+                        _Challenge.user_id == user.id,
+                        _Challenge.used.is_(False),
+                    )
+                    .values(used=True)
+                    .execution_options(synchronize_session=False)
+                )
+        await record("recovery_email_removed", user_id=user.id)
+        return {"recovery_email": None, "recovery_email_verified": False}
+
+    # Standard verify path
+    if not re.fullmatch(r"\d{6}", payload.code):
+        raise HTTPException(400, "Code must be exactly 6 digits")
+    proposed = payload.email.strip().lower()
+
+    from castor.app.db import RecoveryEmailChallenge as _Challenge
+    code_hash = _hash_recovery_code(payload.code)
+    now = datetime.now(timezone.utc)
+
+    async with get_async_session_context() as session:
+        async with session.begin():
+            candidate = (
+                await session.execute(
+                    select(_Challenge)
+                    .where(
+                        _Challenge.email == proposed,
+                        _Challenge.code_hash == code_hash,
+                        _Challenge.used.is_(False),
+                        _Challenge.expires_at > now,
+                        _Challenge.user_id == user.id,
+                        _Challenge.token_version == user.token_version,
+                    )
+                    .with_for_update()
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if candidate is None:
+                raise HTTPException(400, "Invalid or expired code")
+
+            previous = getattr(user, "recovery_email", None)
+            previously_verified = bool(
+                getattr(user, "recovery_email_verified", False)
+            )
+            await session.execute(
+                update(User).where(User.id == user.id).values(
+                    recovery_email=proposed,
+                    recovery_email_verified=True,
+                )
+            )
+            await session.execute(
+                update(_Challenge)
+                .where(_Challenge.id == candidate.id)
+                .values(used=True)
+            )
+
+    if previous and previous.casefold() != proposed.casefold():
+        await record("recovery_email_replaced", user_id=user.id)
+    else:
+        await record("recovery_email_set", user_id=user.id)
+    return {"recovery_email": proposed, "recovery_email_verified": True}
 
 
 # ---------------------------------------------------------------------------
