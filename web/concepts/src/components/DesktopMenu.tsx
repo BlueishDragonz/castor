@@ -17,12 +17,12 @@ import {
   Sheet,
   SheetTrigger,
   SheetContent,
-  SheetHeader,
   SheetTitle,
   SheetClose,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Avatar } from '@/components/ui/avatar';
 import {
   LayoutGrid,
   Upload,
@@ -43,7 +43,11 @@ interface MenuItem {
   destructive?: boolean;
 }
 
-export function DesktopMenu() {
+interface DesktopMenuProps {
+  email?: string | null;
+}
+
+export function DesktopMenu({ email = null }: DesktopMenuProps) {
   // Open state lifted to drive the close-then-navigate pattern. Radix's
   // <Sheet onOpenChange> handles Esc + overlay click automatically.
   const [open, setOpen] = React.useState(false);
@@ -127,9 +131,24 @@ export function DesktopMenu() {
             {/* Drag handle (top edge of side sheets) */}
             <div className="w-9 h-1 bg-muted rounded mx-auto my-2" />
 
-            <SheetHeader className="px-6 pb-2">
-              <SheetTitle className="text-base font-semibold">Menu</SheetTitle>
-            </SheetHeader>
+            {/* sr-only title for screen readers — Radix requires the
+                dialog to have an accessible name; the visible heading
+                is the avatar + email block below. */}
+            <SheetTitle className="sr-only">Menu</SheetTitle>
+
+            {/* Account row — avatar + email, moved off the page header
+                so each page's title isn't crowded by who-is-here copy. */}
+            <div className="px-6 pt-2 pb-4 flex items-center gap-3">
+              <Avatar email={email} size="md" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground truncate">
+                  {email ?? 'Signed in'}
+                </p>
+                <p className="text-xs text-muted-foreground">Account</p>
+              </div>
+            </div>
+
+            <Separator />
 
             <div className="flex-1 overflow-y-auto px-4 pb-4">
               {groups.map((group, gi) => (

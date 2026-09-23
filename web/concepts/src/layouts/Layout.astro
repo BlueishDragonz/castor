@@ -64,6 +64,6 @@ const umamiEnabled = !!umamiId;
   </head>
   <body class="min-h-screen antialiased"><slot />{Astro.locals.session && (<>
         <BottomNav />
-        <DesktopMenu client:load />
+        <DesktopMenu client:load email={Astro.locals.session.email} />
       </>)}</body>
 </html>

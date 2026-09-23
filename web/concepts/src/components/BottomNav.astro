@@ -8,7 +8,9 @@
  * Includes safe-area-inset-bottom padding for iOS.
  */
 import { Home, BarChart2 } from 'lucide-react';
-import MoreSheet from './MoreSheet';
+import MoreSheet from './MoreSheet.astro';
+
+const email = Astro.locals.session?.email ?? null;
 ---
 
 <style>
@@ -71,5 +73,5 @@ import MoreSheet from './MoreSheet';
     <span class="nav-label">Stats</span>
   </a>
 
-  <MoreSheet client:load />
+  <MoreSheet client:load email={email} />
 </nav>

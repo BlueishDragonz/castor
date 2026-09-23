@@ -17,8 +17,7 @@
  * - habit_enable_tag_filters, habit_tag_selection_mode
  */
 import Layout from '../../layouts/Layout.astro';
-import { Button } from '../../components/ui/button';
-import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import HabitGrid from '../../components/HabitGrid.astro';
 import { clearStaleSession } from '../../lib/auth';
 
@@ -26,7 +25,11 @@ if (!Astro.locals.session) {
   return Astro.redirect('/login');
 }
 
-const { email } = Astro.locals.session;
+const { email: _sessionEmail } = Astro.locals.session;
+// Email identity is now surfaced in the hamburger drawer (avatar +
+// email at the top) instead of the page header. Kept on locals
+// so pages that want it (e.g. /settings) can still read it.
+void _sessionEmail;
 
 // Read habit display settings from cookies (set via /settings)
 const showStreak = Astro.cookies.get('habit_show_streak')?.value === 'true';
@@ -160,7 +163,6 @@ try {
         <h1 class="text-3xl font-semibold tracking-tight">Habits</h1>
         <p class="text-sm text-muted-foreground mt-0.5">
           {habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
-          <span class="text-muted-foreground/60"> · signed in as {email}</span>
         </p>
       </div>
     </header>
