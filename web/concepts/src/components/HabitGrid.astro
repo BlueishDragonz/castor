@@ -202,86 +202,82 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 )}
 
 <!-- Sticky Date Headers (matching main branch design) -->
-<div class="grid gap-1 sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border"
-     style={`grid-template-columns: 120px repeat(${sortedDays.length}, 44px) ${showStreak ? '44px' : ''} ${showTotal ? '44px' : ''}`.trimEnd()}
+<div class="grid gap-x-1 sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border pb-2"
+     style={`grid-template-columns: minmax(0, 1fr) repeat(${sortedDays.length}, 1.75rem) ${showStreak ? '2.75rem' : ''} ${showTotal ? '2.75rem' : ''}`.trimEnd()}
      aria-hidden="true">
-  {/* Habit name column header */}
-  <div class="sticky left-0 z-10 px-2 text-xs font-medium text-muted-foreground" style="grid-column: 1">
-    Habit
+  {/* Empty first cell — habit name lives in the row cards, no
+      subheader above it (the page heading already says "Habits"). */}
+  <div class="px-2" style="grid-column: 1">
+    {/* intentional spacer so the day cells align with the row cards' ticks */}
   </div>
-  {/* Weekday headers */}
-  {weekDayAbbr.map((weekday, i) => (
-    <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider"
-         style={{ minWidth: '44px' }}>
-      {weekday}
-    </div>
-  ))}
-  {/* Day number headers — explicit grid-column so the numbers line up under the weekday labels
-       above. Without this, auto-flow places them in the trailing 0-width streak/total columns
-       and they wrap to a second row, leaving FRI/SAT/SUN numbers missing. */}
+  {/* Weekday + day number stacked, one column per day, right-aligned */}
   {sortedDays.map((day, i) => (
-    <div class="text-center text-[10px] font-medium text-muted-foreground"
-         style={{ minWidth: '44px', gridColumn: `${i + 2}` }}>
-      {day.getDate()}
+    <div class="flex flex-col items-center justify-end text-[10px] font-medium text-muted-foreground uppercase tracking-wider leading-tight"
+         style={{ gridColumn: `${i + 2}` }}>
+      <span>{weekDayAbbr[i]}</span>
+      <span class="text-[11px] font-semibold normal-case text-foreground/70">{day.getDate()}</span>
     </div>
   ))}
   {showStreak && (
-    <div class="sticky right-0 z-10 text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '44px', gridColumn: `${sortedDays.length + 2}` }}>
+    <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '2.75rem', gridColumn: `${sortedDays.length + 2}` }}>
       Stk
     </div>
   )}
   {showTotal && (
-    <div class="sticky right-0 z-10 text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '44px', gridColumn: `${sortedDays.length + (showStreak ? 3 : 2)}` }}>
+    <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '2.75rem', gridColumn: `${sortedDays.length + (showStreak ? 3 : 2)}` }}>
       Sum
     </div>
   )}
 </div>
 
 <!-- Habit Grid: compact card rows -->
-<div class="space-y-2" role="list" aria-label="Habits">
+<div class="space-y-2 mt-2" role="list" aria-label="Habits">
   {filteredHabits.map(habit => {
     const streak = calculateStreak(habit);
     const total = calculateTotal(habit);
-    
+
     return (
       <>
-        <article class="border border-border rounded-lg bg-card p-3" role="listitem">
-          <div class="grid gap-1" style={`grid-template-columns: 120px repeat(${sortedDays.length}, 44px) ${showStreak ? '44px' : '0'} ${showTotal ? '44px' : '0'}`}>
-            {/* Habit name column - link with drawsheet */}
-                        <div class="sticky left-0 z-10 flex items-center gap-2 min-w-0 bg-card/95 backdrop-blur-sm border-r border-border pr-2" style="grid-column: 1">
-                          <a 
-                            href={`/habits/${habit.id}`}
-                            class="font-medium truncate block hover:underline text-foreground"
-                            role="heading" 
-                            aria-level="3"
-                            data-long-press-delay="150"
-                            data-habit-id={habit.id}
-                          >
-                            {habit.name}
-                          </a>
-                          {habit.tags.length > 0 && (
-                                                                    <span class="flex flex-wrap gap-1 shrink-0" aria-label={`Tags: ${habit.tags.join(', ')}`}>
-                                                                      {habit.tags.map(tag => (
-                                                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 shrink-0">
-                                                                          #{tag}
-                                                                        </Badge>
-                                                                      ))}
-                                                                    </span>
-                                                                  )}
-                                                  </div>
-            
-            {/* Date columns */}
+        <article class="border border-border rounded-lg bg-card p-2" role="listitem">
+          <div class="grid items-center gap-x-1" style={`grid-template-columns: minmax(0, 1fr) repeat(${sortedDays.length}, 1.75rem) ${showStreak ? '2.75rem' : '0'} ${showTotal ? '2.75rem' : '0'}`}>
+            {/* Habit name column - link with drawsheet. min-w-0 + truncate so
+                long names ellipsise and the right-aligned tick icons keep
+                their place on the right edge of the row. */}
+            <div class="flex items-center gap-2 min-w-0 px-2 py-1" style="grid-column: 1">
+              <a
+                href={`/habits/${habit.id}`}
+                class="font-medium truncate block hover:underline text-foreground"
+                role="heading"
+                aria-level="3"
+                data-long-press-delay="150"
+                data-habit-id={habit.id}
+              >
+                {habit.name}
+              </a>
+              {habit.tags.length > 0 && (
+                <span class="flex flex-wrap gap-1 shrink-0" aria-label={`Tags: ${habit.tags.join(', ')}`}>
+                  {habit.tags.map(tag => (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 shrink-0">
+                      #{tag}
+                    </Badge>
+                  ))}
+                </span>
+              )}
+            </div>
+
+            {/* Date columns — icon-only ticks, right-aligned to the
+                row's right edge. No cell borders, no checkbox squares. */}
             {sortedDays.map(day => {
               const isoDate = localISO(day);
               const done = habit.tickedDays.includes(isoDate);
               const dayIsToday = isToday(day);
               const dayIsPast = isPast(day);
-              
+
               return (
-                <div class="relative flex items-center justify-center border-r border-border border-b border-border/50 bg-background/50" 
-                     role="gridcell" 
+                <div class="relative flex items-center justify-center py-1"
+                     role="gridcell"
                      aria-label={`${dayIsToday ? 'Today' : day.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}: ${done ? 'Done' : 'Not done'}`}
-                     style={{ minWidth: '44px' }}>
+                     style={{ gridColumn: 'auto' }}>
                   <HabitCheckBox
                     habitId={habit.id}
                     habitName={habit.name}
@@ -293,10 +289,10 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
                 </div>
               );
             })}
-            
+
             {/* Streak badge */}
             {showStreak && (
-              <div class="sticky right-0 z-10 flex items-center justify-center border-r border-border border-b border-border/50 bg-card/95 backdrop-blur-sm" style={{ width: '44px' }}>
+              <div class="flex items-center justify-center" style={{ width: '2.75rem' }}>
                 {habit.period ? (
                   <Badge variant="outline" className="w-full px-1.5 py-0.5 text-xs" aria-label={`Current streak: ${streak} days`}>
                     {streak > 0 ? streak : '—'}
@@ -308,10 +304,10 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
                 )}
               </div>
             )}
-            
+
             {/* Total badge */}
             {showTotal && (
-              <div class="sticky right-0 z-10 flex items-center justify-center border-b border-border/50 bg-card/95 backdrop-blur-sm" style={{ width: '44px' }}>
+              <div class="flex items-center justify-center" style={{ width: '2.75rem' }}>
                 <Badge variant="outline" className="w-full px-1.5 py-0.5 text-xs" aria-label={`Total completions in view: ${total}`}>
                   {total}
                 </Badge>

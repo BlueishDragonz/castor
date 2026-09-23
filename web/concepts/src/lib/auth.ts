@@ -93,6 +93,22 @@ export function clearSession(cookies: AstroCookies): void {
 }
 
 /**
+ * Detect a stale cookie: the browser still has a `castor_token` cookie
+ * (so `Astro.locals.session` is non-null), but the backend no longer
+ * recognises it. This happens when the user account was wiped (test
+ * fixture cleanup, account deletion) or the JWT was revoked. Returning
+ * a plain 401 here lets the user stare at "Could not load (HTTP 401)"
+ * forever; clearing the cookie + redirecting to /login gives them a
+ * clear path forward.
+ *
+ * Pages that fetch backend data with the bearer should call this when
+ * they get a 401 from a known-authenticated request.
+ */
+export function clearStaleSession(cookies: AstroCookies): void {
+  clearSession(cookies);
+}
+
+/**
  * Mirror the backend's WebAuthn browser cookie into our own cookie.
  * The backend sets `beaver_webauthn` on `/auth/webauthn/{login,register}/begin`
  * for concurrent-tab ceremonies. After the proxy round-trips that

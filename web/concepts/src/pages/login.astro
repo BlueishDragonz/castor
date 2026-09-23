@@ -93,6 +93,10 @@ if (Astro.locals.session && stage !== 'offer_passkey') {
   return Astro.redirect('/habits');
 }
 let errorMessage: string | null = null;
+const expiredQS = url.searchParams.get('expired') === '1';
+if (expiredQS && !errorQS) {
+  errorMessage = 'Your session ended. Sign in again to keep going.';
+}
 if (errorQS === 'bad_credentials') errorMessage = 'That password does not match. Try again, or use a different email.';
 else if (errorQS === 'pw_mismatch') errorMessage = 'The two passwords do not match. Try again and make sure they are the same.';
 else if (errorQS === 'bad_request') errorMessage = 'Something about that did not work. Please check the details and try once more.';

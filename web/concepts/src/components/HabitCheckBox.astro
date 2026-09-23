@@ -49,35 +49,42 @@ const ariaLabel = isToday
     disabled={!isPast && !isToday}
     data-done={done}
     class={[
-      'inline-flex h-5 w-5 items-center justify-center rounded-md border-2 transition-colors',
+      'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
       done
-        ? 'border-primary bg-primary text-primary-foreground'
-        : 'border-border bg-background hover:bg-accent',
-      isToday ? 'ring-2 ring-primary ring-offset-2' : '',
-      !isPast && !isToday ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+        ? 'text-primary hover:text-primary/80'
+        : 'text-muted-foreground/60 hover:text-muted-foreground',
+      !isPast && !isToday ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
     ].join(' ')}
+    title={ariaLabel}
   >
-    {done && (
-      <svg viewBox="0 0 16 16" fill="none" class="h-3 w-3" aria-hidden="true">
-        <path d="M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z" fill="currentColor"/>
+    {done ? (
+      <svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" aria-hidden="true" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 6L9 17l-5-5" />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 24 24" fill="none" class="h-5 w-5 opacity-40" aria-hidden="true" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 6L9 17l-5-5" />
       </svg>
     )}
   </button>
 </form>
 
 <style is:global>
-  /* HabitCheckBox button styling — matches the legacy castor-main look
-     (rounded squares, primary colour when ticked) but uses a button
-     element so screen readers announce it as a switch. */
+  /* HabitCheckBox: icon-only toggle, no checkbox border.
+     A greyed-out tick when not done and a teal tick when done.
+     Matches the castor-main NiceGUI design (Material sym_o_check
+     with keep-color) but keeps the un-ticked state as a faint tick
+     rather than an X — Xs feel like a stream of errors when the user
+     is falling behind on their habits. */
   [data-habit-checkbox] button[role="switch"] {
     appearance: none;
     -webkit-appearance: none;
-    transition: background-color 0.15s ease, border-color 0.15s ease;
+    transition: color 0.15s ease, opacity 0.15s ease;
   }
 
   [data-habit-checkbox] button[role="switch"]:disabled {
-    opacity: 0.5;
+    opacity: 0.3;
     cursor: not-allowed;
   }
 </style>
