@@ -681,9 +681,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `app/security_actions.py::change_password(user_id, current_password, new_password, expected_version)` |
 | **Proposed new UI path** | `SecurityContent.tsx::handleChangePassword` (uses prompt()s — UX is poor) |
 | **API/backend path** | `POST /auth/webauthn/change-password` body `{current_password, new_password}` |
-| **Test IDs** | `tests/test_sensitive_actions.py::test_password_change_cas_rejects_mutation_after_authorization` (passing) |
-| **Status** | 🟡 |
-| **Evidence** | Wired but UX is `prompt()` chains (XSS-resistant but ugly). Should be a shadcn `Dialog` with proper fields. |
+| **Test IDs** | `tests/test_sensitive_actions.py::test_password_change_cas_rejects_mutation_after_authorization` + `tests/test_slice5_security.py::test_change_password_succeeds_and_bumps_token_version`, `test_change_password_wrong_current_password_returns_401`, `test_change_password_unauthenticated_returns_401` |
+| **Status** | ✅ |
+| **Evidence** | Slice 5 verifies the full change-password round-trip: 200 on success, old JWT rejected (401) on next /api/v1/habits call, new password works, old password rejected. Wrong current password returns 401 with the public-safe `Fresh current-password...` message. **Audit-event claim removed**: the parity-matrix above listed `audit.append_audit_event("password_change", ...)` as a side effect; verified the actual backend in `castor/app/security_actions.py:117` does NOT emit this audit event. Will document in Phase 4 audit-reconciliation step. |
 
 ### 5.5 Recovery email (set + verify)
 
@@ -701,9 +701,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `webauthn_routes.py::set_recovery_email` + `verify_recovery_email` |
 | **Proposed new UI path** | `SecurityContent.tsx::handleAddRecoveryEmail` + `handleVerifyEmail` |
 | **API/backend path** | `POST /auth/webauthn/recovery-email` + `POST /auth/webauthn/recovery-email/verify` |
-| **Test IDs** | `tests/security_recovery_browser_acceptance.py` (excluded from laptop run; apollo-only) |
+| **Test IDs** | `tests/security_recovery_browser_acceptance.py` (excluded from laptop run; apollo-only) + `tests/test_slice5_security.py::test_recovery_email_request_returns_pending_envelope`, `test_recovery_email_sends_email`, `test_recovery_email_verify_with_correct_code_succeeds`, `test_recovery_email_verify_invalid_code_format_returns_400`, `test_recovery_email_verify_code_too_short_returns_400`, `test_recovery_email_verify_remove_is_idempotent_when_no_email` |
 | **Status** | ✅ |
-| **Evidence** | Code exists; endpoints exist on backend OpenAPI. |
+| **Evidence** | Slice 5 verifies the full recovery-email flow: request returns `{pending, email, expires_at}`, code is sent via `send_email` (mocked), happy-path verify sets `recovery_email_verified=true`, non-digit / short codes return 400 "Code must be exactly 6 digits", remove=True is idempotent when no email is set. **Audit-event claim removed**: parity-matrix above listed `audit.append_audit_event("recovery_email_set", ...)`; verified `webauthn_routes.py::verify_recovery_email` only emits audit on the `remove=True` path (`audit.record("recovery_email_removed", ...)` line 862). The set path does NOT emit audit. |
 
 ### 5.6 Passwordless account has no usable state
 
@@ -724,6 +724,26 @@ and the evidence command(s) used to verify status.
 | **Test IDs** | `tests/test_sensitive_actions.py::test_passwordless_empty_and_malformed_hashes_do_not_authorize` |
 | **Status** | ✅ |
 | **Evidence** | Test passes. |
+
+### 5.7 Delete account (wipe personal data)
+
+| Field | Value |
+|---|---|
+| **Workflow** | User opens /account/delete → confirms → backend wipes habit_list, API tokens, identity, owned data; keeps an anonymous disabled tombstone for collision-detection |
+| **Current route** | `/account/delete` (legacy `/gui/delete_account`) |
+| **Entry point** | `frontend/account_delete.py::confirm_delete_account` (legacy) |
+| **User role** | Authenticated |
+| **User action** | Type confirmation phrase; click "Delete account" |
+| **Expected result** | 204 No Content; JWT invalidated; subsequent /api/v1/habits calls return 401 |
+| **Data read/written** | Deletes `habit_list`, `api_token`, identity row, owned data; archives user as anonymous disabled |
+| **Side effects** | `audit.append_audit_event("account_deletion", ...)` (verify in Phase 4) |
+| **Error/empty/loading cases** | Missing bearer → 401; garbage bearer → 401 |
+| **Existing code paths** | `castor/views.py::delete_user_account(user)` → `user_storage.delete_user_habit_list` + `crud.delete_user_api_token` + `crud.delete_user_identity` + `crud.delete_user_owned_data` + `user_archive` |
+| **Proposed new UI path** | `web/concepts/src/pages/account/delete.astro` (Astro page calls backend) |
+| **API/backend path** | `DELETE /api/v1/account` (returns 204) |
+| **Test IDs** | `tests/test_slice5_security.py::test_delete_account_returns_204_and_clears_habit_list`, `test_delete_account_unauthenticated_returns_401`, `test_delete_account_with_garbage_bearer_returns_401`, `test_delete_account_blocks_relogin_with_same_email` |
+| **Status** | ✅ |
+| **Evidence** | Slice 5 verifies 204 on delete, JWT rejection on subsequent calls, no 500 on re-registration. |
 
 ---
 
