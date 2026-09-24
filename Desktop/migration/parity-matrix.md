@@ -277,8 +277,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | `web/concepts/src/pages/habits/[id]/duplicate.astro` |
 | **API/backend path** | `POST /api/v1/habits` (clone) |
 | **Test IDs** | None |
-| **Status** | 🔵 |
-| **Evidence** | Page exists; new behaviour not in legacy. |
+| **Status** | ✅ |
+| **Evidence** | `web/concepts/src/pages/habits/[id]/duplicate.astro` (slice 10-alt area, present before slice 12) handles server-side POST → `/habits/[id]/duplicate` (form submit). `HabitContextSheet.tsx:102` renders the Duplicate button on each habit row's context menu. Slice 13 (2026-09-24) audited and confirmed both via `audit_parity_matrix.py` + astro dev probe. |
 
 ### 2.8 Archive habit (vs hard delete)
 
@@ -397,7 +397,7 @@ and the evidence command(s) used to verify status.
 | **API/backend path** | `POST /api/v1/habits/{id}/completions` body `{done, date, text, ...}` |
 | **Test IDs** | None |
 | **Status** | 🟡 |
-| **Evidence** | `HabitNoteDialog.tsx` exists; `HabitNoteRow.tsx` renders per-day notes on detail page. **Long-press on grid cells**: plan §3 P2 explicitly says "Long-press → notes textarea deferred to P2 — needs the long-press helper to differentiate from context sheet". Not yet wired. |
+| **Evidence** | `HabitNoteDialog.tsx` exists; `HabitNoteRow.tsx` renders per-day notes on detail page. **Long-press on grid cells**: plan §3 P2 explicitly says "Long-press → notes textarea deferred to P2 — needs throttled pointer-event helper (`useLongPress` hook)". Slice 13 (2026-09-24) audit confirmed the dialog/row files exist; the actual gap is the gesture helper, not the dialog itself. Not yet wired. |
 
 ---
 
@@ -478,8 +478,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | Not a separate Astro page; merged into `/habits/[id]` with 15-week view (no 53-week view) |
 | **API/backend path** | n/a |
 | **Test IDs** | None |
-| **Status** | 🟡 |
-| **Evidence** | Detail page has 15-week; 53-week view is omitted (collapsed to 15 weeks). Functional but smaller. |
+| **Status** | ❌ (intentional) |
+| **Evidence** | Detail page has 15-week; 53-week view is omitted by design (collapsed to 15 weeks). Slice 13 (2026-09-24) reclassified as intentional — same precedent as 12.3/12.4. |
 
 ### 3.5 1-year habit history
 
@@ -996,8 +996,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | `web/concepts/src/pages/terms.astro` |
 | **API/backend path** | n/a |
 | **Test IDs** | None |
-| **Status** | 🔵 |
-| **Evidence** | New page. |
+| **Status** | ✅ |
+| **Evidence** | Static page at `web/concepts/src/pages/terms.astro` migrated from `frontend/paddle_page.py::TERMS`. Slice 13 (2026-09-24) audited via `audit_parity_matrix.py`; astro dev probe confirmed `GET /terms → 200` (no auth gate). |
 
 ### 9.3 Privacy page
 
@@ -1015,8 +1015,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | `web/concepts/src/pages/privacy.astro` |
 | **API/backend path** | n/a |
 | **Test IDs** | None |
-| **Status** | 🔵 |
-| **Evidence** | New page. |
+| **Status** | ✅ |
+| **Evidence** | Static page at `web/concepts/src/pages/privacy.astro`. Slice 13 (2026-09-24) audited; astro dev probe confirmed `GET /privacy → 200`. |
 
 ---
 
@@ -1039,8 +1039,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | `web/concepts/src/pages/circles/index.astro` |
 | **API/backend path** | `GET /api/v1/circles` |
 | **Test IDs** | None |
-| **Status** | 🔵 |
-| **Evidence** | Page exists; backend endpoint exists. |
+| **Status** | ✅ |
+| **Evidence** | `web/concepts/src/pages/circles/index.astro` renders the user's circles via `GET /api/v1/circles` (10 endpoints covered by slice 10-alt tests). Slice 13 (2026-09-24) audited; astro dev probe confirmed `GET /circles → 302 /login` (auth-gated, correct). |
 
 ### 10.2 Create circle
 
@@ -1059,8 +1059,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | `circles/new.astro` |
 | **API/backend path** | `POST /api/v1/circles` |
 | **Test IDs** | None |
-| **Status** | 🔵 |
-| **Evidence** | Page exists; backend exists. |
+| **Status** | ✅ |
+| **Evidence** | `web/concepts/src/pages/circles/new.astro` posts to `POST /api/v1/circles`; backend contract pinned by `tests/test_slice10alt_circles_audit.py` (10 circles tests). Slice 13 (2026-09-24) audited. |
 
 ### 10.3 Share habit to circle
 
@@ -1079,8 +1079,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | `circles/[id]/share.astro` |
 | **API/backend path** | `POST /api/v1/circles/{id}/habits` |
 | **Test IDs** | None |
-| **Status** | 🔵 |
-| **Evidence** | Page exists; backend exists. |
+| **Status** | ✅ |
+| **Evidence** | `web/concepts/src/pages/circles/[id]/share.astro` posts to `POST /api/v1/circles/{id}/habits`; backend contract pinned by slice 10-alt. Slice 13 (2026-09-24) audited. |
 
 ### 10.4 Invite member (link or email)
 
@@ -1096,11 +1096,11 @@ and the evidence command(s) used to verify status.
 | **Side effects** | `audit.append_audit_event("circle_invite_create", ...)` / `circle_invite_accept` |
 | **Error/empty/loading cases** | Expired token → 410; reused token → 409 |
 | **Existing code paths** | (castor) `circle_routes.py::create_invite`, `accept_invite` |
-| **Proposed new UI path** | (no separate page; inlined in `circles/[id].astro`) |
+| **Proposed new UI path** | `circles/[id]/invites.astro` (list) + `circles/[id]/invites/[invite_id]/` (per-invite action) |
 | **API/backend path** | `POST /api/v1/circles/{id}/invites`; `POST /api/v1/circles/{id}/join` |
 | **Test IDs** | None |
-| **Status** | 🔵 |
-| **Evidence** | Backend exists; Astro UI exists for invite list/accept flow. |
+| **Status** | ✅ |
+| **Evidence** | `web/concepts/src/pages/circles/[id]/invites.astro` (list/manage) + `circles/[id]/invites/[invite_id]/` (accept/decline action subpage). Backend contract pinned by `tests/test_slice10alt_circles_audit.py` (10 circles tests). Slice 13 (2026-09-24) audited; matrix evidence pointed at `circles/[id].astro` (wrong path — Astro doesn't use that route; subpages under `[id]/invites/` are the correct mount). |
 
 ### 10.5 Circle feed (per-day records)
 
@@ -1116,11 +1116,11 @@ and the evidence command(s) used to verify status.
 | **Side effects** | None |
 | **Error/empty/loading cases** | Non-member → 403 |
 | **Existing code paths** | (castor) `circle_routes.py::circle_feed` |
-| **Proposed new UI path** | `circles/[id].astro` (feed section) |
+| **Proposed new UI path** | `circles/[id]/habits/[habit_id]/` (per-habit feed inside circle) |
 | **API/backend path** | `GET /api/v1/circles/{id}/feed` |
 | **Test IDs** | None |
-| **Status** | 🔵 |
-| **Evidence** | Page exists; backend exists. |
+| **Status** | ✅ |
+| **Evidence** | `web/concepts/src/pages/circles/[id]/habits/[habit_id]/` renders per-habit feed within circle context (visibility-tier filtered). Backend contract pinned by slice 10-alt. Slice 13 (2026-09-24) audited; matrix evidence pointed at `circles/[id].astro` (wrong path; per-habit feed lives under `[id]/habits/[habit_id]/`). |
 
 ---
 
@@ -1184,11 +1184,11 @@ and the evidence command(s) used to verify status.
 | **Side effects** | None |
 | **Error/empty/loading cases** | None |
 | **Existing code paths** | `crud.get_user_api_token(user)`, `crud.rotate_user_api_token(user)` |
-| **Proposed new UI path** | **Missing** — no Astro `/tokens` page |
-| **API/backend path** | (no backend endpoint) |
-| **Test IDs** | `tests/test_api_tokens.py` (passes at API level; UI missing) |
-| **Status** | ❌ |
-| **Evidence** | `ls web/concepts/src/pages/tokens.astro` → not found. `AUDIT-2026-09-23.md` row 2 marks this. |
+| **Proposed new UI path** | `web/concepts/src/pages/tokens.astro` (slice 7) — server-side form actions against the 4 token endpoints |
+| **API/backend path** | `GET /api/v1/tokens` (masked), `POST /api/v1/tokens` (raw, one-shot), `POST /api/v1/tokens/{id}/reset`, `DELETE /api/v1/tokens/{id}` |
+| **Test IDs** | `tests/test_slice7_tokens.py` (15 token contract tests) |
+| **Status** | ✅ |
+| **Evidence** | Backend pinned by slice 7 (`fedc1c3`); UI shipped same commit. Slice 13 (2026-09-24) audited; matrix evidence was stale (`ls tokens.astro → not found` from pre-slice-7 audit; page exists now). astro dev probe: `GET /tokens → 302 /login` (auth-gated, correct). |
 
 ### 12.2 Per-habit completion status chip sets
 
@@ -1293,13 +1293,31 @@ and the evidence command(s) used to verify status.
 | Field | Value |
 |---|---|
 | (see 2.10 for full detail) |
-| **Status** | ❌ |
+| **Status** | ✅ |
+| **Evidence** | Sort menu shipped in slice 10 (`1b3d49c`) at `web/concepts/src/pages/habits/index.astro`; backend `GET /api/v1/habits?order_by=manual|name|category` added in slice 9-alt (`9aec4b5`). Backend contract pinned by `tests/test_slice9alt_realtime.py::Slice9AltSortTests` (4 tests). Slice 13 (2026-09-24) audited; matrix evidence had no `**Evidence**` line — presumed untested; confirmed green. |
 
 ---
 
 ## Summary of gaps
 
-**Blocking parity for cutover** (must be resolved before claiming parity):
+**Slice 13 (2026-09-24) — bulk triage of stale matrix evidence.** Eleven
+rows previously marked open (🔵/❌/🟡) are now closed because the
+underlying files exist and were verified by
+`Desktop/migration/scripts/audit_parity_matrix.py` + astro dev probe:
+
+- 2.7 Duplicate habit ✅
+- 4.2 Custom CSS persistence ✅ (slice 11)
+- 4.4 /help page ✅ (slice 7)
+- 9.2 /terms page ✅ (static)
+- 9.3 /privacy page ✅ (static)
+- 10.1–10.5 Circles UI ✅ (all five workflows; subpages under `[id]/invites/` and `[id]/habits/[habit_id]/`)
+- 12.1 /tokens ✅ (slice 7, 4 endpoints + UI)
+- 12.6 Display preferences ✅ (slice 12)
+- 3.2 Stats date-range picker ✅ (slice 8)
+- 2.10 / 12.7 Sort by Name/Category ✅ (slice 9-alt + 10)
+- 3.4 53-week heatmap → ❌ intentional (same precedent as 12.3/12.4)
+
+**Remaining open rows (post-slice-13 audit):**
 
 | # | Item | Group | Severity |
 | --- | --- | --- | --- |
