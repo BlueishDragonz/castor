@@ -236,9 +236,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `habit.name = …`; `habit.star = …`; `habit.period = HabitFrequency(…)` |
 | **Proposed new UI path** | `web/concepts/src/pages/habits/[id]/edit.astro` (server-side POST) |
 | **API/backend path** | `PUT /api/v1/habits/{id}` body `{name?, star?, status?, period?, tags?}` |
-| **Test IDs** | Backend: `tests/test_apis.py` |
+| **Test IDs** | Backend: `tests/test_apis.py` + `tests/test_slice3_edit.py::test_edit_name_persists`, `test_edit_star_persists`, `test_edit_tags_persists`, `test_edit_period_persists`, `test_edit_empty_body_no_change`, `test_edit_cross_user_returns_404`, `test_edit_unauthenticated_returns_401`, `test_tick_survives_edit` |
 | **Status** | ✅ |
-| **Evidence** | Page exists; backend endpoint exists. |
+| **Evidence** | Slice 3 covers all PUT /habits/{id} fields (name, star, period, tags, status) plus empty body and persistence across rename. Cross-user returns 404 (no enumeration). |
 
 ### 2.6 Delete habit
 
@@ -256,9 +256,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `habit_list.remove(habit)` |
 | **Proposed new UI path** | `web/concepts/src/pages/habits/[id]/archive.astro` (POST → backend DELETE) |
 | **API/backend path** | `DELETE /api/v1/habits/{id}` |
-| **Test IDs** | Backend: `tests/test_apis.py` |
+| **Test IDs** | Backend: `tests/test_apis.py` + `tests/test_slice3_edit.py::test_delete_removes_habit_from_list`, `test_delete_archived_habit_works`, `test_delete_cross_user_returns_404_and_keeps_habit`, `test_delete_unauthenticated_returns_401` |
 | **Status** | ✅ |
-| **Evidence** | Page exists; backend endpoint exists. Note: archive in Astro = hard delete on backend. |
+| **Evidence** | Slice 3 covers hard remove + cross-user 404 + 401. **Note (Slice 3 finding)**: castor's `DELETE /api/v1/habits/{id}` is a **hard remove** — habit dict is removed from `habit_list.data` (`castor/storage/dict.py:329`). Legacy NiceGUI's `habit_list.remove()` was also hard remove; this is consistent. |
 
 ### 2.7 Duplicate habit
 
@@ -291,12 +291,12 @@ and the evidence command(s) used to verify status.
 | **Expected result** | Habit hidden from home grid; data preserved |
 | **Data read/written** | Updates `habit_list.data` (status field) |
 | **Side effects** | None |
-| **Existing code paths** | `habit.status = HabitStatus.ARCHIVED` (used by `GetActiveHabits` filter) |
-| **Proposed new UI path** | `web/concepts/src/pages/habits/[id]/archive.astro` (POST → backend PUT status=archived) |
-| **API/backend path** | `PUT /api/v1/habits/{id}` body `{status: "archived"}` |
-| **Test IDs** | Backend: `tests/test_apis.py` (filter by status) |
-| **Status** | 🔵 |
-| **Evidence** | Page exists; new behaviour not in legacy. |
+| **Existing code paths** | `habit.status = HabitStatus.ARCHIVED` (used by `GetActiveHabits` filter) — note: enum VALUE is `'archive'` (singular), not `'archived'` (`castor/storage/storage.py:44`). Third state `'soft_delete'` for hidden habits. |
+| **Proposed new UI path** | `web/concepts/src/pages/habits/[id]/archive.astro` (POST → backend PUT status=archive) |
+| **API/backend path** | `PUT /api/v1/habits/{id}` body `{status: "archive"}` |
+| **Test IDs** | Backend: `tests/test_apis.py` (filter by status) + `tests/test_slice3_edit.py::test_archive_excludes_from_active_list`, `test_archive_then_unarchive_restores_to_active`, `test_archive_invalid_status_value_returns_422`, `test_archive_does_not_lose_records` |
+| **Status** | ✅ |
+| **Evidence** | Slice 3 verifies archive (status='archive') removes from active list, unarchive restores, invalid value rejected, records preserved. **Behavioural note**: `HabitStatus.ARCHIVED` is the Python enum NAME; its value is the string `'archive'` (singular). The parity-matrix above originally said `'archived'`; corrected. |
 
 ### 2.9 Reorder habits (drag-drop)
 
@@ -314,9 +314,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `habit_list.order = [...]; habit_list.order_by = HabitOrder.MANUALLY` |
 | **Proposed new UI path** | `web/concepts/src/pages/habits/order.astro` (server-side POST → PUT /api/v1/habits/meta) |
 | **API/backend path** | `PUT /api/v1/habits/meta` body `{order: [...]}` |
-| **Test IDs** | Backend: `tests/test_apis.py::test_meta_order_round_trip` |
+| **Test IDs** | Backend: `tests/test_apis.py::test_meta_order_round_trip` + `tests/test_slice3_edit.py::test_meta_reorder_persists_and_reflects_in_listing`, `test_meta_reorder_unauthenticated_returns_401`, `test_meta_reorder_with_unknown_id_silently_ignored` |
 | **Status** | ✅ |
-| **Evidence** | Page exists; backend endpoint exists. |
+| **Evidence** | Slice 3 verifies PUT /habits/meta persists order, GET /habits reflects new order, 401 for unauthenticated, and unknown ids are accepted verbatim (UI responsibility to filter). |
 
 ### 2.10 Sort habits by Name / Category / Manually
 
