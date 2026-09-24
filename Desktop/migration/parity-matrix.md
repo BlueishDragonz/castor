@@ -562,7 +562,7 @@ and the evidence command(s) used to verify status.
 | **API/backend path** | n/a |
 | **Test IDs** | None |
 | **Status** | ✅ |
-| **Evidence** | Component exists, mounted in `/settings`. Also exposed via "MoreSheet" `closeAndNavigate('/help')` BUT `/help` page does not exist — sheet link dead-ends at 404. |
+| **Evidence** | Component exists, mounted in `/settings`. The `MoreSheet → /help` link now resolves (slice 7 wired `web/concepts/src/pages/help.astro`; slice 12 probe: `GET /help → 200`). |
 
 ### 4.4 `/help` page
 
@@ -577,11 +577,11 @@ and the evidence command(s) used to verify status.
 | **Data read/written** | None |
 | **Side effects** | None |
 | **Existing code paths** | None on legacy (legacy is a dialog) |
-| **Proposed new UI path** | **MISSING** — `/help` page does not exist; `MoreSheet` line 133 404s |
+| **Proposed new UI path** | `web/concepts/src/pages/help.astro` (slice 7) — static page rendering HelpDialog content |
 | **API/backend path** | n/a |
 | **Test IDs** | None |
-| **Status** | ❌ |
-| **Evidence** | `ls web/concepts/src/pages/help.astro` → not found. `AUDIT-2026-09-23.md` row 1 marks this as the visible 404. |
+| **Status** | ✅ |
+| **Evidence** | File present at `web/concepts/src/pages/help.astro` since slice 7 (commit `fedc1c3`). Slice 12 probe via `astro dev --port 4399`: `GET /help → 200` (static page renders; no auth gate; legacy equivalent was a dialog, not a page, so the page is a net-new surface). |
 
 ### 4.5 Sign out from settings
 
@@ -935,8 +935,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | `<MoreSheet />` (`web/concepts/src/components/MoreSheet.tsx`) |
 | **API/backend path** | n/a |
 | **Test IDs** | None |
-| **Status** | 🟡 |
-| **Evidence** | Component exists; has all 8 menu items. **Dead link**: `closeAndNavigate('/help')` 404s because `/help` doesn't exist. |
+| **Status** | ✅ |
+| **Evidence** | Component exists with all 8 menu items. Slice 12 (2026-09-24) confirmed via `astro dev` probe that all 6 nav targets resolve: `GET /help → 200` (no session required; slice 7 wired the static page); `GET /security, /tokens, /circles, /import, /export → 302 /login` (auth-gated). No dead links remain. |
 
 ### 8.3 Desktop hamburger menu
 
