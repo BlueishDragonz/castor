@@ -1,0 +1,84 @@
+---
+/**
+ * /help — Help / about page.
+ *
+ * Slice 7 (release/astro-migration) closes the visible 404 from
+ * `MoreSheet.tsx:133` (`closeAndNavigate('/help')`). The mobile More
+ * sheet's "Help" item used to dead-end at 404 because no page existed.
+ *
+ * This page is mostly content; no backend endpoint. Links to the four
+ * resources the legacy `HelpDialog` offered (Wiki / Supporter / YouTube /
+ * Issues), plus inline answers to the most common user questions.
+ *
+ * Auth: the Astro middleware does NOT require auth for /help (it's a
+ * "public documentation" page, like /terms and /privacy). If you want to
+ * require auth, set `Astro.locals.session` check at the top.
+ */
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Help — Castor" description="Help and resources for Castor.">
+  <article class="mx-auto max-w-3xl px-6 py-12 prose dark:prose-invert">
+    <header class="mb-10 not-prose">
+      <h1 class="text-3xl font-bold tracking-tight">Help</h1>
+      <p class="text-sm text-muted-foreground mt-2">
+        Documentation and resources for Castor.
+      </p>
+    </header>
+
+    <h2>Quick links</h2>
+    <ul>
+      <li><a href="https://github.com/beaverhabits/castor/wiki" rel="noopener noreferrer" target="_blank">Wiki</a> — usage guides, screenshots, and how-tos.</li>
+      <li><a href="https://github.com/sponsors/beaverhabits" rel="noopener noreferrer" target="_blank">Support Castor</a> — the project is self-hosted by the maintainer.</li>
+      <li><a href="https://www.youtube.com/@beaverhabits" rel="noopener noreferrer" target="_blank">YouTube channel</a> — short walkthrough videos.</li>
+      <li><a href="https://github.com/beaverhabits/castor/issues" rel="noopener noreferrer" target="_blank">Issue tracker</a> — bug reports and feature requests.</li>
+    </ul>
+
+    <h2>Frequently asked questions</h2>
+
+    <h3>How is my data stored?</h3>
+    <p>
+      Your habit data lives in a SQLite database on the server that runs Castor.
+      Each user's data is isolated by user_id; the server never shares it with
+      other users or third parties. Backups are the operator's responsibility.
+    </p>
+
+    <h3>Can I export my data?</h3>
+    <p>
+      Yes. Go to <a href="/export">Export</a> to download a JSON snapshot of all
+      your habits, ticks, and notes. The file can be re-imported on another
+      device via <a href="/import">Import</a>.
+    </p>
+
+    <h3>Can I import from another tool?</h3>
+    <p>
+      The <a href="/import">Import</a> page accepts JSON snapshots in the
+      Castor / beaverhabits format. CSV import is not currently supported.
+    </p>
+
+    <h3>What if I lose my passkey?</h3>
+    <p>
+      If you registered a recovery email on the
+      <a href="/security">Security</a> page, you can use the
+      <a href="/forgot-password">Forgot password</a> flow to receive a
+      12-digit code and reset your password. Without a recovery email
+      (and without a working password), the operator must intervene
+      directly on the database — there is no self-service bypass by design.
+    </p>
+
+    <h3>Why is the Astro UI slower than the old NiceGUI app?</h3>
+    <p>
+      Each Astro page is server-rendered. The first request after a
+      navigation fetches fresh data; subsequent requests in the same
+      session are fast. Mobile users on flaky networks may notice the
+      extra round-trip compared to the old single-page-app model.
+    </p>
+
+    <h2>Need more help?</h2>
+    <p>
+      Open an issue on the
+      <a href="https://github.com/beaverhabits/castor/issues" rel="noopener noreferrer" target="_blank">issue tracker</a>
+      and the maintainer will respond.
+    </p>
+  </article>
+</Layout>

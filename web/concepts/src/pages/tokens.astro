@@ -1,0 +1,146 @@
+---
+/**
+ * /tokens — API token management page.
+ *
+ * Slice 7 (release/astro-migration) closes the parity-matrix row 12.1 gap
+ * (no Astro /tokens page). The backend endpoints at /api/v1/tokens are
+ * new (also added in Slice 7) and pin the contract tested in
+ * tests/test_slice7_tokens.py.
+ *
+ * Behaviour:
+ *   - GET /api/v1/tokens on page load. If null → "Create token" button.
+ *     If masked → display + Copy + Rotate + Revoke buttons.
+ *   - POST /api/v1/tokens (Create): only call if GET returned null.
+ *   - POST /api/v1/tokens/rotate (Rotate): always available.
+ *   - DELETE /api/v1/tokens (Revoke): destructive, requires confirm.
+ *
+ * The raw token is returned ONLY on create/rotate. The user MUST copy it
+ * then. Subsequent GETs return only the masked form.
+ *
+ * Auth: middleware enforces auth via Astro.locals.session.
+ */
+import Layout from '../layouts/Layout.astro';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+
+if (!Astro.locals.session) {
+  return Astro.redirect('/login');
+}
+
+const token = Astro.locals.session.token;
+const BACKEND = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+
+let currentToken: string | null = null;
+let error: string | null = null;
+
+try {
+  const r = await fetch(new URL('/api/v1/tokens', BACKEND), {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  if (r.ok) {
+    const body = await r.json();
+    currentToken = body.token;
+  } else {
+    error = `Could not load token (HTTP ${r.status}).`;
+  }
+} catch (e) {
+  error = (e as Error).message;
+}
+---
+
+<Layout title="API Tokens — Castor">
+  <script is:inline define:vars={{ token: currentToken, error }}>
+    // No client-side JS needed: each action is a server-rendered <form>
+    // posting to the backend. The raw token is shown only after a
+    // successful create/rotate via ?new_token=... query param.
+  </script>
+  <div class="mx-auto max-w-3xl px-6 py-12 space-y-8">
+    <header>
+      <h1 class="text-3xl font-bold tracking-tight">API Tokens</h1>
+      <p class="text-sm text-muted-foreground mt-2">
+        Use API tokens to authenticate mobile and CLI clients against
+        <code>/api/v1/habits</code> and <code>/api/v1/sync/ws</code>.
+      </p>
+    </header>
+
+    {error && (
+      <div class="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+        {error}
+      </div>
+    )}
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Current token</CardTitle>
+        <CardDescription>
+          {currentToken
+            ? 'A token is registered. The masked form is shown; the raw value is hidden after this page renders.'
+            : 'No token registered. Create one to enable mobile / CLI access.'}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {currentToken && (
+          <div class="rounded-md border bg-muted px-4 py-3 font-mono text-sm">
+            {currentToken}
+          </div>
+        )}
+        <div class="flex flex-wrap gap-3">
+          {!currentToken && (
+            <form method="POST" action={`${BACKEND}/api/v1/tokens`} class="contents">
+              <input type="hidden" name="redirect" value="/tokens?action=created" />
+              <button
+                type="submit"
+                class="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90"
+              >
+                Create token
+              </button>
+            </form>
+          )}
+          {currentToken && (
+            <>
+              <form method="POST" action={`${BACKEND}/api/v1/tokens/rotate`} class="contents">
+                <input type="hidden" name="redirect" value="/tokens?action=rotated" />
+                <button
+                  type="submit"
+                  class="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
+                >
+                  Rotate
+                </button>
+              </form>
+              <form
+                method="POST"
+                action={`${BACKEND}/api/v1/tokens?_method=DELETE`}
+                class="contents"
+                onsubmit="return confirm('Revoke the token? Any mobile/CLI clients using it will stop working.');"
+              >
+                <input type="hidden" name="redirect" value="/tokens?action=revoked" />
+                <button
+                  type="submit"
+                  class="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20"
+                >
+                  Revoke
+                </button>
+              </form>
+            </>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>How to use</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p>
+          Pass the token as a Bearer credential:
+        </p>
+        <pre class="rounded-md border bg-muted px-4 py-3 overflow-x-auto"><code>{`curl -H "Authorization: Bearer $TOKEN" \\
+  ${BACKEND}/api/v1/habits`}</code></pre>
+        <p class="text-muted-foreground">
+          Or as a query parameter for the WebSocket sync endpoint:
+          <code class="rounded bg-muted px-1.5 py-0.5">?token=&lt;TOKEN&gt;</code>.
+        </p>
+      </CardContent>
+    </Card>
+  </div>
+</Layout>

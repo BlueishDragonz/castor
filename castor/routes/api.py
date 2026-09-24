@@ -19,7 +19,13 @@ from pydantic import BaseModel
 from castor import views
 from castor.app import crud
 from castor.app.auth import user_from_token
-from castor.app.crud import get_user_by_api_token
+from castor.app.crud import (
+    create_user_api_token,
+    delete_user_api_token,
+    get_user_api_token,
+    get_user_by_api_token,
+    reset_user_api_token,
+)
 from castor.app.db import User
 from castor.app.dependencies import current_active_user
 from castor.core.completions import CStatus, get_habit_date_completion
@@ -515,3 +521,41 @@ async def sync_ws(websocket: WebSocket, token: str | None = Query(default=None))
 
 def init_api_routes(app: FastAPI) -> None:
     app.include_router(api_router, prefix="/api/v1")
+
+
+# ---------------------------------------------------------------------------
+# API token management.
+#
+# Tokens are created by castor and used by mobile/native clients to call
+# /api/v1/habits and /sync/ws. Stored as hashes in user_api_tokens; the raw
+# token is returned ONLY on create/reset, never on read.
+# ---------------------------------------------------------------------------
+
+
+@api_router.get("/tokens", tags=["tokens"])
+async def get_token(user: User = Depends(current_active_user)):
+    """Return the user's masked API token (or null if not yet created)."""
+    return {"token": await get_user_api_token(user)}
+
+
+@api_router.post("/tokens", status_code=201, tags=["tokens"])
+async def create_token(user: User = Depends(current_active_user)):
+    """Create a new API token. Returns the raw token — the user must copy
+    it now; subsequent GETs return only the masked form."""
+    raw = await create_user_api_token(user)
+    return {"token": raw}
+
+
+@api_router.post("/tokens/rotate", tags=["tokens"])
+async def rotate_token(user: User = Depends(current_active_user)):
+    """Rotate the API token. The previous token is invalidated immediately.
+    Returns the new raw token."""
+    raw = await reset_user_api_token(user)
+    return {"token": raw}
+
+
+@api_router.delete("/tokens", status_code=204, tags=["tokens"])
+async def revoke_token(user: User = Depends(current_active_user)) -> Response:
+    """Revoke the API token. Subsequent calls with the old token 401."""
+    await delete_user_api_token(user)
+    return Response(status_code=204)
