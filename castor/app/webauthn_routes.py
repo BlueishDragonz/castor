@@ -770,8 +770,10 @@ async def set_recovery_email(
 
     proposed = payload.email.strip().lower()
     code = _generate_recovery_code()
-    expires_at = datetime.now(timezone.utc) + timedelta(
-        minutes=RECOVERY_CODE_TTL_MINUTES
+    # SQLite strips tzinfo; store naive UTC and compare naive.
+    expires_at = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+        + timedelta(minutes=RECOVERY_CODE_TTL_MINUTES)
     )
 
     from castor.app.db import RecoveryEmailChallenge as _Challenge
@@ -869,7 +871,8 @@ async def verify_recovery_email(
 
     from castor.app.db import RecoveryEmailChallenge as _Challenge
     code_hash = _hash_recovery_code(payload.code)
-    now = datetime.now(timezone.utc)
+    # SQLite strips tzinfo; compare in naive UTC.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     async with get_async_session_context() as session:
         async with session.begin():

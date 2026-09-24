@@ -47,7 +47,7 @@ class AuditEvent(db.Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
     )
     event: Mapped[str] = mapped_column(String(32), nullable=False)
     outcome: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -58,7 +58,8 @@ class AuditEvent(db.Base):
 def _cutoff(retention_days: int) -> datetime:
     if type(retention_days) is not int or retention_days <= 0:
         raise ValueError("retention_days must be a positive integer")
-    return datetime.now(timezone.utc) - timedelta(days=retention_days)
+    # SQLite strips tzinfo on round-trip; compare in naive UTC.
+    return datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=retention_days)
 
 
 async def append_audit_event(

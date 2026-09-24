@@ -135,7 +135,7 @@ async def change_password(user_id, expected_version, current_password, new_passw
             async with session.begin():
                 result = await session.execute(update(db.User).where(*_guard(user)).values(
                     hashed_password=hashed_password, token_version=db.User.token_version + 1,
-                    updated_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 ).execution_options(synchronize_session=False))
                 if result.rowcount != 1:
                     raise StaleAuthorizationError()
