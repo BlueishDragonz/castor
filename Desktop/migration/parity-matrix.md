@@ -333,11 +333,11 @@ and the evidence command(s) used to verify status.
 | **Side effects** | None |
 | **Error/empty/loading cases** | None |
 | **Existing code paths** | `habit_list.order_by = HabitOrder.X` |
-| **Proposed new UI path** | Astro UI: drop the existing manual-only sort and add a sort menu (Name / Category / Manually). Slice 9-alt adds the backend HTTP surface; UI work is out of scope for this slice. |
-| **API/backend path** | `GET /api/v1/habits?order_by=name\|category\|manually` (NEW in Slice 9-alt). Invalid values fall back to the persisted order_by. The persistence path (`PUT /api/v1/habits/meta`) is still TODO. |
-| **Test IDs** | `tests/test_slice9alt_realtime.py::Slice9AltSortTests` (4 tests covering default, name, category, invalid fallback) |
-| **Status** | ✅ (backend) / 🟡 (Astro UI) |
-| **Evidence** | Slice 9-alt: `GET /api/v1/habits` now accepts `?order_by=` and forwards to `HabitListBuilder.order_by`. `HabitListBuilder.build()` updated to honour the builder's `order_by` override (previously only the persisted `habit_list.order_by` was used, so the HTTP query param had no effect). |
+| **Proposed new UI path** | `/habits` page header now has a sort `<select>` (Manual / Name / Category). On change, the page reloads with `?order_by=name` etc., and the backend honours the param (Slice 9-alt). |
+| **API/backend path** | `GET /api/v1/habits?order_by=name\|category\|manual` (added in Slice 9-alt). Invalid values fall back to manual. Persistence via `PUT /api/v1/habits/meta` still TODO. |
+| **Test IDs** | `tests/test_slice9alt_realtime.py::Slice9AltSortTests` (4 backend tests) |
+| **Status** | ✅ |
+| **Evidence** | Slice 9-alt added the backend query param + `HabitListBuilder.build()` fix. Slice 10 added the Astro UI: a `<select>` in the page header reading `?order_by=` from URL and forwarding to the fetch. |
 
 ### 2.11 Habit detail page
 
