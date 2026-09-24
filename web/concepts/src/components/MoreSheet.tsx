@@ -180,6 +180,17 @@ export default function MoreSheet({ email = null }: Props) {
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
               </div>
             </Button>
+          </div>
+
+          <Separator className="my-1.5" />
+
+          {/* Sharing Section — circles moved out of Data into their own
+              group so they're discoverable as a first-class destination,
+              not buried under import/export. Matches DesktopMenu.tsx. */}
+          <div className="px-4">
+            <h3 className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase pt-4 pb-1">
+              Sharing
+            </h3>
 
             <Button
               variant="ghost"

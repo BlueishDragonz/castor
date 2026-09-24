@@ -34,6 +34,7 @@ import {
   Menu as MenuIcon,
   X,
   ChevronRight,
+  Users,
 } from 'lucide-react';
 
 interface MenuItem {
@@ -90,6 +91,17 @@ export function DesktopMenu({ email = null }: DesktopMenuProps) {
         { label: 'Import', Icon: Upload, onClick: () => closeAndNavigate('/import') },
         { label: 'Export', Icon: Download, onClick: () => closeAndNavigate('/export') },
         { label: 'Statistics', Icon: BarChart2, onClick: () => closeAndNavigate('/stats') },
+      ],
+    },
+    {
+      // Mobile's MoreSheet has had a Private Circles entry under its
+      // own "Sharing" section since before the migration; the desktop
+      // drawer didn't. Putting it in its own group (not under Tools)
+      // matches the mobile surface and signals that circles are a
+      // first-class navigation destination, not just another tool.
+      title: 'Sharing',
+      items: [
+        { label: 'Private Circles', Icon: Users, onClick: () => closeAndNavigate('/circles') },
       ],
     },
     {
