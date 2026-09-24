@@ -765,9 +765,10 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `views.export_user_habit_list(habit_list, user.email)` |
 | **Proposed new UI path** | `web/concepts/src/pages/export.astro` (server-side GET → backend) |
 | **API/backend path** | `GET /api/v1/habits/export` |
-| **Test IDs** | `tests/test_apis.py::test_export_round_trip` |
+| **Test IDs** | `tests/test_apis.py::test_export_round_trip` + `tests/test_slice6_import_export.py::Slice6ImportExportTests` (14 tests covering empty, metadata, ticked records, order, user-scoping, content-type, JSON round-trip) |
 | **Status** | ✅ |
-| **Evidence** | Page exists; backend endpoint exists; BFF at `/api/v1/habits/export` streams with `Content-Disposition: attachment`. |
+| **Evidence** | Slice 6 verifies the export endpoint behaviour end-to-end. Empty user → `{habits: []}`. Populated user → `{habits: [{name, records, id, tags}], order: [...]}`. Ticked records preserved (flat shape, not nested). Order reflects meta.order. User-scoped (User A's export does not include User B's habits). Returns `application/json`. |
+| **Schema gap** | The export shape is `{name, records, id, tags}` — `status`, `period`, `star` are NOT included. The legacy NiceGUI export included these. If a user re-imports the JSON on another device via the BFF loop, periods and statuses are lost. See slice-6-import-export.md for the full finding. |
 
 ### 6.2 Export CSV
 
@@ -804,9 +805,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `import_page.py::import_from_json`, `import_from_csv` |
 | **Proposed new UI path** | `web/concepts/src/pages/import.astro` (server-side POST → backend) |
 | **API/backend path** | `POST /api/v1/habits/import` (backend endpoint **NOT YET SHIPPED**) |
-| **Test IDs** | None (no backend import endpoint) |
+| **Test IDs** | `tests/test_slice6_import_export.py::test_import_loop_creates_habits_from_export`, `test_import_loop_drops_records`, `test_import_max_habit_count_enforced`, `test_import_loop_handles_missing_optional_fields`, `test_import_loop_rejects_empty_name`, `test_export_size_scales_with_habits` |
 | **Status** | 🟡 |
-| **Evidence** | Page exists; BFF at `/api/v1/habits/import` exists; backend route is pending. Per migration-plan.md §Phase 3 P1 Import/Export: "backend POST /habits/import gap documented". Page surfaces honest 404. |
+| **Evidence** | The Astro BFF import at `web/concepts/src/pages/api/v1/habits/import.ts` implements import as a loop of `POST /api/v1/habits` calls. Slice 6 verifies the round-trip (export → wipe → import loop → 2 habits re-appear). **Three Slice 6 findings**: (1) the BFF sends `tags`/`status` on POST but the backend only accepts `{name}` on POST — those fields are silently dropped; (2) tick records are NOT preserved on import (BFF sends only `{name, period, tags, status}` to POST, then tick records are never POSTed); (3) if the user has 5 habits, the 6th import attempt hits MAX_HABIT_COUNT and the loop returns an error rather than a partial success. The parity matrix above said the workflow is "merged into existing list with renamed collisions" — that requires a backend `POST /habits/import` endpoint which does NOT exist. Slice 6 documented the actual contract. |
 
 ### 6.4 Telegram backup (per-user)
 
