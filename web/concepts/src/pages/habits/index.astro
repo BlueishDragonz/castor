@@ -71,6 +71,14 @@ if (dateReverse) {
   days.reverse();
 }
 
+// Slice 10 — read ?order_by=... from URL and forward to the backend.
+// Validated against the HabitOrder enum values: 'manual', 'name', 'category'.
+// Invalid values are ignored (backend falls back to manual).
+const rawOrderBy = Astro.url.searchParams.get('order_by');
+const validOrderBy = ['manual', 'name', 'category'];
+const orderBy =
+  rawOrderBy && validOrderBy.includes(rawOrderBy) ? rawOrderBy : 'manual';
+
 interface Habit {
   id: string;
   name: string;
@@ -91,8 +99,9 @@ try {
   } else {
     const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
     
-    // Fetch habits list
-    const habitsRes = await fetch(new URL('/api/v1/habits', origin), {
+    // Fetch habits list (with sort)
+    const habitsQuery = orderBy === 'manual' ? '' : `?order_by=${orderBy}`;
+    const habitsRes = await fetch(new URL(`/api/v1/habits${habitsQuery}`, origin), {
       headers: { 'Authorization': `Bearer ${token}` },
     });
     
@@ -164,6 +173,20 @@ try {
         <p class="text-sm text-muted-foreground mt-0.5">
           {habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
         </p>
+      </div>
+      <!-- Slice 10 — sort menu (parity row 2.10) -->
+      <div class="flex items-center gap-2">
+        <label for="sort-select" class="text-xs text-muted-foreground">Sort by</label>
+        <select
+          id="sort-select"
+          class="rounded-md border bg-background px-2 py-1 text-sm"
+          onchange="window.location.search = this.value ? '?order_by=' + this.value : window.location.pathname"
+          aria-label="Sort habits"
+        >
+          <option value="manual" selected={orderBy === 'manual'}>Manually</option>
+          <option value="name" selected={orderBy === 'name'}>Name</option>
+          <option value="category" selected={orderBy === 'category'}>Category</option>
+        </select>
       </div>
     </header>
     {error && (
