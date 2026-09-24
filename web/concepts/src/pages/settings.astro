@@ -45,6 +45,7 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { Separator } from '../components/ui/separator';
 import HelpDialog from '../components/HelpDialog.tsx';
 import SettingsClient from '../components/SettingsClient.tsx';
+import DisplayCard from '../components/DisplayCard.tsx';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -156,47 +157,11 @@ if (Astro.request.method === 'POST') {
       </CardContent>
     </Card>
 
-    <Card>
-      <CardHeader>
-        <CardTitle>Display</CardTitle>
-        <CardDescription>
-          Per-device habit grid options. Saved to your account
-          immediately, applies on next visit.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            id="display-show_streak"
-            class="h-4 w-4 accent-primary"
-          />
-          <span class="text-sm">Show streak badge</span>
-        </label>
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            id="display-show_total"
-            class="h-4 w-4 accent-primary"
-          />
-          <span class="text-sm">Show total-completion badge</span>
-        </label>
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            id="display-date_reverse"
-            class="h-4 w-4 accent-primary"
-          />
-          <span class="text-sm">Show date columns in reverse (oldest first)</span>
-        </label>
-        <p class="text-xs text-muted-foreground">
-          Each toggle saves to
-          <code>/api/v1/user-configs</code>
-          on change. The home grid on /habits reads these server-side, so
-          switching browser or device preserves your selection.
-        </p>
-      </CardContent>
-    </Card>
+    <!-- Display card moved to <DisplayCard /> React island (slice 16):
+         uses the shadcn Checkbox primitive for visual parity with the
+         radios + buttons on the same page. Behaviour (cookie mirror +
+         immediate PUT to /api/v1/user-configs) is preserved. -->
+    <DisplayCard client:load />
 
     <Card>
       <CardHeader>
