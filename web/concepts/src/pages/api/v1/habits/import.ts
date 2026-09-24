@@ -28,19 +28,16 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     // Import each habit
     const results = [];
     for (const habit of habits) {
-      // Create habit
+      // Create habit (POST only accepts {name}; tags/status/period/records
+      // must be set via PUT /habits/{id} after creation. The backend
+      // silently drops everything except name on POST.)
       const createRes = await fetch(new URL('/api/v1/habits', origin), {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          name: habit.name,
-          period: habit.period || null,
-          tags: habit.tags || [],
-          status: habit.status || 'active',
-        }),
+        body: JSON.stringify({ name: habit.name }),
       });
 
       if (!createRes.ok) {
@@ -50,13 +47,36 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       }
 
       const created = await createRes.json();
-      
-      // Import records
-      if (habit.records && habit.records.length > 0) {
-        for (const record of habit.records) {
+
+      // Apply tags / period / status via PUT. Skip the round-trip if all
+      // three are at their defaults (no PUT is cheaper than an empty PUT).
+      const hasMetadata =
+        (habit.tags && habit.tags.length > 0) ||
+        (habit.period) ||
+        (habit.status && habit.status !== 'active');
+      if (hasMetadata) {
+        const update: Record<string, unknown> = {};
+        if (habit.tags && habit.tags.length > 0) update.tags = habit.tags;
+        if (habit.period) update.period = habit.period;
+        if (habit.status) update.status = habit.status;
+        await fetch(new URL(`/api/v1/habits/${created.id}`, origin), {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(update),
+        });
+      }
+
+      // Import records. Records in the export are nested: {data: {day, done, ...}}
+      // (matches /habits/{id} canonical shape). Flatten them here.
+      const records = (habit.records || []).map((r: any) => r.data || r);
+      if (records.length > 0) {
+        for (const record of records) {
           await fetch(new URL(`/api/v1/habits/${created.id}/completions`, origin), {
             method: 'POST',
-            headers: { 
+            headers: {
               'Content-Type': 'application/x-www-form-urlencoded',
               'Authorization': `Bearer ${token}`
             },

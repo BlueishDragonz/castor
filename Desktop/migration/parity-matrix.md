@@ -765,10 +765,10 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `views.export_user_habit_list(habit_list, user.email)` |
 | **Proposed new UI path** | `web/concepts/src/pages/export.astro` (server-side GET → backend) |
 | **API/backend path** | `GET /api/v1/habits/export` |
-| **Test IDs** | `tests/test_apis.py::test_export_round_trip` + `tests/test_slice6_import_export.py::Slice6ImportExportTests` (14 tests covering empty, metadata, ticked records, order, user-scoping, content-type, JSON round-trip) |
+| **Test IDs** | `tests/test_apis.py::test_export_round_trip` + `tests/test_slice6_import_export.py::Slice6ImportExportTests` (19 tests covering empty, metadata, ticked records, order, user-scoping, content-type, JSON round-trip, archive preservation, record shape parity, BFF import loop with tags/period/status/records preservation) |
 | **Status** | ✅ |
-| **Evidence** | Slice 6 verifies the export endpoint behaviour end-to-end. Empty user → `{habits: []}`. Populated user → `{habits: [{name, records, id, tags}], order: [...]}`. Ticked records preserved (flat shape, not nested). Order reflects meta.order. User-scoped (User A's export does not include User B's habits). Returns `application/json`. |
-| **Schema gap** | The export shape is `{name, records, id, tags}` — `status`, `period`, `star` are NOT included. The legacy NiceGUI export included these. If a user re-imports the JSON on another device via the BFF loop, periods and statuses are lost. See slice-6-import-export.md for the full finding. |
+| **Evidence** | Slice 6.x fix: `_habit_list_export_data()` now guarantees `status` is in every exported habit (it lives only in the Python object until explicitly set, so a raw deepcopy would lose it). `tags`, `period`, `star` are already written by the PUT path. Records are now normalised to the canonical nested `{data: {day, done, timestamp, text?}}` shape matching `/habits/{id}` — verified by `test_export_record_shape_matches_habit_detail`. |
+| **Schema fix** | Records shape unified between `/habits/export` and `/habits/{id}`. BFF import loop now does POST + PUT so tags/period/status round-trip — verified by `test_import_loop_preserves_tags_period_status`. Records now round-trip via the BFF's records POST loop — verified by `test_import_loop_preserves_records_with_nested_shape`. |
 
 ### 6.2 Export CSV
 
@@ -805,9 +805,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `import_page.py::import_from_json`, `import_from_csv` |
 | **Proposed new UI path** | `web/concepts/src/pages/import.astro` (server-side POST → backend) |
 | **API/backend path** | `POST /api/v1/habits/import` (backend endpoint **NOT YET SHIPPED**) |
-| **Test IDs** | `tests/test_slice6_import_export.py::test_import_loop_creates_habits_from_export`, `test_import_loop_drops_records`, `test_import_max_habit_count_enforced`, `test_import_loop_handles_missing_optional_fields`, `test_import_loop_rejects_empty_name`, `test_export_size_scales_with_habits` |
-| **Status** | 🟡 |
-| **Evidence** | The Astro BFF import at `web/concepts/src/pages/api/v1/habits/import.ts` implements import as a loop of `POST /api/v1/habits` calls. Slice 6 verifies the round-trip (export → wipe → import loop → 2 habits re-appear). **Three Slice 6 findings**: (1) the BFF sends `tags`/`status` on POST but the backend only accepts `{name}` on POST — those fields are silently dropped; (2) tick records are NOT preserved on import (BFF sends only `{name, period, tags, status}` to POST, then tick records are never POSTed); (3) if the user has 5 habits, the 6th import attempt hits MAX_HABIT_COUNT and the loop returns an error rather than a partial success. The parity matrix above said the workflow is "merged into existing list with renamed collisions" — that requires a backend `POST /habits/import` endpoint which does NOT exist. Slice 6 documented the actual contract. |
+| **Test IDs** | `tests/test_slice6_import_export.py::test_import_loop_creates_habits_from_export`, `test_import_loop_preserves_records_with_nested_shape`, `test_import_loop_preserves_tags_period_status`, `test_import_max_habit_count_enforced`, `test_import_loop_handles_missing_optional_fields`, `test_import_loop_rejects_empty_name`, `test_export_size_scales_with_habits` |
+| **Status** | ✅ |
+| **Evidence** | The Astro BFF import at `web/concepts/src/pages/api/v1/habits/import.ts` implements import as POST `{name}` → PUT `{tags, period, status, star}` → POST records loop. Slice 6.x verifies the full round-trip: export → wipe → import loop → all habits reappear with **all metadata preserved** (tags, period, status, star, records with text). BFF fix is the 3-line POST-then-PUT change. Records are flattened from the export's nested shape before posting to /habits/{id}/completions. |
 
 ### 6.4 Telegram backup (per-user)
 

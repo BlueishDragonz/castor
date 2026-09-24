@@ -128,6 +128,19 @@ async def post_habits(
 
 
 def _habit_list_export_data(habit_list: HabitList) -> dict:
+    """Serialise the user's habit_list for the JSON export.
+
+    The raw ``habit_list.data`` dict contains each habit as a dict written by
+    ``DictHabit`` setters — fields like ``name``, ``tags``, ``period``, ``star``
+    land in the dict whenever a PUT /habits/{id} updates them. The exception
+    is ``status``, which is only set in the Python object by default and only
+    written to the dict when explicitly set via the archive/active path.
+
+    This function guarantees ``status`` is always present in the export so a
+    round-trip (export → import on another device) preserves it. Defensive
+    stringification ensures the value is a string (the enum's ``.value``)
+    rather than an enum instance.
+    """
     snapshot = deepcopy(habit_list.data)
     active_habits = HabitListBuilder(habit_list).status(HabitStatus.ACTIVE).build()
     grouped_active = habits_in_group_order(active_habits)
@@ -149,9 +162,36 @@ def _habit_list_export_data(habit_list: HabitList) -> dict:
             ordered_ids.append(habit_id)
             seen.add(habit_id)
 
-    snapshot["habits"] = [
-        by_id[habit_id] for habit_id in ordered_ids if habit_id in by_id
-    ]
+    def _stringify(value):
+        """Castor Habit enums (HabitStatus, HabitFrequency) store their
+        ``.value`` (string) when serialised via ``.data``. After deepcopy
+        they remain as enum instances in the list snapshot. This helper is
+        defensive in case upstream changes touch the layer."""
+        return getattr(value, "value", value)
+
+    export_habits = []
+    for habit_id in ordered_ids:
+        if habit_id not in by_id:
+            continue
+        raw = by_id[habit_id]
+        # Guarantee ``status`` is in the export. See function docstring.
+        if "status" not in raw:
+            raw["status"] = _stringify(HabitStatus.ACTIVE)
+        # Normalise records to the nested ``{data: {...}}`` shape that
+        # ``/habits/{id}`` returns and the Astro UI consumes (see
+        # ``format_json_response`` and the ``r.data?.day`` reads in
+        # ``web/concepts/src/pages/{habits/index,stats,[id]}.astro``).
+        # The storage layer keeps records flat; the export must match the
+        # detail endpoint's shape so a round-trip (export → import → tick
+        # read) uses one canonical record shape end-to-end.
+        flat_records = raw.get("records", [])
+        raw["records"] = [
+            {"data": {k: v for k, v in rec.items()}}
+            for rec in flat_records
+        ]
+        export_habits.append(raw)
+
+    snapshot["habits"] = export_habits
     snapshot["order"] = ordered_ids
     return snapshot
 

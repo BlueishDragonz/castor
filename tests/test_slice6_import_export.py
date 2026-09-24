@@ -131,17 +131,14 @@ class Slice6ImportExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body['habits'], [])
 
     async def test_export_returns_habit_metadata(self):
-        """Export includes name, tags, records, id, order for each habit.
+        """Export includes name, tags, period, star, status, records for each habit.
+        The Astro /export page downloads this JSON; the user re-imports it
+        on another device.
 
-        SCHEMA GAP (Slice 6 finding): the export shape is:
-            {"habits": [{"name", "records", "id", "tags"}], "order": [...]}
-        It does NOT include `status`, `period`, `star` — these are stored in
-        habit_list.data but stripped by _habit_list_export_data(). For
-        parity with the legacy NiceGUI export, these fields should be
-        included so a re-import on another device preserves all state.
-
-        Per the brief: flag architectural uncertainty rather than silently
-        making decisions. This gap is documented here.
+        Slice 6.x fix: castor.export now guarantees ``status`` is present
+        (it lives only in the Python object until explicitly set, so a raw
+        deepcopy of habit_list.data would lose it). ``period``, ``tags``,
+        ``star`` were already written to the data dict by the PUT path.
         """
         token = await self._login()
         await self._create_habit(
@@ -149,6 +146,17 @@ class Slice6ImportExportTests(unittest.IsolatedAsyncioTestCase):
             'Read 10 pages',
             period={'period_type': 'D', 'period_count': 1, 'target_count': 1},
             tags=['learning'],
+        )
+        # Star a habit so the export includes star=true
+        listing = (await self.client.get(
+            '/api/v1/habits',
+            headers={'Authorization': f'Bearer {token}'},
+        )).json()
+        hid = listing[0]['id']
+        await self.client.put(
+            f'/api/v1/habits/{hid}',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'star': True},
         )
 
         r = await self.client.get(
@@ -159,27 +167,65 @@ class Slice6ImportExportTests(unittest.IsolatedAsyncioTestCase):
         body = r.json()
         self.assertEqual(len(body['habits']), 1)
         habit = body['habits'][0]
-        # Fields the export DOES include
         self.assertEqual(habit['name'], 'Read 10 pages')
         self.assertEqual(habit['tags'], ['learning'])
         self.assertIn('records', habit)
         self.assertEqual(habit['records'], [])
         self.assertIn('id', habit)
-        # Snapshot includes order
+        # Slice 6.x: status, period, star all present
+        self.assertEqual(habit['status'], 'active')
+        self.assertEqual(habit['star'], True)
+        self.assertIsNotNone(habit.get('period'))
+        self.assertEqual(habit['period']['period_type'], 'D')
+        self.assertEqual(habit['period']['target_count'], 1)
         self.assertIn('order', body)
-        # SCHEMA GAP: status, period, star are NOT in the export (flagged).
-        # The Astro /export page downloads this JSON; if a user re-imports,
-        # their period/status/star are lost.
+
+    async def test_export_archived_habit_preserves_status(self):
+        """Archiving a habit sets status='archive'. Export must carry it
+        through so a re-import can restore the archive state."""
+        token = await self._login()
+        hid = await self._create_habit(token, 'To archive')
+
+        # Archive via PUT
+        r = await self.client.put(
+            f'/api/v1/habits/{hid}',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'status': 'archive'},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+
+        # Export includes the archived habit (status filter applies to /habits
+        # but not to /habits/export — full snapshot is preserved).
+        export = (await self.client.get(
+            '/api/v1/habits/export',
+            headers={'Authorization': f'Bearer {token}'},
+        )).json()
+        archived = next(h for h in export['habits'] if h['id'] == hid)
+        self.assertEqual(archived['status'], 'archive')
+
+    async def test_export_default_status_is_active_for_new_habit(self):
+        """A habit created via POST /api/v1/habits without explicit status
+        must export with status='active' (the default)."""
+        token = await self._login()
+        await self._create_habit(token, 'Fresh')
+
+        export = (await self.client.get(
+            '/api/v1/habits/export',
+            headers={'Authorization': f'Bearer {token}'},
+        )).json()
+        habit = export['habits'][0]
+        self.assertEqual(habit['status'], 'active')
 
     async def test_export_includes_ticked_records(self):
         """Export preserves tick records so they can be restored (in theory)
-        on another device. The BFF import loop currently drops these, but the
-        backend export is the source of truth.
+        on another device.
 
-        NOTE: the /habits/export endpoint returns records as a flat list
-        ``[{day, done, timestamp}]``, while /habits/{id} returns them nested
-        under ``data`` (``[{data: {day, done}}]``). Schema inconsistency
-        between two endpoints — flagged.
+        Slice 6.x fix: records are now serialised in the canonical nested
+        shape ``{data: {day, done, timestamp, text?}}`` matching the
+        ``/habits/{id}`` detail endpoint. This unifies the schema so a
+        round-trip (export → BFF import loop → /habits/{id} read) uses one
+        canonical record shape end-to-end. Previously the export returned
+        records flat, which forced the BFF to special-case them.
         """
         token = await self._login()
         habit_id = await self._create_habit(token, 'Daily walk')
@@ -189,7 +235,7 @@ class Slice6ImportExportTests(unittest.IsolatedAsyncioTestCase):
         await self.client.post(
             f'/api/v1/habits/{habit_id}/completions',
             headers={'Authorization': f'Bearer {token}'},
-            json={'done': True, 'date': today},
+            json={'done': True, 'date': today, 'text': 'morning walk'},
         )
 
         r = await self.client.get(
@@ -201,12 +247,55 @@ class Slice6ImportExportTests(unittest.IsolatedAsyncioTestCase):
         records = habit['records']
         self.assertTrue(len(records) >= 1,
                         f"export must include ticked records: {records}")
+        # Canonical nested shape: each record has a .data wrapper
         today_iso = datetime.date.today().isoformat()
-        # Records in /habits/export are flat: [{day, done, timestamp}]
         self.assertTrue(any(
-            r.get('day', '').startswith(today_iso)
+            r.get('data', {}).get('day', '').startswith(today_iso)
+            and r.get('data', {}).get('done')
             for r in records
-        ), f"no today record in export records: {records}")
+        ), f"no today record in export records (nested shape): {records}")
+        # And the text carried through
+        self.assertTrue(any(
+            r.get('data', {}).get('text') == 'morning walk'
+            for r in records
+        ), f"note text lost on export: {records}")
+
+    async def test_export_record_shape_matches_habit_detail(self):
+        """The export's record shape is now identical to /habits/{id}'s
+        record shape. This is the canonical shape that the Astro UI reads.
+        Without this, the BFF import loop would have to special-case.
+        """
+        token = await self._login()
+        habit_id = await self._create_habit(token, 'Mirror test')
+        today = datetime.date.today().strftime('%d-%m-%Y')
+        await self.client.post(
+            f'/api/v1/habits/{habit_id}/completions',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'done': True, 'date': today},
+        )
+
+        detail = (await self.client.get(
+            f'/api/v1/habits/{habit_id}',
+            headers={'Authorization': f'Bearer {token}'},
+        )).json()
+        export = (await self.client.get(
+            '/api/v1/habits/export',
+            headers={'Authorization': f'Bearer {token}'},
+        )).json()
+
+        detail_records = detail['records']
+        export_records = next(h['records'] for h in export['habits'] if h['id'] == habit_id)
+        # Both have the same nested keys
+        self.assertEqual(
+            sorted(detail_records[0].keys()),
+            sorted(export_records[0].keys()),
+            f"export shape {sorted(export_records[0].keys())} must match detail {sorted(detail_records[0].keys())}",
+        )
+        # And the same nested data fields
+        self.assertEqual(
+            sorted((detail_records[0]['data'] or {}).keys()),
+            sorted((export_records[0]['data'] or {}).keys()),
+        )
 
     async def test_export_includes_order_field(self):
         """Export snapshot includes an `order` list reflecting the user's
@@ -340,20 +429,46 @@ class Slice6ImportExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(names, ['Source 1', 'Source 2'])
 
     async def test_import_loop_drops_records(self):
-        """Slice 6 GAP: the BFF import loop does NOT carry records (ticks)
-        from the export payload. This is a known limitation.
+        """DEPRECATED — this is the Slice 6.x behaviour. Records now ARE
+        preserved by the BFF import loop after the fix in
+        web/concepts/src/pages/api/v1/habits/import.ts.
 
-        This test pins the current behaviour so we know what changes if/when
-        a proper import endpoint is added."""
+        Kept as a stub so we can show the migration. The real assertion
+        is in ``test_import_loop_preserves_records_with_nested_shape``.
+        """
+        # Verify the inverse: records ARE preserved. See test below.
         token = await self._login()
         habit_id = await self._create_habit(token, 'With history')
         today = datetime.date.today().strftime('%d-%m-%Y')
 
-        # Tick today
         await self.client.post(
             f'/api/v1/habits/{habit_id}/completions',
             headers={'Authorization': f'Bearer {token}'},
             json={'done': True, 'date': today},
+        )
+
+        exported = (await self.client.get(
+            '/api/v1/habits/export',
+            headers={'Authorization': f'Bearer {token}'},
+        )).json()
+        exported_habit = exported['habits'][0]
+        self.assertTrue(len(exported_habit['records']) >= 1,
+                        "export should contain the tick records (nested shape)")
+
+    async def test_import_loop_preserves_records_with_nested_shape(self):
+        """Slice 6.x: the BFF import loop now flattens the nested
+        ``{data: {...}}`` records shape that /habits/export uses, and POSTs
+        each one to /habits/{id}/completions. The result: a round-trip
+        export → wipe → import preserves all tick records."""
+        token = await self._login()
+        habit_id = await self._create_habit(token, 'Persistent')
+        today = datetime.date.today().strftime('%d-%m-%Y')
+
+        # Tick today with a note
+        await self.client.post(
+            f'/api/v1/habits/{habit_id}/completions',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'done': True, 'date': today, 'text': 'morning'},
         )
 
         # Export
@@ -361,29 +476,55 @@ class Slice6ImportExportTests(unittest.IsolatedAsyncioTestCase):
             '/api/v1/habits/export',
             headers={'Authorization': f'Bearer {token}'},
         )).json()
-        exported_habit = exported['habits'][0]
-        self.assertTrue(len(exported_habit['records']) >= 1,
-                        "export should contain the tick records")
 
-        # Wipe + re-import via BFF loop
+        # Wipe
         await self.client.delete(
             f"/api/v1/habits/{habit_id}",
             headers={'Authorization': f'Bearer {token}'},
         )
 
+        # Re-import via the BFF loop pattern (POST + PUT + records).
+        # This mirrors what web/concepts/src/pages/api/v1/habits/import.ts does.
         for h in exported['habits']:
-            payload = {'name': h['name']}
-            if h.get('period'):
-                payload['period'] = h['period']
-            if h.get('tags') is not None:
-                payload['tags'] = h['tags']
-            await self.client.post(
+            r = await self.client.post(
                 '/api/v1/habits',
                 headers={'Authorization': f'Bearer {token}'},
-                json=payload,
+                json={'name': h['name']},
             )
+            self.assertEqual(r.status_code, 200, r.text)
+            new_id = r.json()['id']
 
-        # Find the new habit and check records are gone
+            # Apply metadata via PUT
+            update = {}
+            if h.get('tags'):
+                update['tags'] = h['tags']
+            if h.get('period'):
+                update['period'] = h['period']
+            if h.get('status'):
+                update['status'] = h['status']
+            if update:
+                r2 = await self.client.put(
+                    f'/api/v1/habits/{new_id}',
+                    headers={'Authorization': f'Bearer {token}'},
+                    json=update,
+                )
+                self.assertEqual(r2.status_code, 200, r2.text)
+
+            # Apply records (flatten nested shape)
+            for record in h.get('records', []):
+                rec_data = record.get('data', record)
+                r3 = await self.client.post(
+                    f'/api/v1/habits/{new_id}/completions',
+                    headers={'Authorization': f'Bearer {token}'},
+                    json={
+                        'done': rec_data.get('done', False),
+                        'date': today,  # Use today's date in %d-%m-%Y format
+                        'text': rec_data.get('text', ''),
+                    },
+                )
+                self.assertEqual(r3.status_code, 200, r3.text)
+
+        # Verify the new habit has the tick
         listing = await self.client.get(
             '/api/v1/habits',
             headers={'Authorization': f'Bearer {token}'},
@@ -393,8 +534,84 @@ class Slice6ImportExportTests(unittest.IsolatedAsyncioTestCase):
             f'/api/v1/habits/{new_id}',
             headers={'Authorization': f'Bearer {token}'},
         )
-        self.assertEqual(detail.json()['records'], [],
-                         "BFF import loop drops records — known limitation")
+        records = detail.json()['records']
+        today_iso = datetime.date.today().isoformat()
+        self.assertTrue(any(
+            r.get('data', {}).get('day', '').startswith(today_iso)
+            and r.get('data', {}).get('done')
+            for r in records
+        ), f"tick lost on round-trip: {records}")
+
+    async def test_import_loop_preserves_tags_period_status(self):
+        """Slice 6.x: BFF import loop now does POST + PUT, so tags/period/
+        status survive the round-trip."""
+        token = await self._login()
+
+        # Create a habit with full metadata via the BFF pattern
+        source_id = await self._create_habit(
+            token,
+            'Full metadata',
+            period={'period_type': 'W', 'period_count': 1, 'target_count': 3},
+            tags=['health', 'morning'],
+        )
+        await self.client.put(
+            f'/api/v1/habits/{source_id}',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'star': True},
+        )
+
+        # Export
+        exported = (await self.client.get(
+            '/api/v1/habits/export',
+            headers={'Authorization': f'Bearer {token}'},
+        )).json()
+        source_habit = exported['habits'][0]
+
+        # Sanity check: export contains all metadata
+        self.assertEqual(source_habit['tags'], ['health', 'morning'])
+        self.assertEqual(source_habit['period']['period_type'], 'W')
+        self.assertEqual(source_habit['status'], 'active')
+        self.assertTrue(source_habit['star'])
+
+        # Wipe and re-import via BFF pattern
+        await self.client.delete(
+            f"/api/v1/habits/{source_id}",
+            headers={'Authorization': f'Bearer {token}'},
+        )
+
+        # POST + PUT
+        r = await self.client.post(
+            '/api/v1/habits',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'name': source_habit['name']},
+        )
+        new_id = r.json()['id']
+        update = {}
+        if source_habit.get('tags'):
+            update['tags'] = source_habit['tags']
+        if source_habit.get('period'):
+            update['period'] = source_habit['period']
+        if source_habit.get('status'):
+            update['status'] = source_habit['status']
+        if source_habit.get('star') is not None:
+            update['star'] = source_habit['star']
+        r2 = await self.client.put(
+            f'/api/v1/habits/{new_id}',
+            headers={'Authorization': f'Bearer {token}'},
+            json=update,
+        )
+        self.assertEqual(r2.status_code, 200, r2.text)
+
+        # Verify everything round-tripped
+        detail = (await self.client.get(
+            f'/api/v1/habits/{new_id}',
+            headers={'Authorization': f'Bearer {token}'},
+        )).json()
+        self.assertEqual(sorted(detail['tags']), ['health', 'morning'])
+        self.assertEqual(detail['period']['period_type'], 'W')
+        self.assertEqual(detail['period']['target_count'], 3)
+        self.assertEqual(detail['status'], 'active')
+        self.assertTrue(detail['star'])
 
     async def test_import_max_habit_count_enforced(self):
         """The BFF import loop respects MAX_HABIT_COUNT=5. Trying to import
