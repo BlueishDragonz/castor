@@ -1283,10 +1283,10 @@ and the evidence command(s) used to verify status.
 | **Side effects** | None |
 | **Existing code paths** | `views.cache_user_configs(user)` |
 | **Proposed new UI path** | Astro reads from cookies (no backend write endpoint yet) |
-| **API/backend path** | `GET /api/v1/habits/meta` returns `{order}` only; no write endpoint for display prefs |
-| **Test IDs** | None |
-| **Status** | 🟡 |
-| **Evidence** | `settings.astro` §4 docstring: "Habit-display preferences… parked until the backend ships user_configs write endpoints — see docs/plan/migration-plan.md Phase 3 P2". |
+| **API/backend path** | `GET /api/v1/user-configs` → returns dict; `PUT /api/v1/user-configs {custom_css?, show_streak?, show_total?, date_reverse?}` → merge into user_configs.config_data (slice 11 + 12). Booleans are Pydantic StrictBool (reject 0/1/"yes" coercion). |
+| **Test IDs** | Slice 11 (13); Slice 12b (10) |
+| **Status** | ✅ |
+| **Evidence** | Backend: 23 contract tests in `test_slice11_user_configs.py` + `test_slice12_display_prefs.py` cover GET defaults, PUT custom_css sanitisation, PUT boolean validation (StrictBool), merge semantics, cross-user isolation. Astro: `settings.astro` Display card with 3 toggles; `SettingsClient` PUTs on change AND mirrors to `habit_*` cookies so `/habits/index.astro`'s server-side cookie read reflects the choice on next render. Server `user_configs` is source-of-truth across devices. |
 
 ### 12.7 Sort habits by Name / Category
 
