@@ -13,6 +13,13 @@ A row that has any "MISSING" path keeps its current status.
 A row that has ONLY "OK" paths AND zero intentionally-missing keys
 is a stale-evidence candidate.
 
+Note: this script is a fast file-existence check. It cannot detect
+rows whose evidence files exist but are NOT WIRED TOGETHER (e.g.
+row 2.13 had all referenced files present, but the event chain
+between them had to be traced manually). For such cases, follow the
+stale-evidence candidate with a manual event-chain inspection before
+marking the row ✅.
+
 Run from repo root:
     python Desktop/migration/scripts/audit_parity_matrix.py
 """

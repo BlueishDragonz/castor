@@ -396,8 +396,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | HabitNoteDialog + HabitNoteRow exist (`components/HabitNoteDialog.tsx`, `HabitNoteRow.tsx`) — wired to HabitGrid cells? |
 | **API/backend path** | `POST /api/v1/habits/{id}/completions` body `{done, date, text, ...}` |
 | **Test IDs** | None |
-| **Status** | 🟡 |
-| **Evidence** | `HabitNoteDialog.tsx` exists; `HabitNoteRow.tsx` renders per-day notes on detail page. **Long-press on grid cells**: plan §3 P2 explicitly says "Long-press → notes textarea deferred to P2 — needs throttled pointer-event helper (`useLongPress` hook)". Slice 13 (2026-09-24) audit confirmed the dialog/row files exist; the actual gap is the gesture helper, not the dialog itself. Not yet wired. |
+| **Status** | ✅ |
+| **Evidence** | `HabitGrid.astro:463-523` wires 200ms hold + right-click on `[data-long-press-delay]` tick cells to emit `castor:tick-longpress` CustomEvent. `HabitNoteRow.tsx:72-73` listens and opens HabitNoteDialog (auto-save every 700ms via `/api/v1/habits/{id}/notes`). Slice 13 (2026-09-24) initially flagged this as a gap; verified during slice 14 (2026-09-24) by tracing the full event chain — no missing helper, no missing wire-up. |
 
 ---
 
@@ -1317,30 +1317,32 @@ underlying files exist and were verified by
 - 2.10 / 12.7 Sort by Name/Category ✅ (slice 9-alt + 10)
 - 3.4 53-week heatmap → ❌ intentional (same precedent as 12.3/12.4)
 
-**Remaining open rows (post-slice-13 audit):**
+**Slice 14 (2026-09-24) — additional stale-evidence closure:**
 
-| # | Item | Group | Severity |
+- 2.13 Long-press notes ✅ — traced full event chain
+  (`HabitGrid.astro:463-523` → `castor:tick-longpress` CustomEvent →
+  `HabitNoteRow.tsx:72-73` listener → `HabitNoteDialog`). Wire-up
+  existed; matrix evidence was stale.
+
+**Remaining open rows (post-slice-14 audit):**
+
+| Severity | Item | Group | Notes |
 | --- | --- | --- | --- |
-| 1 | `/help` page (currently 404 from mobile MoreSheet) | 4.4 | High (visible 404 to every mobile user) |
-| 2 | `/gui/tokens` UI (`/tokens`) | 12.1 | Medium |
-| 3 | Habit-display preferences persistence | 12.6 | Medium (functional but not persisted server-side) |
-| 4 | Import POST backend endpoint | 6.3 | Medium (page surfaces honest 404) |
-| 5 | Stats date-range picker | 3.2 | Medium |
-| 6 | CSV export | 6.2 | Low (legacy never had this either) |
-| 7 | Last-key passkey removal UX | 5.3 | Low (backend correct; UI uses prompt()) |
-| 8 | Change-password UX | 5.4 | Low (works; uses prompt() chain) |
-| 9 | Sort-by-Name/Category menu | 2.10, 12.7 | Low |
-| 10 | Daily-rollover timer | 11.2 | Low (most users reload) |
-| 11 | `/completion-status` (chip set editor) | 12.2 | Low |
-| 12 | Paddle pricing page | 12.3 | None (intentionally dropped) |
-| 13 | Google One Tap | 12.4 | None (intentionally dropped) |
-| 14 | WebSocket fan-out to Astro | 11.1 | None (mobile clients use it; Astro pages re-fetch) |
-| 15 | Telegram backup config UI | 6.4 | Low |
-| 16 | Custom CSS persistence backend | 4.2 | Low (textarea present; backend write endpoint pending) |
-| 17 | Long-press notes-textarea on grid cells | 2.13 | Low (still in P2 polish) |
-| 18 | rpId mismatch on apollo (`WEBAUTHN_RP_ID=localhost` vs origin `10.8.0.1`) | 1.2 | High (passkey login broken on existing apollo) |
+| High | rpId mismatch (`WEBAUTHN_RP_ID=localhost` vs origin `10.8.0.1`) | 1.2 | Phase 4 cutover item — fix `compose.yml` env before flipping traffic |
+| Medium | Import POST backend endpoint | 6.3 | Page surfaces honest 404; not blocking because BFF import loop in slice 6.x is the working path |
+| Low | CSV export | 6.2 | Net-new (legacy never had it) |
+| Low | Telegram backup config UI | 6.4 | Net-new (legacy never had it) |
+| Low | Last-key passkey removal UX | 5.3 | Backend correct; UI uses `prompt()` chain — UX polish only |
+| Low | Change-password UX | 5.4 | Works; uses `prompt()` chain — UX polish only |
+| Low | Daily-rollover timer | 11.2 | Real JS gap; deferred (most users reload) |
+| Low | `/completion-status` (chip-set editor) | 12.2 | Real UI gap; deferred |
+| Low | Habit image upload (notes) | 12.5 | Real UI gap; backend has no media path yet |
+| None | Paddle pricing page | 12.3 | Intentionally dropped (commercial feature) |
+| None | Google One Tap | 12.4 | Intentionally dropped |
+| None | 53-week heatmap | 3.4 | Intentionally dropped (15-week view covers UX need) |
+| None | WebSocket fan-out to Astro | 11.1 | Mobile clients use it; Astro pages re-fetch |
 
-**Net-new on migration branch**: items marked 🔵 (Private Circles, /terms, /privacy).
+**Net-new on migration branch**: items marked 🔵 (Private Circles, /terms, /privacy) — all closed in slice 13.
 
 ---
 
