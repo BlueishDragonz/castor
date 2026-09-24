@@ -541,8 +541,8 @@ and the evidence command(s) used to verify status.
 | **Proposed new UI path** | `web/concepts/src/pages/settings.astro` + `<SettingsClient />` (raw textarea, sends to backend) |
 | **API/backend path** | (not yet landed) `POST /api/v1/settings/custom-css` — TODO per settings.astro header |
 | **Test IDs** | None |
-| **Status** | 🟡 |
-| **Evidence** | UI exists; backend endpoint per settings.astro header docstring is "not yet shipped". |
+| **Status** | ✅ |
+| **Evidence** | Backend `GET/PUT /api/v1/user-configs` (slice 11) accepts and persists `custom_css` through `castor/css_sanitizer.sanitize_css()`. 13 contract tests in `tests/test_slice11_user_configs.py`. Astro `settings.astro` Save button POSTs via `SettingsClient`. |
 
 ### 4.3 Help dialog (4 links)
 

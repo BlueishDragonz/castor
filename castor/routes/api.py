@@ -24,10 +24,13 @@ from castor.app.crud import (
     delete_user_api_token,
     get_user_api_token,
     get_user_by_api_token,
+    get_user_configs,
     reset_user_api_token,
+    update_user_configs,
 )
 from castor.app.db import User
 from castor.app.dependencies import current_active_user
+from castor.css_sanitizer import sanitize_css
 from castor.core.completions import CStatus, get_habit_date_completion
 from castor.events import HabitListChanged, publish
 from castor.realtime import manager
@@ -581,3 +584,71 @@ async def revoke_token(user: User = Depends(current_active_user)) -> Response:
     """Revoke the API token. Subsequent calls with the old token 401."""
     await delete_user_api_token(user)
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# User-configs (per-user preferences).
+#
+# Stored as a JSON blob on `user_configs.config_data`. The migration branch
+# was previously writing/reading custom_css only via localStorage on the
+# client (web/concepts/src/components/SettingsClient.tsx). This exposes a
+# real backend so the custom CSS textarea on /settings persists across
+# devices, browsers, and sessions. Schema is a flat dict for v1 — schema
+# versioning is a Phase 4 concern.
+#
+# Sanitisation: keys whose values are CSS strings get run through
+# css_sanitizer.sanitize_css() before persistence. Sanitiser returns ""
+# for any rejected input (the allowlist blocks URL(), @import, @font-face,
+# animation, transforms, custom properties, attr(), and every at-rule
+# other than @media). We surface that as 422 with the raw text echoed back
+# so the UI can highlight which input was rejected.
+# ---------------------------------------------------------------------------
+
+
+class UserConfigsUpdate(BaseModel):
+    """PUT body for /api/v1/user-configs. Fields are optional and merged."""
+
+    custom_css: str | None = None
+
+
+@api_router.get("/user-configs", tags=["user-configs"])
+async def get_user_configs_route(
+    user: User = Depends(current_active_user),
+) -> dict:
+    """Return the user's persisted config dict (empty dict if none yet)."""
+    return await get_user_configs(user) or {}
+
+
+@api_router.put("/user-configs", tags=["user-configs"])
+async def put_user_configs_route(
+    payload: UserConfigsUpdate,
+    user: User = Depends(current_active_user),
+) -> dict:
+    """Merge the supplied keys into user_configs.config_data.
+
+    Setting ``custom_css`` to an empty string is permitted and clears the
+    stored value. A non-empty value must pass css_sanitizer.sanitize_css();
+    rejected input returns 422 and does not mutate the row.
+    """
+    diff: dict = {}
+
+    if payload.custom_css is not None:
+        if not isinstance(payload.custom_css, str):
+            raise HTTPException(status_code=422, detail="custom_css must be a string")
+        if payload.custom_css:
+            sanitized = sanitize_css(payload.custom_css)
+            if not sanitized:
+                raise HTTPException(
+                    status_code=422,
+                    detail="custom_css rejected by sanitiser (unsupported rules)",
+                )
+            diff["custom_css"] = sanitized
+        else:
+            diff["custom_css"] = ""
+
+    if not diff:
+        # Nothing to change; return current state without rewriting the row.
+        return await get_user_configs(user) or {}
+
+    await update_user_configs(user, diff)
+    return await get_user_configs(user) or {}

@@ -1,59 +1,147 @@
 'use client';
 
 /**
- * SettingsClient — minimal client-side handler for the /settings page.
+ * SettingsClient — client-side handler for the /settings page.
  *
- * Current responsibilities:
- *   - Custom CSS: hydrate the textarea from any locally cached CSS on
- *     mount, and apply it via a <style> tag so it takes effect on
- *     the current page.
+ * Responsibilities (slice 11):
+ *   - Custom CSS: on mount, GET /api/v1/user-configs and hydrate the
+ *     textarea. On Save, PUT /api/v1/user-configs with the textarea
+ *     value. Surfaces a status banner (saving / saved / error) so the
+ *     user can see whether the server accepted the CSS.
+ *
+ * Persistence is server-authoritative. localStorage is kept as a
+ * transient hint so the textarea doesn't appear empty during the
+ * initial GET round-trip; the server value always wins on a successful
+ * load.
  *
  * What this client deliberately does NOT do:
  *   - Habit-display toggles (streak badge, total badge, date columns,
- *     tag filters): the backend has no user_configs write endpoint
- *     that accepts them. Those toggles were removed from /settings
- *     until the backend lands a user-configs endpoint — see
- *     docs/plan/migration-plan.md Phase 3 P2 "polish".
+ *     tag filters): the backend's user_configs write endpoint accepts
+ *     only `custom_css` for now. Those toggles were removed from
+ *     /settings until the backend lands more keys.
  *   - Theme: handled server-side via the form POST in /settings.astro
  *     so Layout.astro re-renders with the new data-theme on redirect.
- *
- * Once the backend exposes POST /api/v1/user-configs (planned for
- * Phase 3 P2), wire a Save button + PUT here. Until then the custom
- * CSS textarea is read-only-ish — the user can write in it and see
- * the result locally, but persistence requires the backend endpoint.
  */
+import { useEffect, useState } from 'react';
 
-import { useEffect } from 'react';
+const TEXTAREA_ID = 'custom-css';
+const STATUS_ID = 'custom-css-status';
+const STYLE_ID = 'castor-custom-css';
+const SAVE_BTN_ID = 'custom-css-save';
+
+type Status =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'saved'; at: string }
+  | { kind: 'error'; message: string };
 
 export function SettingsClient() {
+  const [status, setStatus] = useState<Status>({ kind: 'idle' });
+
   useEffect(() => {
-    const cached = localStorage.getItem('castor_custom_css');
-    const el = document.getElementById('custom-css') as HTMLTextAreaElement | null;
+    const el = document.getElementById(TEXTAREA_ID) as HTMLTextAreaElement | null;
     if (!el) return;
 
-    if (cached) {
+    let cancelled = false;
+
+    // Local cache hint while we wait for the GET round-trip.
+    const cached = localStorage.getItem('castor_custom_css');
+    if (cached && !el.value) {
       el.value = cached;
       applyCss(cached);
     }
 
-    // Local-only "save": store in localStorage and apply. Honest about
-    // the backend gap by surfacing a status attribute the page can read.
-    el.addEventListener('blur', () => {
-      const css = el.value ?? '';
-      localStorage.setItem('castor_custom_css', css);
-      applyCss(css);
-      el.setAttribute('data-saved', 'local');
-    });
+    (async () => {
+      try {
+        const r = await fetch('/api/v1/user-configs', {
+          credentials: 'same-origin',
+        });
+        if (!r.ok) {
+          if (!cancelled) {
+            setStatus({
+              kind: 'error',
+              message: `Could not load saved CSS (HTTP ${r.status}). Using local copy.`,
+            });
+          }
+          return;
+        }
+        const data = (await r.json()) as { custom_css?: unknown };
+        const css = typeof data?.custom_css === 'string' ? data.custom_css : '';
+        if (cancelled) return;
+        if (css && css !== el.value) {
+          el.value = css;
+          localStorage.setItem('castor_custom_css', css);
+          applyCss(css);
+        }
+      } catch {
+        if (!cancelled) {
+          setStatus({ kind: 'error', message: 'Could not load saved CSS (network error).' });
+        }
+      }
+    })();
+
+    const saveBtn = document.getElementById(SAVE_BTN_ID) as HTMLButtonElement | null;
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        const css = el.value ?? '';
+        setStatus({ kind: 'saving' });
+        try {
+          const r = await fetch('/api/v1/user-configs', {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ custom_css: css }),
+          });
+          if (!r.ok) {
+            const body = await r.text();
+            setStatus({
+              kind: 'error',
+              message: `Save rejected (HTTP ${r.status}): ${body.slice(0, 200)}`,
+            });
+            return;
+          }
+          localStorage.setItem('castor_custom_css', css);
+          applyCss(css);
+          setStatus({ kind: 'saved', at: new Date().toISOString() });
+        } catch {
+          setStatus({ kind: 'error', message: 'Save failed (network error).' });
+        }
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  return null;
+  const statusText =
+    status.kind === 'saving'
+      ? 'Saving…'
+      : status.kind === 'saved'
+        ? `Saved on server at ${new Date(status.at).toLocaleTimeString()}.`
+        : status.kind === 'error'
+          ? status.message
+          : '';
+
+  return (
+    <p
+      id={STATUS_ID}
+      role={status.kind === 'error' ? 'alert' : 'status'}
+      aria-live="polite"
+      className={`text-xs mt-2 ${status.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
+      data-saved={status.kind === 'saved' ? 'server' : ''}
+    >
+      {statusText}
+    </p>
+  );
 }
 
 function applyCss(css: string): void {
-  let styleEl = document.getElementById('castor-custom-css');
+  let styleEl = document.getElementById(STYLE_ID);
   if (!styleEl) {
     styleEl = document.createElement('style');
-    styleEl.id = 'castor-custom-css';
+    styleEl.id = STYLE_ID;
     document.head.appendChild(styleEl);
   }
   styleEl.textContent = css;

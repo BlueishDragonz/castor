@@ -141,11 +141,16 @@ if (Astro.request.method === 'POST') {
           placeholder="/* Your custom CSS here */"
           spellcheck="false"
         ></textarea>
-        <p class="text-xs text-muted-foreground mt-2">
-          Changes save when you click Save. Invalid CSS is rejected by the
-          backend's CSS sanitizer — see
-          <code>beaverhabits/css_sanitizer.py</code> for the allowlist.
-        </p>
+        <div class="flex items-center justify-between mt-3 gap-3">
+          <p class="text-xs text-muted-foreground">
+            Click Save to persist. Rejected CSS is left untouched so you
+            can fix and retry. Server-stored CSS survives browser /
+            device changes.
+          </p>
+          <Button id="custom-css-save" type="button" size="sm">
+            Save CSS
+          </Button>
+        </div>
       </CardContent>
     </Card>
 
