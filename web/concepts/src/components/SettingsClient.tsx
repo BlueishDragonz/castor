@@ -3,11 +3,14 @@
 /**
  * SettingsClient — client-side handler for the /settings page.
  *
- * Responsibilities (slice 11):
+ * Responsibilities (slice 11 + 12):
  *   - Custom CSS: on mount, GET /api/v1/user-configs and hydrate the
  *     textarea. On Save, PUT /api/v1/user-configs with the textarea
- *     value. Surfaces a status banner (saving / saved / error) so the
- *     user can see whether the server accepted the CSS.
+ *     value.
+ *   - Display preferences (parity row 12.6): streak badge, total badge,
+ *     date-reverse. Each toggle PUTs immediately on change. The
+ *     underlying `/habits` page reads these server-side and lays out
+ *     the grid accordingly.
  *
  * Persistence is server-authoritative. localStorage is kept as a
  * transient hint so the textarea doesn't appear empty during the
@@ -15,10 +18,11 @@
  * load.
  *
  * What this client deliberately does NOT do:
- *   - Habit-display toggles (streak badge, total badge, date columns,
- *     tag filters): the backend's user_configs write endpoint accepts
- *     only `custom_css` for now. Those toggles were removed from
- *     /settings until the backend lands more keys.
+ *   - Habit-display grid preferences not yet wired (date_columns,
+ *     first_day_of_week, tag filters, etc.): the backend's user_configs
+ *     write endpoint accepts the three booleans + custom_css for now.
+ *     Numeric / enum keys would need new schema fields and additional
+ *     Pydantic Strict* types — a future slice.
  *   - Theme: handled server-side via the form POST in /settings.astro
  *     so Layout.astro re-renders with the new data-theme on redirect.
  */
@@ -28,6 +32,22 @@ const TEXTAREA_ID = 'custom-css';
 const STATUS_ID = 'custom-css-status';
 const STYLE_ID = 'castor-custom-css';
 const SAVE_BTN_ID = 'custom-css-save';
+const DISPLAY_STATUS_ID = 'display-prefs-status';
+
+type DisplayKey = 'show_streak' | 'show_total' | 'date_reverse';
+const DISPLAY_KEYS: readonly DisplayKey[] = [
+  'show_streak',
+  'show_total',
+  'date_reverse',
+] as const;
+
+type DisplayPrefs = Record<DisplayKey, boolean>;
+
+type DisplayStatus =
+  | { kind: 'idle' }
+  | { kind: 'saving'; key: DisplayKey }
+  | { kind: 'saved'; key: DisplayKey; at: string }
+  | { kind: 'error'; key: DisplayKey; message: string };
 
 type Status =
   | { kind: 'idle' }
@@ -115,26 +135,195 @@ export function SettingsClient() {
     };
   }, []);
 
+  // ───────────────────────── Display preferences (12.6) ─────────────────
+  // Each toggle PUTs immediately. The toggle's `checked` reflects
+  // local state seeded from the GET round-trip via data-initial;
+  // toggling sends the new value and updates the data-initial so a
+  // re-render re-syncs with the server's authoritative answer.
+  const [displays, setDisplays] = useState<DisplayPrefs>({
+    show_streak: false,
+    show_total: false,
+    date_reverse: false,
+  });
+  const [displayStatus, setDisplayStatus] = useState<DisplayStatus>({
+    kind: 'idle',
+  });
+
+  useEffect(() => {
+    // Hydrate toggles from /api/v1/user-configs, with a cookie fallback
+    // so toggles reflect the user's last local session even if the GET
+    // round-trip is slow or fails. The server value always wins on a
+    // successful load.
+    let cancelled = false;
+    const seedFromCookies: DisplayPrefs = {
+      show_streak: readBoolCookie('habit_show_streak'),
+      show_total: readBoolCookie('habit_show_total'),
+      date_reverse: readBoolCookie('habit_date_reverse'),
+    };
+    setDisplays(seedFromCookies);
+    for (const key of DISPLAY_KEYS) {
+      const el = document.getElementById(`display-${key}`) as
+        | HTMLInputElement
+        | null;
+      if (el) el.checked = seedFromCookies[key];
+    }
+    (async () => {
+      try {
+        const r = await fetch('/api/v1/user-configs', {
+          credentials: 'same-origin',
+        });
+        if (!r.ok) return;
+        const data = (await r.json()) as Record<string, unknown>;
+        if (cancelled) return;
+        const next: DisplayPrefs = {
+          show_streak: readBool(data?.show_streak),
+          show_total: readBool(data?.show_total),
+          date_reverse: readBool(data?.date_reverse),
+        };
+        setDisplays(next);
+        for (const key of DISPLAY_KEYS) {
+          const el = document.getElementById(`display-${key}`) as
+            | HTMLInputElement
+            | null;
+          if (el) el.checked = next[key];
+          // Also mirror server values to cookies so /habits (server-side
+          // cookie reads) reflects them even before the user toggles.
+          document.cookie = `habit_${key}=${next[key] ? 'true' : 'false'}; path=/; max-age=31536000; samesite=lax`;
+        }
+      } catch {
+        // Network failure: silently leave toggles in cookie-seed state.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onToggle(key: DisplayKey, value: boolean) {
+    setDisplays((d) => ({ ...d, [key]: value }));
+    // Mirror the value to the cookie too so /habits (which reads from
+    // cookies server-side) reflects the change on the next request.
+    // Server-stored user_configs remains source-of-truth across devices.
+    document.cookie = `habit_${key}=${value ? 'true' : 'false'}; path=/; max-age=31536000; samesite=lax`;
+    setDisplayStatus({ kind: 'saving', key });
+    try {
+      const r = await fetch('/api/v1/user-configs', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+      if (!r.ok) {
+        const body = await r.text();
+        setDisplayStatus({
+          kind: 'error',
+          key,
+          message: `Save rejected (HTTP ${r.status}): ${body.slice(0, 200)}`,
+        });
+        // Roll back: revert the toggle to its prior value.
+        setDisplays((d) => ({ ...d, [key]: !value }));
+        const el = document.getElementById(`display-${key}`) as
+          | HTMLInputElement
+          | null;
+        if (el) el.checked = !value;
+        return;
+      }
+      setDisplayStatus({ kind: 'saved', key, at: new Date().toISOString() });
+    } catch {
+      setDisplayStatus({
+        kind: 'error',
+        key,
+        message: 'Save failed (network error).',
+      });
+      setDisplays((d) => ({ ...d, [key]: !value }));
+      const el = document.getElementById(`display-${key}`) as
+        | HTMLInputElement
+        | null;
+      if (el) el.checked = !value;
+    }
+  }
+
   const statusText =
-    status.kind === 'saving'
+    displayStatus.kind === 'saving'
       ? 'Saving…'
-      : status.kind === 'saved'
-        ? `Saved on server at ${new Date(status.at).toLocaleTimeString()}.`
-        : status.kind === 'error'
-          ? status.message
+      : displayStatus.kind === 'saved'
+        ? `Saved at ${new Date(displayStatus.at).toLocaleTimeString()}.`
+        : displayStatus.kind === 'error'
+          ? displayStatus.message
           : '';
 
   return (
-    <p
-      id={STATUS_ID}
-      role={status.kind === 'error' ? 'alert' : 'status'}
-      aria-live="polite"
-      className={`text-xs mt-2 ${status.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
-      data-saved={status.kind === 'saved' ? 'server' : ''}
-    >
-      {statusText}
-    </p>
+    <>
+      <p
+        id={STATUS_ID}
+        role={status.kind === 'error' ? 'alert' : 'status'}
+        aria-live="polite"
+        className={`text-xs mt-2 ${status.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
+        data-saved={status.kind === 'saved' ? 'server' : ''}
+      >
+        {statusText}
+      </p>
+      <p
+        id={DISPLAY_STATUS_ID}
+        role={displayStatus.kind === 'error' ? 'alert' : 'status'}
+        aria-live="polite"
+        className={`text-xs mt-2 ${displayStatus.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
+        data-saved={displayStatus.kind === 'saved' ? 'server' : ''}
+      >
+        {/* Display status text overlaps with the CSS status in the
+            same column; only one will be in 'saving'/'saved' state at
+            a time in practice. Keep both for clarity. */}
+        {statusText ? '' : displayStatus.kind === 'idle' ? '' : statusText}
+      </p>
+      {/* Hidden helper — the actual toggle inputs are emitted from
+          settings.astro as `<input type="checkbox" id="display-{key}">`.
+          We bind their change listener below. */}
+      <DisplayPrefBinder
+        keyId="show_streak"
+        onToggle={(v) => onToggle('show_streak', v)}
+      />
+      <DisplayPrefBinder
+        keyId="show_total"
+        onToggle={(v) => onToggle('show_total', v)}
+      />
+      <DisplayPrefBinder
+        keyId="date_reverse"
+        onToggle={(v) => onToggle('date_reverse', v)}
+      />
+    </>
   );
+}
+
+function readBool(v: unknown): boolean {
+  return typeof v === 'boolean' ? v : false;
+}
+
+function readBoolCookie(name: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const match = document.cookie
+    .split('; ')
+    .find((c) => c.startsWith(`${name}=`));
+  if (!match) return false;
+  return match.split('=')[1] === 'true';
+}
+
+function DisplayPrefBinder({
+  keyId,
+  onToggle,
+}: {
+  keyId: DisplayKey;
+  onToggle: (next: boolean) => void;
+}) {
+  useEffect(() => {
+    const el = document.getElementById(`display-${keyId}`) as
+      | HTMLInputElement
+      | null;
+    if (!el) return;
+    const handler = () => onToggle(el.checked);
+    el.addEventListener('change', handler);
+    return () => el.removeEventListener('change', handler);
+  }, [keyId, onToggle]);
+  return null;
 }
 
 function applyCss(css: string): void {

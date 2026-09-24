@@ -2,33 +2,35 @@
 /**
  * /settings — the signed-in user's preferences and account controls.
  *
- * Sections (only what the backend supports today):
+ * Sections:
  *   1. Account identity (email) — read from Astro.locals.session.
  *   2. Theme — Light/Dark toggle. Submitting the form sets the
  *      `castor-theme` cookie (max-age 1 year, sameSite lax, path /)
  *      and redirects back here so Layout.astro re-renders with the
  *      new `data-theme` attribute. No client JS — the redirect gives
  *      us the re-render we need.
- *   3. Custom CSS — Advanced customization. The textarea is bound to
- *      SettingsClient which POSTs to /api/v1/settings/custom-css (a
- *      new server route that wraps the backend's user_configs update).
- *      The legacy castor main applied CSS via the backend's tinycss2
- *      sanitizer (see beaverhabits/css_sanitizer.py); the Astro side
- *      sends raw text and relies on the backend to reject anything
- *      unsafe. Custom CSS is non-portable across browsers; v1 keeps
- *      it as a textarea rather than a CodeMirror island.
- *   4. Help — opens a shadcn Dialog with the same four links as the
+ *   3. Custom CSS — textarea bound to SettingsClient which PUTs to
+ *      /api/v1/user-configs (custom_css key). The legacy castor main
+ *      applied CSS via the backend's tinycss2 sanitiser (see
+ *      castor/css_sanitizer.py); the Astro side sends raw text and
+ *      relies on the backend to reject anything unsafe. Custom CSS is
+ *      non-portable across browsers; v1 keeps it as a textarea rather
+ *      than a CodeMirror island.
+ *   4. Display — three boolean toggles (show_streak, show_total,
+ *      date_reverse). SettingsClient PUTs each one immediately to
+ *      /api/v1/user-configs. The /habits grid reads these server-side
+ *      when rendering, so a session/device change preserves the
+ *      choice. (parity row 12.6)
+ *   5. Help — opens a shadcn Dialog with the same four links as the
  *      legacy layout.py::show_help_dialog (Wiki / Supporter / YouTube
  *      / Issues).
- *   5. Account actions — Sign out (POST /logout) and a destructive
+ *   6. Account actions — Sign out (POST /logout) and a destructive
  *      link to /account/delete.
  *
- * Habit-display preferences (streak badge, total badge, date columns,
- * tag filters, calendar) were present in earlier drafts but the
- * backend has no endpoint for them yet (/api/v1/habits/meta only
- * accepts {order}). Those are parked until the backend ships
- * `user_configs` write endpoints — see docs/plan/migration-plan.md
- * Phase 3 P2 "polish" for the slice that wires them up.
+ * Numeric / enum display keys (date_columns, first_day_of_week, tag
+ * filters) are not yet wired. The backend's PUT body accepts the three
+ * booleans + custom_css only; expanding would require new Strict* type
+ * fields. Deferred to a later slice.
  */
 import Layout from '../layouts/Layout.astro';
 import {
@@ -151,6 +153,48 @@ if (Astro.request.method === 'POST') {
             Save CSS
           </Button>
         </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Display</CardTitle>
+        <CardDescription>
+          Per-device habit grid options. Saved to your account
+          immediately, applies on next visit.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            id="display-show_streak"
+            class="h-4 w-4 accent-primary"
+          />
+          <span class="text-sm">Show streak badge</span>
+        </label>
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            id="display-show_total"
+            class="h-4 w-4 accent-primary"
+          />
+          <span class="text-sm">Show total-completion badge</span>
+        </label>
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            id="display-date_reverse"
+            class="h-4 w-4 accent-primary"
+          />
+          <span class="text-sm">Show date columns in reverse (oldest first)</span>
+        </label>
+        <p class="text-xs text-muted-foreground">
+          Each toggle saves to
+          <code>/api/v1/user-configs</code>
+          on change. The home grid on /habits reads these server-side, so
+          switching browser or device preserves your selection.
+        </p>
       </CardContent>
     </Card>
 
