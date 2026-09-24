@@ -252,10 +252,17 @@ class HabitListBuilder:
         # Deep copy the list
         habits = [x for x in self.habit_list.habits if x.status in self.status_list]
 
-        # sort by order
-        if self.habit_list.order_by == HabitOrder.NAME:
+        # sort by order. If the builder has an explicit order_by override
+        # (set via ``HabitListBuilder(...).order_by(X)``), use it; otherwise
+        # fall back to the habit_list's persisted order_by.
+        effective_order_by = (
+            self.order_by
+            if self.order_by is not None and self.order_by != self.habit_list.order_by
+            else self.habit_list.order_by
+        )
+        if effective_order_by == HabitOrder.NAME:
             habits.sort(key=lambda x: x.name.lower())
-        elif self.habit_list.order_by == HabitOrder.CATEGORY:
+        elif effective_order_by == HabitOrder.CATEGORY:
             habits.sort(key=lambda x: (0, x.tags[0].lower()) if x.tags else (1, ""))
         elif o := self.habit_list.order:
             habits.sort(

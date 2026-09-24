@@ -85,9 +85,31 @@ async def put_habits_meta(
 @api_router.get("/habits", tags=["habits"])
 async def get_habits(
     status: HabitStatus = HabitStatus.ACTIVE,
+    order_by: str | None = Query(
+        default=None,
+        description="Sort order: 'manual' (default), 'name', 'tags', 'status'.",
+    ),
     habit_list: HabitList = Depends(current_habit_list),
 ):
-    habits = HabitListBuilder(habit_list).status(status).build()
+    """List habits. Order is controlled by ``order_by`` (query) or the
+    persisted ``habit_list.order_by`` (fallback). Invalid values fall back
+    to manual.
+
+    Slice 9-alt: this endpoint previously accepted only ``status`` and
+    ignored any client sort preference. The parity matrix row 2.10 said
+    sort was supported by the backend; the HTTP surface didn't expose it.
+    """
+    from castor.storage.storage import HabitOrder
+    builder = HabitListBuilder(habit_list).status(status)
+    if order_by:
+        # HabitOrder uses canonical member names: MANUALLY, NAME, CATEGORY.
+        # We accept lowercase too for Astro UI convenience.
+        canonical = order_by.upper()
+        try:
+            builder.order_by = HabitOrder[canonical]
+        except KeyError:
+            pass
+    habits = builder.build()
     return [{"id": x.id, "name": x.name} for x in habits]
 
 

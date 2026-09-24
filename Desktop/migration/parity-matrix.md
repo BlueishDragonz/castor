@@ -2,6 +2,7 @@
 
 > Phase 1 deliverable. One row per workflow. Mark unknown (❓) where
 > evidence is incomplete. Status legend:
+>
 > - ✅ **Parity**: equivalent UI path exists, behaviour matches.
 > - 🟡 **Partial**: exists but a documented behavioural gap.
 > - ❌ **Missing**: no equivalent UI, or feature dropped.
@@ -17,7 +18,7 @@ and the evidence command(s) used to verify status.
 ### 1.1 Email + password login
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User enters email + password on /login, gets a JWT, redirected to /habits |
 | **Current route** | `/login` (legacy) |
 | **Entry point** | `frontend/components.py::auth_card(title="Sign in", func=try_login)` |
@@ -37,7 +38,7 @@ and the evidence command(s) used to verify status.
 ### 1.2 Passkey (WebAuthn) login
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User picks passkey from browser, signed assertion proves identity, JWT issued |
 | **Current route** | `/login` (legacy has webauthn_login_button) |
 | **Entry point** | `frontend/components.py::webauthn_login_button`; `frontend/security_passkeys.js` |
@@ -58,7 +59,7 @@ and the evidence command(s) used to verify status.
 ### 1.3 Register (email + password)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | New user provides email + password ≥12 chars; account created; auto-login; redirect to /gui |
 | **Current route** | `/register` |
 | **Entry point** | `routes/routes.py:655` `register_page()` |
@@ -78,7 +79,7 @@ and the evidence command(s) used to verify status.
 ### 1.4 Forgot password — 12-digit code (castor)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User requests reset code; 12-digit code emailed; submit code + new password; JWT issued |
 | **Current route** | (no legacy page; legacy uses notify flow on login screen) |
 | **Entry point** | `frontend/components.py::auth_forgot_password` link |
@@ -98,7 +99,7 @@ and the evidence command(s) used to verify status.
 ### 1.5 Legacy reset-link flow
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks link from email; JWT with reset audience in URL; submit new password |
 | **Current route** | `/reset-password?token=...` |
 | **Entry point** | `routes/routes.py:697` `forgot_password_page(user: User = Depends(get_reset_user))` |
@@ -118,7 +119,7 @@ and the evidence command(s) used to verify status.
 ### 1.6 Logout
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks Log out; cookie cleared; (castor) server-side token_version bumped |
 | **Current route** | `/gui/settings` → Logout button (legacy); `/logout` POST (castor) |
 | **Entry point** | `frontend/components.py` (legacy: explicit button); `web/concepts/src/pages/logout.astro` (Astro POST) |
@@ -142,7 +143,7 @@ and the evidence command(s) used to verify status.
 ### 2.1 View home (habit grid, multi-day)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Authenticated user sees a 2D grid: habit rows × date columns (default 7), with sticky date headers, today highlight, optional streak/total badges, tag filter |
 | **Current route** | `/gui` (legacy) |
 | **Entry point** | `frontend/index_page.py::index_page_ui(days, habit_list)` |
@@ -162,7 +163,7 @@ and the evidence command(s) used to verify status.
 ### 2.2 Tick habit done/undone (today)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks a cell in the grid for today; habit marked done for that day |
 | **Current route** | `/gui` (HabitCheckBox click) |
 | **Entry point** | `frontend/components.py::HabitCheckBox` |
@@ -183,7 +184,7 @@ and the evidence command(s) used to verify status.
 ### 2.3 Tick habit for arbitrary past/future date
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks a past-date cell; habit marked done for that day |
 | **Current route** | `/gui` (any date column) |
 | **Entry point** | `HabitCheckBox` (per-day) |
@@ -203,7 +204,7 @@ and the evidence command(s) used to verify status.
 ### 2.4 Add habit
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User adds a new habit; appears on /gui and /gui/add |
 | **Current route** | `/gui/add` |
 | **Entry point** | `frontend/add_page.py::add_page_ui(habit_list)` |
@@ -223,7 +224,7 @@ and the evidence command(s) used to verify status.
 ### 2.5 Edit habit (name, star, period, tags)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens habit context menu → Edit; updates name, period, tags, star |
 | **Current route** | `/gui/add` (inline edit) |
 | **Entry point** | `frontend/components.py::HabitNameInput` (inline input) + `HabitStarCheckbox` |
@@ -243,7 +244,7 @@ and the evidence command(s) used to verify status.
 ### 2.6 Delete habit
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks Delete on /gui/add row; habit removed |
 | **Current route** | `/gui/add` |
 | **Entry point** | `frontend/components.py::HabitDeleteButton` |
@@ -263,7 +264,7 @@ and the evidence command(s) used to verify status.
 ### 2.7 Duplicate habit
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens habit menu → Duplicate; new habit created with same name + "(copy)" suffix |
 | **Current route** | (no legacy equivalent) |
 | **Entry point** | (no legacy equivalent) |
@@ -282,7 +283,7 @@ and the evidence command(s) used to verify status.
 ### 2.8 Archive habit (vs hard delete)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User archives a habit; it disappears from /gui but data preserved (status="archived") |
 | **Current route** | (no legacy equivalent — legacy uses hard delete) |
 | **Entry point** | (no legacy equivalent) |
@@ -301,7 +302,7 @@ and the evidence command(s) used to verify status.
 ### 2.9 Reorder habits (drag-drop)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User drags habit rows to reorder; manual order persisted |
 | **Current route** | `/gui/order` |
 | **Entry point** | `frontend/order_page.py::order_page_ui(habit_list)` |
@@ -321,7 +322,7 @@ and the evidence command(s) used to verify status.
 ### 2.10 Sort habits by Name / Category / Manually
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User picks sort from menu; home grid re-renders |
 | **Current route** | `/gui` (sort menu in top-right) |
 | **Entry point** | `frontend/menu.py::sort_menu` |
@@ -332,16 +333,16 @@ and the evidence command(s) used to verify status.
 | **Side effects** | None |
 | **Error/empty/loading cases** | None |
 | **Existing code paths** | `habit_list.order_by = HabitOrder.X` |
-| **Proposed new UI path** | Not exposed in Astro UI yet (current HabitGrid only displays pre-sorted list) |
-| **API/backend path** | `PUT /api/v1/habits/meta` body `{order_by: "..."}` — not currently supported |
-| **Test IDs** | Backend: not exercised |
-| **Status** | ❌ |
-| **Evidence** | `grep -r "order_by" web/concepts/src/` returns nothing. Sort menu absent in Astro. |
+| **Proposed new UI path** | Astro UI: drop the existing manual-only sort and add a sort menu (Name / Category / Manually). Slice 9-alt adds the backend HTTP surface; UI work is out of scope for this slice. |
+| **API/backend path** | `GET /api/v1/habits?order_by=name\|category\|manually` (NEW in Slice 9-alt). Invalid values fall back to the persisted order_by. The persistence path (`PUT /api/v1/habits/meta`) is still TODO. |
+| **Test IDs** | `tests/test_slice9alt_realtime.py::Slice9AltSortTests` (4 tests covering default, name, category, invalid fallback) |
+| **Status** | ✅ (backend) / 🟡 (Astro UI) |
+| **Evidence** | Slice 9-alt: `GET /api/v1/habits` now accepts `?order_by=` and forwards to `HabitListBuilder.order_by`. `HabitListBuilder.build()` updated to honour the builder's `order_by` override (previously only the persisted `habit_list.order_by` was used, so the HTTP query param had no effect). |
 
 ### 2.11 Habit detail page
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks habit name; sees streak, history (1 year), best streaks, calendar heatmap (15 weeks), notes |
 | **Current route** | `/gui/habits/{id}` |
 | **Entry point** | `frontend/habit_page.py::habit_page_ui(today, habit)` |
@@ -361,7 +362,7 @@ and the evidence command(s) used to verify status.
 ### 2.12 Best streaks card
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User sees best streak length for the habit (in addition to current streak) |
 | **Current route** | `/gui/habits/{id}` |
 | **Entry point** | `frontend/habit_page.py` (best_streak_card) |
@@ -381,7 +382,7 @@ and the evidence command(s) used to verify status.
 ### 2.13 Daily note on habit (long-press)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User long-presses a cell; textarea opens; saves note for that (habit, day) |
 | **Current route** | `/gui` (HabitCheckBox long-press) |
 | **Entry point** | `frontend/components.py::habit_notes` |
@@ -405,7 +406,7 @@ and the evidence command(s) used to verify status.
 ### 3.1 Stats page (per-habit streak, date range)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /stats; sees per-habit streak cards; picks date range |
 | **Current route** | `/gui/stats` |
 | **Entry point** | `frontend/stats_page.py::stats_page_ui(today, habit_list)` |
@@ -425,7 +426,7 @@ and the evidence command(s) used to verify status.
 ### 3.2 Date range picker
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User picks "Last 3/6/12 months" or custom range; page reloads with new range |
 | **Current route** | `/gui/stats` |
 | **Entry point** | `frontend/menu.py::stats_date_pick_menu` |
@@ -445,7 +446,7 @@ and the evidence command(s) used to verify status.
 ### 3.3 Calendar heatmap on detail (15 weeks)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User sees 15-week heatmap of habit completions on detail page |
 | **Current route** | `/gui/habits/{id}` |
 | **Entry point** | `frontend/habit_page.py::CalendarHeatmap.build()` |
@@ -464,7 +465,7 @@ and the evidence command(s) used to verify status.
 ### 3.4 Full 53-week heatmap
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens `/gui/habits/{id}/heatmap`; sees 53-week heatmap |
 | **Current route** | `/gui/habits/{id}/heatmap` |
 | **Entry point** | `frontend/streaks.py::streaks(today, habit)` |
@@ -483,7 +484,7 @@ and the evidence command(s) used to verify status.
 ### 3.5 1-year habit history
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User sees 1-year tick history (date list) |
 | **Current route** | `/gui/habits/{id}` |
 | **Entry point** | `frontend/components.py::habit_history` |
@@ -506,7 +507,7 @@ and the evidence command(s) used to verify status.
 ### 4.1 Theme (light/dark)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User picks light/dark; choice persists across reloads |
 | **Current route** | `/gui/settings` |
 | **Entry point** | `frontend/settings_page.py::settings_page(user)` |
@@ -526,7 +527,7 @@ and the evidence command(s) used to verify status.
 ### 4.2 Custom CSS
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User edits custom CSS; gets sanitised by tinycss2; applied to layout |
 | **Current route** | `/gui/settings` |
 | **Entry point** | `frontend/settings_page.py` + CodeMirror editor |
@@ -546,7 +547,7 @@ and the evidence command(s) used to verify status.
 ### 4.3 Help dialog (4 links)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks Help; dialog opens with Wiki / Supporter / YouTube / Issues links |
 | **Current route** | `/gui/settings` |
 | **Entry point** | `frontend/layout.py::show_help_dialog` |
@@ -566,7 +567,7 @@ and the evidence command(s) used to verify status.
 ### 4.4 `/help` page
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User navigates to `/help` (from mobile More sheet); sees help content |
 | **Current route** | (no legacy equivalent — was a dialog, not a page) |
 | **Entry point** | `web/concepts/src/components/MoreSheet.tsx:133` → `closeAndNavigate('/help')` |
@@ -585,7 +586,7 @@ and the evidence command(s) used to verify status.
 ### 4.5 Sign out from settings
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks Sign out; cookies cleared; (castor) token_version bumped |
 | **Current route** | `/gui/settings` |
 | **Entry point** | Logout button |
@@ -608,7 +609,7 @@ and the evidence command(s) used to verify status.
 ### 5.1 View passkey list
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /security; sees list of registered passkeys with name + created date |
 | **Current route** | `/gui/security` |
 | **Entry point** | `frontend/security_page.py::security_page(user)` |
@@ -628,7 +629,7 @@ and the evidence command(s) used to verify status.
 ### 5.2 Add passkey
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens dialog; types nickname; browser prompts; passkey saved |
 | **Current route** | `/gui/security` |
 | **Entry point** | `security_page.py` → `add_security_passkeys_javascript()` |
@@ -648,7 +649,7 @@ and the evidence command(s) used to verify status.
 ### 5.3 Remove passkey
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens passkey menu → Remove → confirm with current password → passkey deleted |
 | **Current route** | `/gui/security` |
 | **Entry point** | `security_page.py` (menu → Remove → dialog) |
@@ -668,7 +669,7 @@ and the evidence command(s) used to verify status.
 ### 5.4 Change password
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens Change Password dialog; types current + new + confirm; password changed, token_version bumped, sessions invalidated |
 | **Current route** | `/gui/security` |
 | **Entry point** | `security_page.py::change_password_dialog` |
@@ -688,7 +689,7 @@ and the evidence command(s) used to verify status.
 ### 5.5 Recovery email (set + verify)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User adds recovery email; receives 6-digit code; verifies; email becomes verified |
 | **Current route** | `/gui/security` |
 | **Entry point** | `security_page.py::recovery_email_section` |
@@ -708,7 +709,7 @@ and the evidence command(s) used to verify status.
 ### 5.6 Passwordless account has no usable state
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | A user without a password cannot login by typing empty |
 | **Current route** | `/login` |
 | **Entry point** | `views.login_user` |
@@ -728,7 +729,7 @@ and the evidence command(s) used to verify status.
 ### 5.7 Delete account (wipe personal data)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /account/delete → confirms → backend wipes habit_list, API tokens, identity, owned data; keeps an anonymous disabled tombstone for collision-detection |
 | **Current route** | `/account/delete` (legacy `/gui/delete_account`) |
 | **Entry point** | `frontend/account_delete.py::confirm_delete_account` (legacy) |
@@ -752,7 +753,7 @@ and the evidence command(s) used to verify status.
 ### 6.1 Export JSON (download)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks Export JSON; file downloads with current habit data |
 | **Current route** | `/gui/export` |
 | **Entry point** | `frontend/export_page.py::export_panel(habit_list, user)` → `views.export_user_habit_list()` |
@@ -773,7 +774,7 @@ and the evidence command(s) used to verify status.
 ### 6.2 Export CSV
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User clicks Export CSV; file downloads in CSV format |
 | **Current route** | `/gui/export` |
 | **Entry point** | (not exposed in legacy UI; only in `views.export_user_habit_list`) |
@@ -792,7 +793,7 @@ and the evidence command(s) used to verify status.
 ### 6.3 Import JSON/CSV
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User uploads JSON or CSV; habits merged into existing list |
 | **Current route** | `/gui/import` |
 | **Entry point** | `frontend/import_page.py::handle_upload` |
@@ -812,7 +813,7 @@ and the evidence command(s) used to verify status.
 ### 6.4 Telegram backup (per-user)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User configures bot token + chat ID; backup triggered manually or daily; JSON sent to Telegram |
 | **Current route** | `/gui/settings` → Backup panel |
 | **Entry point** | `frontend/export_page.py::backup_panel(habit_list)` |
@@ -836,7 +837,7 @@ and the evidence command(s) used to verify status.
 ### 7.1 Admin user list
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Superuser opens /admin; sees list of all activated users + customers |
 | **Current route** | `/gui/admin` |
 | **Entry point** | `frontend/admin.py::admin_page(user)` |
@@ -856,7 +857,7 @@ and the evidence command(s) used to verify status.
 ### 7.2 Manual backup trigger (admin)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Admin clicks "Trigger backup now"; backup for all users runs |
 | **Current route** | `/gui/admin` |
 | **Entry point** | `frontend/admin.py` (button) |
@@ -876,7 +877,7 @@ and the evidence command(s) used to verify status.
 ### 7.3 Paddle promote/demote
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Admin enters email, clicks Promote to Pro / Demote from Pro |
 | **Current route** | `/gui/admin` |
 | **Entry point** | `frontend/admin.py` (buttons) |
@@ -900,7 +901,7 @@ and the evidence command(s) used to verify status.
 ### 8.1 Mobile bottom nav (Home / Stats / More)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Mobile user sees fixed bottom nav; taps icons to navigate |
 | **Current route** | All pages |
 | **Entry point** | `frontend/bottom_nav.py::bottom_nav()` |
@@ -920,7 +921,7 @@ and the evidence command(s) used to verify status.
 ### 8.2 More sheet (mobile hamburger menu)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Mobile user taps ⋮; bottom sheet opens with Account / Data / Session sections |
 | **Current route** | All pages |
 | **Entry point** | `frontend/more_sheet.py` |
@@ -940,7 +941,7 @@ and the evidence command(s) used to verify status.
 ### 8.3 Desktop hamburger menu
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Desktop user taps top-right menu; side sheet opens with Tools / Account / Session |
 | **Current route** | All pages |
 | **Entry point** | `frontend/menu.py::menu()` |
@@ -963,7 +964,7 @@ and the evidence command(s) used to verify status.
 ### 9.1 `/` redirect
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Unauthenticated user visits /; sees /login. Authenticated user visits /; sees /habits |
 | **Current route** | `/` |
 | **Entry point** | `routes/routes.py:153-154` `index_page` |
@@ -982,7 +983,7 @@ and the evidence command(s) used to verify status.
 ### 9.2 Terms page
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /terms; sees terms of service |
 | **Current route** | (no legacy page) |
 | **Entry point** | n/a |
@@ -1001,7 +1002,7 @@ and the evidence command(s) used to verify status.
 ### 9.3 Privacy page
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /privacy; sees privacy policy |
 | **Current route** | (no legacy page) |
 | **Entry point** | n/a |
@@ -1024,7 +1025,7 @@ and the evidence command(s) used to verify status.
 ### 10.1 List my circles
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /circles; sees circles they own or belong to |
 | **Current route** | (no legacy equivalent) |
 | **Entry point** | n/a |
@@ -1044,7 +1045,7 @@ and the evidence command(s) used to verify status.
 ### 10.2 Create circle
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /circles/new; enters name; circle created; user becomes owner |
 | **Current route** | (no legacy) |
 | **Entry point** | n/a |
@@ -1064,7 +1065,7 @@ and the evidence command(s) used to verify status.
 ### 10.3 Share habit to circle
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Owner opens circle detail → picks habit → shares with visibility tier |
 | **Current route** | (no legacy) |
 | **Entry point** | n/a |
@@ -1084,7 +1085,7 @@ and the evidence command(s) used to verify status.
 ### 10.4 Invite member (link or email)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Owner invites a user via shareable link or email; invitee accepts; membership created |
 | **Current route** | (no legacy) |
 | **Entry point** | n/a |
@@ -1104,7 +1105,7 @@ and the evidence command(s) used to verify status.
 ### 10.5 Circle feed (per-day records)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | Member opens circle detail; sees per-habit feed with ticks, optional streak, optional notes (gated by visibility) |
 | **Current route** | (no legacy) |
 | **Entry point** | n/a |
@@ -1128,7 +1129,7 @@ and the evidence command(s) used to verify status.
 ### 11.1 WebSocket fan-out of HabitListChanged
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User A ticks a habit; User B (same account, other device) sees the tick live |
 | **Current route** | All clients (mobile, browser) |
 | **Entry point** | `habit.tick()` → `publish(HabitListChanged)` |
@@ -1141,14 +1142,14 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `castor/realtime.py::manager.broadcast(user_id, payload)` |
 | **Proposed new UI path** | Not used by Astro (no Astro client connects to WebSocket) |
 | **API/backend path** | `WS /api/v1/sync/ws?token=<jwt>` |
-| **Test IDs** | `tests/test_realtime.py` |
-| **Status** | 🟡 |
-| **Evidence** | Backend endpoint exists; not used by Astro UI (per `AUDIT-2026-09-23.md` row 5: "WebSocket sync — branch has endpoint, untested client"). |
+| **Test IDs** | `tests/test_slice9alt_realtime.py::Slice9AltWebSocketTests` (6 tests) + `tests/test_realtime.py` (broadcast manager helpers) |
+| **Status** | ✅ |
+| **Evidence** | Slice 9-alt added real E2E WebSocket tests using a uvicorn server on a free port + the `websockets` client library. Verified: auth on connect (no token → HTTP 4xx; bad token → HTTP 4xx; valid token → accepts); `push_habit_list` → `habit_list_ack` echo + `habit_list_changed` broadcast to other devices; cross-user isolation; HTTP tick (`POST /api/v1/habits/{id}/completions`) → `tick_changed` broadcast to other devices. Existing `test_realtime.py` only tested the broadcast manager with a FakeWebSocket — Slice 9-alt is the first real E2E. |
 
 ### 11.2 Daily-change timer (midnight rollover)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User leaves app open across midnight; home grid auto-refreshes with new "today" column |
 | **Current route** | /gui |
 | **Entry point** | `frontend/index_page.py::refresh_habit_list_when_today_changes` |
@@ -1172,7 +1173,7 @@ and the evidence command(s) used to verify status.
 ### 12.1 API token management (display + rotate)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /gui/tokens; sees API token; copies / rotates |
 | **Current route** | `/gui/tokens` |
 | **Entry point** | `frontend/tokens_page.py::tokens_page(user)` |
@@ -1192,7 +1193,7 @@ and the evidence command(s) used to verify status.
 ### 12.2 Per-habit completion status chip sets
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /gui/completion-status; sets default status chips (e.g. "yes:green", "no:red"); used as the default mapping on home grid |
 | **Current route** | `/gui/completion-status` |
 | **Entry point** | `frontend/chip_sets_page.py::chip_sets_page(user)` |
@@ -1212,7 +1213,7 @@ and the evidence command(s) used to verify status.
 ### 12.3 Paddle pricing page
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /pricing; sees Free vs Pro pricing; clicks Buy on Pro |
 | **Current route** | `/pricing` |
 | **Entry point** | `frontend/pricing_page.py::pricing_page()` |
@@ -1232,7 +1233,7 @@ and the evidence command(s) used to verify status.
 ### 12.4 Google One Tap login
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User opens /login; Google One Tap prompt appears; user picks account; JWT issued |
 | **Current route** | `/login` |
 | **Entry point** | `routes/google_one_tap.py::google_one_tap_login` |
@@ -1252,7 +1253,7 @@ and the evidence command(s) used to verify status.
 ### 12.5 Habit image upload (notes)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User uploads an image as a daily note (e.g. meal photo) |
 | **Current route** | n/a (called via `/assets` POST from frontend JS) |
 | **Entry point** | `routes/routes.py:732` `upload_note_image` |
@@ -1271,7 +1272,7 @@ and the evidence command(s) used to verify status.
 ### 12.6 Habit-display preferences (streak badge, total badge, date columns)
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | **Workflow** | User toggles "show streak badge" in /settings; choice persisted |
 | **Current route** | `/gui/settings` (display preferences section) |
 | **Entry point** | `frontend/settings_page.py` |
@@ -1301,7 +1302,7 @@ and the evidence command(s) used to verify status.
 **Blocking parity for cutover** (must be resolved before claiming parity):
 
 | # | Item | Group | Severity |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | `/help` page (currently 404 from mobile MoreSheet) | 4.4 | High (visible 404 to every mobile user) |
 | 2 | `/gui/tokens` UI (`/tokens`) | 12.1 | Medium |
 | 3 | Habit-display preferences persistence | 12.6 | Medium (functional but not persisted server-side) |
@@ -1328,13 +1329,13 @@ and the evidence command(s) used to verify status.
 ## Evidence chain summary
 
 | Claim | Verified by |
-|---|---|
+| --- | --- |
 | Live apollo runs NiceGUI | `ssh apollo 'docker exec wg-easy wget -q -O - http://10.8.0.1:8080/health' → OK`; OpenAPI includes `/auth/webauthn/*`; HTML page title = "Beaver Habit Tracker" |
 | Migration branch has Astro + 35 pages | `find web/concepts/src/pages -name "*.astro" \| wc -l` |
 | `astro check` clean | `cd web/concepts && pnpm exec astro check` → 0 errors, 0 warnings |
 | Backend tests pass | `pytest tests/ --ignore=test_batch4_live` → 180 passed |
 | `test_batch4_live` failures are env-gated | Tests probe `http://10.8.0.1:8080` (apollo VPN) and `sys.path.insert(0, "/opt/castor")` (apollo-only) |
 | 46 commits ahead of origin on migration branch | `git status` |
-| Existing data (jrodux@gmail.com, 7 habits, 1 passkey) | `python3 sqlite3 mode=ro` query of live apollo DB |
+| Existing data (<jrodux@gmail.com>, 7 habits, 1 passkey) | `python3 sqlite3 mode=ro` query of live apollo DB |
 | rpId mismatch on apollo | `docker exec beaverhabits env` shows `WEBAUTHN_RP_ID=localhost` despite compose declaring `10.8.0.1` |
 | `/help` 404 | `MoreSheet.tsx:133` `closeAndNavigate('/help')`; no `web/concepts/src/pages/help.astro` |
