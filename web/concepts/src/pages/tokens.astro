@@ -21,21 +21,23 @@
  */
 import Layout from '../layouts/Layout.astro';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { backendFetch, readSession } from '../lib/auth';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
 }
 
 const token = Astro.locals.session.token;
-const BACKEND = import.meta.env.BACKEND_URL || 'http://localhost:8085';
-
 let currentToken: string | null = null;
 let error: string | null = null;
 
+// BACKEND is only used below in the "How to use" curl example. The page
+// itself never calls the backend directly — it goes through the Astro BFF
+// at /api/v1/tokens (see src/pages/api/v1/tokens/{index,rotate}.ts).
+const BACKEND = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+
 try {
-  const r = await fetch(new URL('/api/v1/tokens', BACKEND), {
-    headers: { 'Authorization': `Bearer ${token}` },
-  });
+  const r = await backendFetch(Astro.cookies, '/api/v1/tokens');
   if (r.ok) {
     const body = await r.json();
     currentToken = body.token;
@@ -85,7 +87,7 @@ try {
         )}
         <div class="flex flex-wrap gap-3">
           {!currentToken && (
-            <form method="POST" action={`${BACKEND}/api/v1/tokens`} class="contents">
+            <form method="POST" action="/api/v1/tokens" class="contents">
               <input type="hidden" name="redirect" value="/tokens?action=created" />
               <button
                 type="submit"
@@ -97,7 +99,7 @@ try {
           )}
           {currentToken && (
             <>
-              <form method="POST" action={`${BACKEND}/api/v1/tokens/rotate`} class="contents">
+              <form method="POST" action="/api/v1/tokens/rotate" class="contents">
                 <input type="hidden" name="redirect" value="/tokens?action=rotated" />
                 <button
                   type="submit"
@@ -108,7 +110,7 @@ try {
               </form>
               <form
                 method="POST"
-                action={`${BACKEND}/api/v1/tokens?_method=DELETE`}
+                action="/api/v1/tokens?_method=DELETE"
                 class="contents"
                 onsubmit="return confirm('Revoke the token? Any mobile/CLI clients using it will stop working.');"
               >
