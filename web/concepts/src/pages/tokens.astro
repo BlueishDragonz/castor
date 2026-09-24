@@ -56,12 +56,20 @@ try {
     // successful create/rotate via ?new_token=... query param.
   </script>
   <div class="mx-auto max-w-3xl px-6 py-12 space-y-8">
-    <header>
-      <h1 class="text-3xl font-bold tracking-tight">API Tokens</h1>
-      <p class="text-sm text-muted-foreground mt-2">
-        Use API tokens to authenticate mobile and CLI clients against
-        <code>/api/v1/habits</code> and <code>/api/v1/sync/ws</code>.
-      </p>
+    <header class="flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight">API Tokens</h1>
+        <p class="text-sm text-muted-foreground mt-2">
+          Use API tokens to authenticate mobile and CLI clients against
+          <code>/api/v1/habits</code> and <code>/api/v1/sync/ws</code>.
+        </p>
+      </div>
+      <a
+        href="/habits"
+        class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-1"
+      >
+        &larr; Back to habits
+      </a>
     </header>
 
     {error && (

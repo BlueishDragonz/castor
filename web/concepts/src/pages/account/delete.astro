@@ -91,9 +91,15 @@ if (Astro.request.method === 'POST') {
 
 <Layout title="Delete account — Castor">
   <main class="mx-auto max-w-md px-6 py-12 space-y-6">
-    <div>
+    <header class="flex items-center justify-between gap-4">
       <h1 class="text-2xl font-semibold tracking-tight">Delete account</h1>
-    </div>
+      <a
+        href="/habits"
+        class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        &larr; Back to habits
+      </a>
+    </header>
 
     <Card>
       <CardHeader>

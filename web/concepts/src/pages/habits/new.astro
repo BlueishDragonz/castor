@@ -96,10 +96,16 @@ if (Astro.request.method === 'POST') {
 ---
 <Layout title="Add habit — Castor">
   <main class="mx-auto max-w-md px-6 py-12 space-y-6">
-    <div>
+    <header class="flex items-center justify-between gap-4">
       <h1 class="text-2xl font-semibold tracking-tight">Add a habit</h1>
-      <p class="text-sm text-muted-foreground">one small thing, repeated daily.</p>
-    </div>
+      <a
+        href="/habits"
+        class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        &larr; Back to habits
+      </a>
+    </header>
+    <p class="text-sm text-muted-foreground">one small thing, repeated daily.</p>
 
     {errorMessage && (
       <Alert variant="destructive">
