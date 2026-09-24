@@ -175,10 +175,10 @@ class CircleInvite(TimestampMixin, Base):
     delivery: Mapped[str] = mapped_column(String(8), nullable=False, default="link")
     invited_email: Mapped[str | None] = mapped_column(String(254), nullable=True)
     expires_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime, nullable=False
     )
     used_at: Mapped[datetime.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime, nullable=True
     )
     # User that minted the invite (always the circle owner in v1).
     invited_by = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
@@ -234,4 +234,12 @@ def mint_invite_token() -> tuple[str, str]:
 
 
 def is_invite_expired(invite: CircleInvite) -> bool:
-    return datetime.datetime.now(datetime.timezone.utc) >= invite.expires_at
+    """Check if the invite has expired.
+
+    Storage uses naive UTC datetimes (DateTime without timezone=True)
+    because SQLite doesn't reliably preserve tzinfo on round-trip.
+    The model column is naive; we compare against the current UTC time
+    with tzinfo stripped.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    return now >= invite.expires_at
