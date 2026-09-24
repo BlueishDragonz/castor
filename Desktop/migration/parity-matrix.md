@@ -436,11 +436,11 @@ and the evidence command(s) used to verify status.
 | **Side effects** | None |
 | **Error/empty/loading cases** | Bad format → "Invalid date range" |
 | **Existing code paths** | Same |
-| **Proposed new UI path** | Not yet implemented in Astro `/stats` |
-| **API/backend path** | n/a |
-| **Test IDs** | None |
-| **Status** | ❌ |
-| **Evidence** | `grep -r "stats_start_date\|date-range\|dateRange" web/concepts/src/` returns nothing. `/stats.astro` shows current 15-week view but no date range picker. |
+| **Proposed new UI path** | `web/concepts/src/pages/stats.astro` URL query params `?start=YYYY-MM-DD&end=YYYY-MM-DD` |
+| **API/backend path** | n/a (filtering is server-side in the Astro page render) |
+| **Test IDs** | `tests/test_slice8_stats.py::Slice8StatsPageTests` (6 SSR contract tests; require running dev server) |
+| **Status** | ✅ |
+| **Evidence** | Slice 8: stats.astro gained a preset dropdown (3M/6M/12M/24M) + two `<input type="date">` fields + Apply/Clear controls. Filtering happens server-side in the page render via `filterDay()`. Invalid date format / start > end renders "Invalid date range" alert. URL query state matches the legacy `app.storage.user` semantics (stateless, shareable by link). |
 
 ### 3.3 Calendar heatmap on detail (15 weeks)
 
@@ -849,9 +849,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `crud.get_user_list()`, `crud.get_customer_list()` |
 | **Proposed new UI path** | `web/concepts/src/pages/admin.astro` (ADMIN_EMAIL-gated) |
 | **API/backend path** | `GET /api/v1/admin/users` |
-| **Test IDs** | None |
+| **Test IDs** | `tests/test_slice8_admin.py::Slice8AdminTests::test_list_users_*` |
 | **Status** | ✅ |
-| **Evidence** | Page exists; backend endpoint exists; auth delegated to backend (ADMIN_EMAIL string gate). |
+| **Evidence** | Page exists; backend endpoint exists; auth delegated to backend (ADMIN_EMAIL string gate). Slice 8 pinned: 4 contract tests cover unauth/regular-user/admin, response shape, no password leakage. |
 
 ### 7.2 Manual backup trigger (admin)
 
@@ -869,9 +869,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `views.backup_all_users()` |
 | **Proposed new UI path** | `admin.astro` button → POST `/api/admin/backup` → backend `/api/v1/admin/backup` |
 | **API/backend path** | `POST /api/v1/admin/backup` |
-| **Test IDs** | None |
+| **Test IDs** | `tests/test_slice8_admin.py::Slice8AdminTests::test_trigger_backup_*` |
 | **Status** | ✅ |
-| **Evidence** | Page exists; backend endpoint exists. |
+| **Evidence** | Page exists; backend endpoint exists. Slice 8 pinned: 5 contract tests cover unauth/regular-user/admin-success/audit-event/emits-telegram-if-configured. Audit event `backup` is emitted (verified by querying `castor.app.audit.AuditEvent`). |
 
 ### 7.3 Paddle promote/demote
 

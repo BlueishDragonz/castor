@@ -92,6 +92,74 @@ for (let i = 0; i < DAYS_IN_WEEK; i++) {
   }
 }
 
+/**
+ * Slice 8 — date-range picker (parity row 3.2).
+ *
+ * The legacy NiceGUI /stats page let users pick "Last 3/6/12 months" or a
+ * custom range, persisted in app.storage.user. The Astro migration branch
+ * has no equivalent; this slice adds one.
+ *
+ * Implementation choice — URL query params (?start=YYYY-MM-DD&end=YYYY-MM-DD)
+ * rather than cookies. Query params:
+ *   - are stateless (no cookie-clearing on logout)
+ *   - support browser back/forward navigation
+ *   - share the chosen range by link
+ * Defaults: if no query, show ALL records (matches the legacy default).
+ */
+function isoDate(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+const todayIso = isoDate(new Date());
+
+const url = Astro.url;
+const rawStart = url.searchParams.get('start');
+const rawEnd = url.searchParams.get('end');
+
+function parseIsoDate(s: string | null): Date | null {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (isNaN(d.getTime())) return null;
+  return d;
+}
+
+const parsedStart = parseIsoDate(rawStart);
+const parsedEnd = parseIsoDate(rawEnd);
+const validRange =
+  parsedStart !== null && parsedEnd !== null && parsedStart <= parsedEnd;
+const rangeError: string | null =
+  rawStart === null && rawEnd === null
+    ? null
+    : validRange
+      ? null
+      : 'Invalid date range';
+const startDate = validRange ? parsedStart : null;
+const endDate = validRange ? parsedEnd : null;
+const rangeActive = startDate !== null && endDate !== null;
+
+/**
+ * Apply the chosen range to a habit's record days.
+ * - All-time (no range): pass through.
+ * - Range active: filter to records within [start, end].
+ */
+function filterDay(dayIso: string | undefined): string | null {
+  if (!dayIso) return null;
+  if (!rangeActive) return dayIso;
+  const day = dayIso.split('T')[0];
+  // startIso/endIso are inclusive on both ends
+  if (startDate && day < isoDate(startDate)) return null;
+  if (endDate && day > isoDate(endDate)) return null;
+  return day;
+}
+
+const defaultStart = new Date();
+defaultStart.setMonth(defaultStart.getMonth() - 3);
+const defaultStartIso = isoDate(defaultStart);
+
 // Month headers for heatmap
 const heatmapHeaders: string[] = [];
 let lastMonth = -1;
@@ -149,6 +217,85 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 
     {!loadError && habits.length > 0 && (
       <div class="space-y-4">
+        <div
+          class="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3 text-sm"
+          data-testid="date-range-picker"
+        >
+          <div class="flex flex-col gap-1">
+            <label for="preset-start" class="text-xs text-muted-foreground">Preset</label>
+            <select
+              id="preset-start"
+              class="rounded-md border bg-background px-2 py-1 text-sm"
+              onchange="
+                const v = this.value;
+                if (!v) return;
+                const today = new Date();
+                let start = new Date(today);
+                if (v === '3m') start.setMonth(today.getMonth() - 3);
+                else if (v === '6m') start.setMonth(today.getMonth() - 6);
+                else if (v === '12m') start.setMonth(today.getMonth() - 12);
+                else if (v === '24m') start.setFullYear(today.getFullYear() - 2);
+                else return;
+                const fmt = d => d.toISOString().split('T')[0];
+                window.location.search = `?start=${fmt(start)}&end=${fmt(today)}`;
+              "
+            >
+              <option value="">Pick a range…</option>
+              <option value="3m">Last 3 months</option>
+              <option value="6m">Last 6 months</option>
+              <option value="12m">Last 12 months</option>
+              <option value="24m">Last 24 months</option>
+            </select>
+          </div>
+          <form method="get" class="flex flex-wrap items-end gap-3">
+            <div class="flex flex-col gap-1">
+              <label for="start" class="text-xs text-muted-foreground">Start</label>
+              <input
+                type="date"
+                id="start"
+                name="start"
+                value={rawStart ?? ''}
+                max={rawEnd ?? todayIso}
+                class="rounded-md border bg-background px-2 py-1 text-sm"
+              />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label for="end" class="text-xs text-muted-foreground">End</label>
+              <input
+                type="date"
+                id="end"
+                name="end"
+                value={rawEnd ?? ''}
+                min={rawStart ?? ''}
+                max={todayIso}
+                class="rounded-md border bg-background px-2 py-1 text-sm"
+              />
+            </div>
+            <button
+              type="submit"
+              class="rounded-md bg-primary text-primary-foreground px-3 py-1 text-sm font-medium hover:opacity-90"
+            >
+              Apply
+            </button>
+            {rangeActive && (
+              <a
+                href="/stats"
+                class="rounded-md border px-3 py-1 text-sm hover:bg-accent"
+              >
+                Clear
+              </a>
+            )}
+          </form>
+        </div>
+        {rangeError && (
+          <div
+            class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+            role="alert"
+          >
+            {rangeError}
+          </div>
+        )}
+
         {habits.map((habit) => (
           <Card key={habit.id} className="overflow-hidden">
             <CardHeader className="pb-2">
@@ -174,8 +321,8 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
                 days={heatmapDays}
                 tickedDays={habit.records
                   .filter((r) => r.data?.done)
-                  .map((r) => r.data?.day?.split('T')[0])
-                  .filter(Boolean)}
+                  .map((r) => filterDay(r.data?.day))
+                  .filter(Boolean) as string[]}
                 headers={heatmapHeaders}
                 weekDayAbbr={weekDayAbbr}
                 today={today}
