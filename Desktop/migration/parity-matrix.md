@@ -50,9 +50,9 @@ and the evidence command(s) used to verify status.
 | **Existing code paths** | `beaverhabits/routes/api.py` (no — this is `app/webauthn_routes.py`); client JS at `frontend/security_passkeys.js` |
 | **Proposed new UI path** | `web/concepts/src/pages/login.astro` (Stage 2 → passkey alternative button on same form) |
 | **API/backend path** | `POST /auth/webauthn/login/begin` (form `username`) → challenge; `POST /auth/webauthn/login/complete` (attestation) → `{access_token}` |
-| **Test IDs** | `tests/test_lane2_webauthn.py` (unit), `tests/test_batch4_live.py::TestLiveWebAuthnRoutes` (apollo-only) |
-| **Status** | 🟡 |
-| **Evidence** | Backend routes verified on apollo (`/openapi.json` lists `/auth/webauthn/login/{begin,complete}`); 401 without bearer; `test_batch4_live.py::test_login_begin_404_for_unknown_email` confirmed as a known-fail from the laptop (apollo-only). **Open risk**: running apollo env has `WEBAUTHN_RP_ID=localhost` while origin is `10.8.0.1:8080` — rpId mismatch may break passkey login for new credentials. |
+| **Test IDs** | `tests/test_lane2_webauthn.py` (15+ tests, ceremony internals) + `tests/test_batch4_live.py::TestLiveWebAuthnRoutes` (apollo-only) + `tests/test_slice4_passkey.py::Slice4PasskeyTests` (20 tests, login-page-visible contracts: `/check`, `/login/begin` shape, `/credentials` list/delete, no-enumeration probe) |
+| **Status** | ✅ |
+| **Evidence** | Slice 4 verifies the surface the Astro Login page depends on: `/auth/webauthn/check` returns `{has_passkey, passkey_offer_dismissed}` with no enumeration leak (unknown email returns the same envelope as 'no passkey'); `/auth/webauthn/login/begin` returns `{publicKey: {challenge, rpId, allowCredentials}}` with 43-byte base64url challenge for valid users, 404 for unknown/no-passkey; `/credentials` lists user's passkeys; DELETE requires password re-confirmation. Defence-in-depth verified: wrong password returns 401 with public-safe message, credential NOT removed. |
 | **Open risk** | rpId mismatch on apollo; needs fix in `.secrets.env` or compose |
 
 ### 1.3 Register (email + password)
