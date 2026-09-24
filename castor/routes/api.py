@@ -14,7 +14,7 @@ from fastapi import (
     status,
 )
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 
 from castor import views
 from castor.app import crud
@@ -606,9 +606,18 @@ async def revoke_token(user: User = Depends(current_active_user)) -> Response:
 
 
 class UserConfigsUpdate(BaseModel):
-    """PUT body for /api/v1/user-configs. Fields are optional and merged."""
+    """PUT body for /api/v1/user-configs. Fields are optional and merged.
+
+    All keys are best-effort: missing keys leave the stored value
+    untouched. Boolean fields (`show_streak`, `show_total`,
+    `date_reverse`) are validated by Pydantic — strict booleans only.
+    `custom_css` runs through castor.css_sanitizer.sanitize_css().
+    """
 
     custom_css: str | None = None
+    show_streak: StrictBool | None = None
+    show_total: StrictBool | None = None
+    date_reverse: StrictBool | None = None
 
 
 @api_router.get("/user-configs", tags=["user-configs"])
@@ -645,6 +654,14 @@ async def put_user_configs_route(
             diff["custom_css"] = sanitized
         else:
             diff["custom_css"] = ""
+
+    # Display preferences (parity row 12.6). Pydantic StrictBool
+    # rejects 0/1/"yes"/"no" coercion — anything that isn't a real JSON
+    # boolean fails validation upstream with a 422 we never reach here.
+    for bool_key in ("show_streak", "show_total", "date_reverse"):
+        value = getattr(payload, bool_key)
+        if value is not None:
+            diff[bool_key] = value
 
     if not diff:
         # Nothing to change; return current state without rewriting the row.
