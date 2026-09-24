@@ -32,6 +32,10 @@ const WEBAUTHN_BROWSER_COOKIE = 'castor_webauthn_browser';
 // carry the value in a single canonical cookie.
 const BACKEND_WEBAUTHN_COOKIE = 'beaver_webauthn';
 
+// Cookie max-age aligned with backend JWT lifetime (castor.configs.JWT_LIFETIME_SECONDS=2592000).
+// Single source of truth so login + logout + mirror stay in lockstep.
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
+
 /**
  * Detect production from env. Two flags accepted so both Astro-native
  * (PUBLIC_BACKEND_URL) and Docker-compose-style (TLS_TERMINATED) deploys
@@ -72,14 +76,14 @@ export function writeSession(
     secure,
     path: '/',
     // Token lifetime is enforced by the upstream JWT strategy.
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: SESSION_MAX_AGE_SECONDS,
   });
   cookies.set(USERNAME_COOKIE, email, {
     httpOnly: false, // visible to client for UI greeting
     sameSite: 'lax',
     secure,
     path: '/',
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: SESSION_MAX_AGE_SECONDS,
   });
 }
 
