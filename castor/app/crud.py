@@ -241,16 +241,30 @@ async def get_user_api_token(user: User) -> str | None:
 
 
 async def create_user_api_token(user: User) -> str:
-    token = secrets.token_urlsafe(32)
-    token_hash = _hash_token(token)
+    """Create a new API token for the user.
+
+    If the user already has a token (one row, enforced by the unique index
+    on ``user_id``), this is an idempotent create that replaces the existing
+    row. The legacy behaviour was to raise IntegrityError; Slice 7 of the
+    Astro migration surfaced that the Astro /tokens page POSTs to this
+    function on every "Create token" click, so 500ing on the second click
+    would be a regression.
+    """
+    new_token = secrets.token_urlsafe(32)
+    new_hash = _hash_token(new_token)
     async with get_async_session_context() as session:
-        token_model = UserApiTokenModel(token=token_hash, user_id=user.id)
-        session.add(token_model)
-        await session.commit()
-        logger.info(f"[CRUD] User {user.id} API token created")
+        async with session.begin():
+            existing = (await session.execute(
+                select(UserApiTokenModel).where(UserApiTokenModel.user_id == user.id)
+            )).scalar_one_or_none()
+            if existing is not None:
+                existing.token = new_hash
+            else:
+                session.add(UserApiTokenModel(token=new_hash, user_id=user.id))
         from castor.app.audit import record
         await record("token_create", user_id=user.id)
-        return token
+    logger.info(f"[CRUD] User {user.id} API token created")
+    return new_token
 
 
 async def reset_user_api_token(user: User) -> str:
