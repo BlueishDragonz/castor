@@ -1,0 +1,39 @@
+---
+/**
+ * /circles/{id}/members/me/habits/{habit_id}/delete — caller un-shares
+ * one of THEIR OWN habits from this circle. Slice 24d added the
+ * `DELETE /api/v1/circles/{id}/members/me/habits/{habit_id}` endpoint
+ * for member-owned shares; this Astro page is the form action that
+ * the index page's trash button posts to.
+ *
+ * (Owner-side unshare still goes through the existing
+ * `habits/[habit_id]/unshare.astro` page, which hits the owner-only
+ * endpoint. After slice 24e the index page routes both cases through
+ * this page; the backend scope-by-caller logic in the member endpoint
+ * is the same as the owner endpoint for the owner's own shares.)
+ */
+import { backendFetch } from '../../../../../../../lib/auth';
+
+if (!Astro.locals.session) return Astro.redirect('/login');
+const { id, habit_id } = Astro.params;
+if (!id || !habit_id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+if (Astro.request.method !== 'POST') {
+  return Astro.redirect(`/circles/${circleId}`);
+}
+
+const res = await backendFetch(
+  Astro.cookies,
+  `/api/v1/circles/${circleId}/members/me/habits/${habit_id}`,
+  { method: 'DELETE' },
+);
+
+if (!res.ok) {
+  return Astro.redirect(`/circles/${circleId}?err=unshare_failed`);
+}
+
+return Astro.redirect(`/circles/${circleId}`);
+---
+

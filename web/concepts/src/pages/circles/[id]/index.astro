@@ -5,9 +5,13 @@
  * Renders:
  *   - Header: circle name + crown if owner
  *   - Members section
- *   - Shared habits section (with visibility per habit)
+ *   - Shared habits section (slice 24d: split into "Yours" and "Members"
+ *     so the owner can manage their own shares while seeing attribution
+ *     for shares from other members)
  *   - Pending invites section (owner only) + new invite form
- *   - Feed section (members only): per-shared-habit ticks + streak + notes
+ *   - Feed section (slice 24d: now for both owners and members): per-shared-habit
+ *     ticks + streak + notes, with each entry keyed by its actual
+ *     owner_email
  *
  * Forms are server-side POSTs:
  *   - /circles/{id}/invites  (POST, owner only): mint invite
@@ -90,6 +94,18 @@ try {
 }
 
 if (circle) {
+  // Slice 24d: fetch /feed for everyone, not just members. The owner
+  // now needs to see what their circle members have shared (and what
+  // activity has happened). Member-shared habits also appear in
+  // circle.shared_habits, but the feed is the rendered view.
+  try {
+    const feedRes = await backendFetch(
+      Astro.cookies,
+      `/api/v1/circles/${circleId}/feed?days=14`,
+      { method: 'GET', headers },
+    );
+    if (feedRes.ok) feed = (await feedRes.json()) as CircleFeedHabit[];
+  } catch {}
   if (circle.is_owner) {
     try {
       const invRes = await backendFetch(
@@ -98,15 +114,6 @@ if (circle) {
         { method: 'GET', headers },
       );
       if (invRes.ok) invites = (await invRes.json()) as CircleInvite[];
-    } catch {}
-  } else {
-    try {
-      const feedRes = await backendFetch(
-        Astro.cookies,
-        `/api/v1/circles/${circleId}/feed?days=14`,
-        { method: 'GET', headers },
-      );
-      if (feedRes.ok) feed = (await feedRes.json()) as CircleFeedHabit[];
     } catch {}
   }
 }
@@ -233,7 +240,8 @@ const inviteUrl = newInviteUrl
           </CardContent>
         </Card>
 
-        <!-- Shared habits (owner: manage; member: read feed below) -->
+        <!-- Shared habits — slice 24d: split into "your shares" (manageable)
+             and "members' shares" (read-only with attribution). -->
         <Card className="w-full">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-medium">
@@ -241,63 +249,149 @@ const inviteUrl = newInviteUrl
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            {circle.shared_habits.length === 0 && (
-              <p class="text-sm text-muted-foreground">
-                No habits shared yet. {circle.is_owner ? 'Pick one below.' : ''}
-              </p>
-            )}
-            <ul class="divide-y divide-border" role="list">
-              {circle.shared_habits.map(sh => (
-                <li class="py-2 flex items-center gap-2 text-sm">
-                  <span class="font-mono text-xs text-muted-foreground">{sh.habit_id.slice(0, 8)}…</span>
-                  <Badge variant="outline">{VISIBILITY_LABEL[sh.visibility]}</Badge>
-                  {circle.is_owner && (
-                    <form method="post" action={`/circles/${circleId}/habits/${sh.habit_id}/unshare`} class="ml-auto">
-                      <Button type="submit" variant="ghost" size="icon" aria-label="Unshare this habit">
-                        <Trash2 className="h-4 w-4" aria-hidden="true" />
-                      </Button>
+            {(() => {
+              // Slice 24e: split "your shares" (rows this viewer owns)
+              // from "members' shares" (everyone else in this circle).
+              // The viewer's user_id is the email-keyed entry in the
+              // members list — the cookie only carries email, but
+              // members[] always includes the viewer for any circle
+              // they can see.
+              const viewerEmail = Astro.locals.session?.email ?? '';
+              const viewerEntry = circle.members.find(
+                m => m.email === viewerEmail,
+              );
+              const viewerId = viewerEntry?.user_id ?? circle.owner_id;
+              const emailById = new Map<string, string>();
+              for (const m of circle.members) emailById.set(m.user_id, m.email);
+              const mine = circle.shared_habits.filter(
+                sh => (sh.owner_user_id ?? viewerId) === viewerId,
+              );
+              const theirs = circle.shared_habits.filter(
+                sh => (sh.owner_user_id ?? viewerId) !== viewerId,
+              );
+              return (
+                <>
+                  {circle.shared_habits.length === 0 && (
+                    <p class="text-sm text-muted-foreground">
+                      No habits shared yet. {circle.is_owner ? 'Pick one below.' : ''}
+                    </p>
+                  )}
+
+                  {mine.length > 0 && (
+                    <div class="space-y-1">
+                      <p class="text-xs uppercase tracking-wide text-muted-foreground">
+                        Yours
+                      </p>
+                      <ul class="divide-y divide-border" role="list">
+                        {mine.map(sh => {
+                          // Slice 24e: pull the habit's name out of the
+                          // feed (which carries per-owner records and
+                          // names). For the viewer, "Yours" rows map to
+                          // feed rows owned by the viewer's email —
+                          // which equals the viewer's email for the
+                          // member case, and circle.owner_email for
+                          // the owner case (since the owner is also a
+                          // member).
+                          const feedRow = feed.find(
+                            f => f.habit_id === sh.habit_id
+                              && f.owner_email === viewerEmail,
+                          );
+                          const label = feedRow?.name ?? sh.habit_id;
+                          return (
+                          <li class="py-2 flex items-center gap-2 text-sm">
+                            <span class="font-medium">{label}</span>
+                            <span class="font-mono text-xs text-muted-foreground">{sh.habit_id.slice(0, 8)}…</span>
+                            <Badge variant="outline">{VISIBILITY_LABEL[sh.visibility]}</Badge>
+                            {/* Slice 24e: "Yours" rows are always owned by
+                                the viewer, so the trash is always
+                                available. The endpoint is the member-
+                                scoped DELETE (slice 24d) so the owner
+                                sees it here for their own shares and a
+                                member sees it for their own shares —
+                                both routed through the same handler. */}
+                            <form
+                              method="post"
+                              action={`/circles/${circleId}/members/me/habits/${sh.habit_id}/delete`}
+                              class="ml-auto"
+                            >
+                              <Button type="submit" variant="ghost" size="icon" aria-label="Unshare this habit">
+                                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                              </Button>
+                            </form>
+                           </li>
+                           );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+
+                  {theirs.length > 0 && (
+                    <div class={`space-y-1 ${mine.length > 0 ? 'mt-4' : ''}`}>
+                      <p class="text-xs uppercase tracking-wide text-muted-foreground">
+                        Members
+                      </p>
+                      <ul class="divide-y divide-border" role="list">
+                        {theirs.map(sh => {
+                          const memberEmail = sh.owner_user_id
+                            ? (emailById.get(sh.owner_user_id) ?? 'a member')
+                            : 'a member';
+                          const feedRow = feed.find(
+                            f => f.habit_id === sh.habit_id
+                              && f.owner_email === memberEmail,
+                          );
+                          const label = feedRow?.name ?? sh.habit_id;
+                          return (
+                            <li class="py-2 flex items-center gap-2 text-sm">
+                              <span class="font-medium">{label}</span>
+                              <span class="font-mono text-xs text-muted-foreground">{sh.habit_id.slice(0, 8)}…</span>
+                              <span class="text-xs text-muted-foreground">{memberEmail}</span>
+                              <Badge variant="outline">{VISIBILITY_LABEL[sh.visibility]}</Badge>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+
+                  {circle.is_owner && myHabits.length > 0 && (
+                    <form id="share-habit-form" method="post" action={`/circles/${circleId}/share`} class="mt-4 space-y-4">
+                      <div class="space-y-2">
+                        <Label htmlFor="habit-id">Add a habit</Label>
+                        <select
+                          id="habit-id"
+                          name="habit_id"
+                          required
+                          class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <option value="">Select a habit…</option>
+                          {myHabits
+                            .filter(h => !mine.some(sh => sh.habit_id === h.id))
+                            .map(h => (
+                              <option value={h.id}>{h.name}</option>
+                            ))}
+                        </select>
+                      </div>
+                      <div class="space-y-2">
+                        <Label htmlFor="visibility">Visibility</Label>
+                        <select
+                          id="visibility"
+                          name="visibility"
+                          class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <option value="ticks">Ticks only</option>
+                          <option value="ticks+streak">Ticks + streak</option>
+                          <option value="ticks+streak+notes">Ticks + streak + notes</option>
+                        </select>
+                        <p class="text-xs text-muted-foreground">
+                          {VISIBILITY_DESCRIPTION['ticks+streak+notes']}
+                        </p>
+                      </div>
+                      <FormActions cancelHref={`/circles/${circleId}`} submitLabel="Share" formId="share-habit-form" />
                     </form>
                   )}
-                </li>
-              ))}
-            </ul>
-
-            {circle.is_owner && myHabits.length > 0 && (
-              <form id="share-habit-form" method="post" action={`/circles/${circleId}/share`} class="mt-4 space-y-4">
-                <div class="space-y-2">
-                  <Label htmlFor="habit-id">Add a habit</Label>
-                  <select
-                    id="habit-id"
-                    name="habit_id"
-                    required
-                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <option value="">Select a habit…</option>
-                    {myHabits
-                      .filter(h => !circle!.shared_habits.some(sh => sh.habit_id === h.id))
-                      .map(h => (
-                        <option value={h.id}>{h.name}</option>
-                      ))}
-                  </select>
-                </div>
-                <div class="space-y-2">
-                  <Label htmlFor="visibility">Visibility</Label>
-                  <select
-                    id="visibility"
-                    name="visibility"
-                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <option value="ticks">Ticks only</option>
-                    <option value="ticks+streak">Ticks + streak</option>
-                    <option value="ticks+streak+notes">Ticks + streak + notes</option>
-                  </select>
-                  <p class="text-xs text-muted-foreground">
-                    {VISIBILITY_DESCRIPTION['ticks+streak+notes']}
-                  </p>
-                </div>
-                <FormActions cancelHref={`/circles/${circleId}`} submitLabel="Share" formId="share-habit-form" />
-              </form>
-            )}
+                </>
+              );
+            })()}
           </CardContent>
         </Card>
 

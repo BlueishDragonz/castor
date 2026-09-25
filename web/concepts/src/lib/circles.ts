@@ -67,6 +67,10 @@ export interface CircleSharedHabit {
   habit_id: string;
   visibility: CircleVisibility;
   share_notes: boolean;
+  // Slice 24d: backend now includes this on GET /circles/{id} so the
+  // owner-facing detail page can tell which shares belong to the
+  // owner (manageable) vs to a member (read-only with attribution).
+  owner_user_id?: string;
 }
 
 export interface CircleDetail {
