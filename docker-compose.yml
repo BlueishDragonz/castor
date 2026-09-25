@@ -3,12 +3,35 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: castor
+    container_name: beaverhabits                 # keep legacy name; rename is a separate cutover decision
     network_mode: "container:wg-easy"
+    image: castor:custom-2026-09-XX             # PIN a custom tag — never :latest
     environment:
       - HABITS_STORAGE=DATABASE
-      - WEBAUTHN_RP_ID=localhost
-      - WEBAUTHN_ORIGIN=http://localhost:8080
+      # ─── WebAuthn ────────────────────────────────────────────────
+      # rpId MUST match the host the browser hits. VPN clients hit
+      # 10.8.0.1:8080, so the rpId is 10.8.0.1. Legacy value
+      # (localhost) only worked for sessions on the apollo host
+      # itself; VPN sessions would fail rpId validation on new
+      # passkey registrations. See slice-19 cutover runbook §5.
+      - WEBAUTHN_RP_ID=10.8.0.1
+      - WEBAUTHN_ORIGIN=http://10.8.0.1:8080
+      # ─── Backend routing ─────────────────────────────────────────
+      # BACKEND_URL points Astro at the in-container backend (the
+      # Dockerfile supervisor launches gunicorn on 127.0.0.1:8081
+      # in the background). Astro's backendFetch() targets this URL
+      # directly; no middleware proxy needed because all browser
+      # traffic goes through Astro pages or pages/api/ BFF routes.
+      - BACKEND_URL=http://127.0.0.1:8081
+      # ─── Secrets (sourced from /opt/castor/.user/.secrets.env on
+      # apollo; values here are placeholders — Docker compose reads
+      # from the env_file below in production). DO NOT commit real
+      # secrets to this file. ───────────────────────────────────────
+      - JWT_SECRET=${JWT_SECRET}
+      - RESET_PASSWORD_TOKEN_SECRET=${RESET_PASSWORD_TOKEN_SECRET}
+      - NICEGUI_STORAGE_SECRET=${NICEGUI_STORAGE_SECRET}
+    env_file:
+      - ./.user/.secrets.env   # optional: if present, overrides above
     volumes:
       - castor_data:/app/.user/
     restart: unless-stopped
