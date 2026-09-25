@@ -1324,11 +1324,11 @@ underlying files exist and were verified by
   `HabitNoteRow.tsx:72-73` listener → `HabitNoteDialog`). Wire-up
   existed; matrix evidence was stale.
 
-**Remaining open rows (post-slice-14 audit):**
+**Remaining open rows (post-slice-21):**
 
 | Severity | Item | Group | Notes |
 | --- | --- | --- | --- |
-| High | rpId mismatch (`WEBAUTHN_RP_ID=localhost` vs origin `10.8.0.1`) | 1.2 | Phase 4 cutover item — fix `compose.yml` env before flipping traffic |
+| ~~High~~ | rpId mismatch (`WEBAUTHN_RP_ID=localhost` vs origin `10.8.0.1`) | 1.2 | ✅ **RESOLVED slice 20** — `docker-compose.yml` now sets `WEBAUTHN_RP_ID=10.8.0.1` and `WEBAUTHN_ORIGIN=http://10.8.0.1:8080`. Will activate on apollo cutover. |
 | Medium | Import POST backend endpoint | 6.3 | Page surfaces honest 404; not blocking because BFF import loop in slice 6.x is the working path |
 | Low | CSV export | 6.2 | Net-new (legacy never had it) |
 | Low | Telegram backup config UI | 6.4 | Net-new (legacy never had it) |
