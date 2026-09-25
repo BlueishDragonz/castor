@@ -498,6 +498,16 @@ async def accept_invite(
                 raise HTTPException(status_code=410, detail="Invite already used")
             if circles_mod.is_invite_expired(invite):
                 raise HTTPException(status_code=410, detail="Invite expired")
+            # Self-join guard: the inviter cannot accept their own invite.
+            # Without this, an owner accidentally POSTing /join with their
+            # own token would silently become a member (see dogfood-2026-09-25
+            # finding C). Match by string so UUID-vs-string mismatches across
+            # DB backends don't trip the check.
+            if str(invite.invited_by) == str(user.id):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot accept your own invite",
+                )
             # Add as member (no-op if already a member).
             existing = (await session.execute(
                 select(circles_mod.CircleMember).where(
