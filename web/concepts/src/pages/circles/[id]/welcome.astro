@@ -48,6 +48,8 @@ let circle: CircleDetail | null = null;
 let feed: CircleFeedHabit[] = [];
 let myHabits: Array<{ id: string; name: string }> = [];
 let mySharedHabits: CircleSharedHabit[] = [];
+let allHabitsEmpty = true;
+let allShared = false;
 let error: string | null = null;
 
 const headers = { Accept: 'application/json' };
@@ -108,6 +110,12 @@ try {
     for (const sh of (circle?.shared_habits ?? [])) alreadyShared.add(sh.habit_id);
     for (const sh of mySharedHabits) alreadyShared.add(sh.habit_id);
     myHabits = allHabits.filter(h => !alreadyShared.has(h.id));
+    // Slice 24f: distinguish "user has zero habits" from "user's
+    // only habits are already shared" so the empty-state copy tells
+    // the truth. allHabitsEmpty = genuine no-habits-yet. allShared =
+    // they have habits, but all are already shared with this circle.
+    allHabitsEmpty = allHabits.length === 0;
+    allShared = allHabits.length > 0 && myHabits.length === 0;
   }
 } catch {}
 
@@ -289,12 +297,26 @@ const otherMembers = (circle?.members ?? []).filter(
           </Card>
         )}
 
-        {myHabits.length === 0 && (
+        {myHabits.length === 0 && allHabitsEmpty && (
           <Card className="w-full">
             <CardContent className="pt-6 text-sm text-muted-foreground">
               You don't have any habits to share yet. Create one from the
               <a href="/habits/new" class="underline ml-1">new habit</a> page and
               come back to share it.
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Slice 24f: the user has habits, but they're all already
+            shared with this circle. Tell them honestly so they know
+            "What you've shared" really is the final state, not a
+            bug or a missing load. */}
+        {myHabits.length === 0 && allShared && (
+          <Card className="w-full">
+            <CardContent className="pt-6 text-sm text-muted-foreground">
+              You've shared all {mySharedHabits.length === 1 ? 'your habit' : 'your habits'}
+              {' '}with this circle. You can revisit your visibility choices or remove a share from
+              the <a href={`/circles/${circleId}`} class="underline ml-1">circle page</a> any time.
             </CardContent>
           </Card>
         )}
