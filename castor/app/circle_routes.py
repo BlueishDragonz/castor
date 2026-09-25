@@ -43,7 +43,7 @@ from castor.storage.storage import HabitListNotFoundError
 # the trick used in slice 23a (try/except AttributeError).
 from castor.utils import send_email
 
-from sqlalchemy import delete, select
+from sqlalchemy import String, cast, delete, select
 
 
 router = APIRouter(prefix="/circles", tags=["circles"])
@@ -147,6 +147,29 @@ async def _require_owner(circle_id: int, user: User) -> circles_mod.Circle:
         circle = await _load_circle(session, circle_id)
         if str(user.id) != str(circle.owner_id):
             raise HTTPException(status_code=403, detail="Owner only")
+        return circle
+
+
+async def _require_member(circle_id: int, user: User) -> circles_mod.Circle:
+    """Slice 24d: allow any circle member (incl. owner) to operate.
+
+    Used by endpoints like POST /circles/{id}/members/me/habits where
+    the caller is sharing THEIR OWN habit with the circle, not the
+    owner's. The owner is automatically a member (seeded on circle
+    create), so this also accepts the owner.
+    """
+    async with async_session_maker() as session:
+        circle = await _load_circle(session, circle_id)
+        is_owner = str(user.id) == str(circle.owner_id)
+        if not is_owner:
+            membership = (await session.execute(
+                select(circles_mod.CircleMember).where(
+                    circles_mod.CircleMember.circle_id == circle_id,
+                    circles_mod.CircleMember.user_id == str(user.id),
+                )
+            )).scalar_one_or_none()
+            if membership is None:
+                raise HTTPException(status_code=403, detail="Not a member of this circle")
         return circle
 
 
@@ -261,7 +284,14 @@ async def get_circle(
             for (m, u) in members
         ],
         "shared_habits": [
-            {"habit_id": h.habit_id, "visibility": h.visibility, "share_notes": h.share_notes}
+            {
+                "habit_id": h.habit_id,
+                "visibility": h.visibility,
+                "share_notes": h.share_notes,
+                # Slice 24d: lets the welcome page tell the new member
+                # which shared habits are theirs vs the owner's.
+                "owner_user_id": h.owner_user_id,
+            }
             for h in shared
         ],
         "created_at": circle.created_at,
@@ -394,6 +424,109 @@ async def unshare_habit(
             )
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Habit not shared in this circle")
+    await record("circle_habit_unshare", user_id=user.id)
+    return
+
+
+# ----------------------------------------------------------------------
+# Slice 24d: member shares OWN habit with the circle they're in
+# ----------------------------------------------------------------------
+
+
+@router.get(
+    "/{circle_id}/members/me/habits",
+    response_model=list[CircleHabitShare],
+)
+async def list_my_shared_habits(
+    circle_id: int,
+    user: User = Depends(current_active_user),
+):
+    """Return the caller's CircleHabit rows in this circle (their own shares)."""
+    await _require_member(circle_id, user)
+    async with async_session_maker() as session:
+        rows = (await session.execute(
+            select(circles_mod.CircleHabit).where(
+                circles_mod.CircleHabit.circle_id == circle_id,
+                circles_mod.CircleHabit.owner_user_id == str(user.id),
+            )
+        )).scalars().all()
+        return [
+            {"habit_id": r.habit_id, "visibility": r.visibility}
+            for r in rows
+        ]
+
+
+@router.post(
+    "/{circle_id}/members/me/habits",
+    response_model=CircleHabitShare,
+    status_code=201,
+)
+async def share_my_habit(
+    circle_id: int,
+    body: CircleHabitShare,
+    user: User = Depends(current_active_user),
+):
+    """Caller shares ONE OF THEIR OWN habits with the circle."""
+    await _require_member(circle_id, user)
+    # Validate the habit belongs to the caller (members cannot share
+    # someone else's habit — that would be the owner's share endpoint).
+    try:
+        await views.get_user_habit(user, body.habit_id)
+    except Exception:
+        raise HTTPException(
+            status_code=404,
+            detail="Habit not found in your habit list",
+        )
+    share_notes = body.visibility == circles_mod.VIS_TICKS_STREAK_NOTES
+    async with async_session_maker() as session:
+        async with session.begin():
+            existing = (await session.execute(
+                select(circles_mod.CircleHabit).where(
+                    circles_mod.CircleHabit.circle_id == circle_id,
+                    circles_mod.CircleHabit.habit_id == body.habit_id,
+                    circles_mod.CircleHabit.owner_user_id == str(user.id),
+                )
+            )).scalar_one_or_none()
+            if existing is not None:
+                existing.visibility = body.visibility
+                existing.share_notes = share_notes
+            else:
+                session.add(circles_mod.CircleHabit(
+                    circle_id=circle_id,
+                    habit_id=body.habit_id,
+                    owner_user_id=str(user.id),
+                    visibility=body.visibility,
+                    share_notes=share_notes,
+                ))
+    await record("circle_habit_share", user_id=user.id)
+    return {"habit_id": body.habit_id, "visibility": body.visibility}
+
+
+@router.delete(
+    "/{circle_id}/members/me/habits/{habit_id}",
+    status_code=204,
+)
+async def unshare_my_habit(
+    circle_id: int,
+    habit_id: str,
+    user: User = Depends(current_active_user),
+):
+    """Caller un-shares one of their own habits from this circle."""
+    await _require_member(circle_id, user)
+    async with async_session_maker() as session:
+        async with session.begin():
+            result = await session.execute(
+                delete(circles_mod.CircleHabit).where(
+                    circles_mod.CircleHabit.circle_id == circle_id,
+                    circles_mod.CircleHabit.habit_id == habit_id,
+                    circles_mod.CircleHabit.owner_user_id == str(user.id),
+                )
+            )
+            if result.rowcount == 0:
+                raise HTTPException(
+                    status_code=404,
+                    detail="You have not shared this habit in this circle",
+                )
     await record("circle_habit_unshare", user_id=user.id)
     return
 
@@ -604,23 +737,57 @@ async def circle_feed(
         )).scalars().all()
         if not shared:
             return []
-        owner = (await session.execute(
-            select(User).where(User.id == circle.owner_id)
-        )).scalar_one()
-
-    # The owner's habit_list is fetched once for the whole batch.
-    try:
-        habit_list = await views.get_user_habit_list(owner)
-    except HabitListNotFoundError:
-        return []
+        # Slice 24d: shared habits may belong to the owner OR to any
+        # member. Group by owner (string id, since CircleHabit stores
+        # str to match CircleMember.user_id) so we fetch each owner's
+        # habit list only once (avoid N+1).
+        owners: dict[str, User] = {}
+        for ch in shared:
+            key = str(ch.owner_user_id)
+            if key not in owners:
+                owners[key] = (await session.execute(
+                    select(User).where(cast(User.id, String) == key)
+                )).scalar_one()
+        owner_key = str(circle.owner_id)
+        if owner_key not in owners:
+            # Defensive: if the owner hasn't shared anything, we still
+            # need their User row for the habit-list fetch below.
+            owners[owner_key] = (await session.execute(
+                select(User).where(cast(User.id, String) == owner_key)
+            )).scalar_one()
+        # Pop the owner's habit list (most likely cached); member lists
+        # are fetched below if they appear.
+        owner = owners[owner_key]
+        try:
+            owner_habit_list = await views.get_user_habit_list(owner)
+        except HabitListNotFoundError:
+            owner_habit_list = None
+        member_habit_lists: dict[str, object] = {}
+        for uid, u in owners.items():
+            if uid == owner_key:
+                continue
+            try:
+                member_habit_lists[uid] = await views.get_user_habit_list(u)
+            except HabitListNotFoundError:
+                member_habit_lists[uid] = None
 
     end = datetime.date.today()
     start = end - datetime.timedelta(days=days - 1)
 
     out: list[CircleHabitRead] = []
     for ch in shared:
+        # Slice 24d: dispatch on the habit's actual owner, not always
+        # the circle owner. ch.owner_user_id is UUID on the way out of
+        # the DB; the owners dict is keyed by str for consistency.
+        owner_user = owners[str(ch.owner_user_id)]
+        habit_list = (
+            owner_habit_list if owner_user.id == owner.id else
+            member_habit_lists.get(str(ch.owner_user_id))
+        )
+        if habit_list is None:
+            continue
         try:
-            habit = await views.get_user_habit(owner, ch.habit_id)
+            habit = await views.get_user_habit(owner_user, ch.habit_id)
         except Exception:
             continue
         status_map = get_habit_date_completion(habit, start, end)
@@ -643,7 +810,7 @@ async def circle_feed(
         ) else 0
         out.append(CircleHabitRead(
             habit_id=ch.habit_id,
-            owner_email=owner.email,
+            owner_email=owner_user.email,
             name=habit.name,
             visibility=ch.visibility,
             share_notes=ch.share_notes,

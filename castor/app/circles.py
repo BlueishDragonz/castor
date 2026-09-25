@@ -142,7 +142,16 @@ class CircleHabit(TimestampMixin, Base):
     circle: Mapped[Circle] = relationship(back_populates="habits")
 
     __table_args__ = (
-        UniqueConstraint("circle_id", "habit_id", name="circle_habit_unique"),
+        # Slice 24d: was (circle_id, habit_id). Now (circle_id, habit_id,
+        # owner_user_id) so two members can each share a habit of the
+        # same string id with the circle. The DB migration helper in
+        # castor.app.db.create_db_and_tables drops the old index and
+        # creates this one idempotently (the unique constraint name is
+        # unchanged for the drop-and-recreate).
+        UniqueConstraint(
+            "circle_id", "habit_id", "owner_user_id",
+            name="circle_habit_unique",
+        ),
         CheckConstraint(
             f"visibility IN ({_sql_values(VISIBILITY_LEVELS)})",
             name="circle_habit_visibility",

@@ -221,6 +221,19 @@ async def create_db_and_tables():
             await conn.execute(text(
                 'ALTER TABLE "user" ADD COLUMN recovery_email_verified BOOLEAN NOT NULL DEFAULT FALSE'
             ))
+        # Slice 24d: the unique constraint on circle_habit used to be
+        # (circle_id, habit_id) — sufficient when only the owner could
+        # share. We extended it to (circle_id, habit_id, owner_user_id)
+        # so two members can each share their own copy of a habit with
+        # the same string id. Drop the old index if it's a 2-column
+        # one, then re-create it as a 3-column unique index.
+        await conn.execute(text(
+            'DROP INDEX IF EXISTS circle_habit_unique'
+        ))
+        await conn.execute(text(
+            'CREATE UNIQUE INDEX IF NOT EXISTS circle_habit_unique '
+            'ON circle_habit (circle_id, habit_id, owner_user_id)'
+        ))
         # Existing users that have at least one passkey registered
         # should be treated as "dismissed" — they've already onboarded.
         await conn.execute(text(

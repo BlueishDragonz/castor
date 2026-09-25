@@ -8,9 +8,9 @@
  * - Loads the feed so we can show what the new member can now see.
  * - Optionally shows a "Share your habits" wizard IF the user has any
  *   habits (calls GET /api/v1/habits). The wizard lets them pick a
- *   habit + visibility and POSTs to /api/v1/circles/{id}/habits; on
- *   success it updates the inline "What you shared" count without
- *   a full page reload.
+ *   habit + visibility and POSTs to /api/v1/circles/{id}/members/me/habits
+ *   (slice 24d: the member-shares-own-habit endpoint). On success it
+ *   updates the inline "What you shared" count without a full page reload.
  */
 import Layout from '../../../layouts/Layout.astro';
 import {
@@ -24,7 +24,7 @@ import { Badge } from '../../../components/ui/badge';
 import PageHeader from '../../../components/PageHeader.astro';
 import ErrorBanner from '../../../components/ErrorBanner.astro';
 import { VISIBILITY_LABEL, VISIBILITY_DESCRIPTION } from '../../../lib/circles';
-import type { CircleDetail, CircleFeedHabit } from '../../../lib/circles';
+import type { CircleDetail, CircleFeedHabit, CircleSharedHabit } from '../../../lib/circles';
 import { backendFetch } from '../../../lib/auth';
 
 if (!Astro.locals.session) {
@@ -46,6 +46,7 @@ const token = (Astro.url.searchParams.get('token') ?? '').trim();
 let circle: CircleDetail | null = null;
 let feed: CircleFeedHabit[] = [];
 let myHabits: Array<{ id: string; name: string }> = [];
+let mySharedHabits: CircleSharedHabit[] = [];
 let error: string | null = null;
 
 const headers = { Accept: 'application/json' };
@@ -77,6 +78,19 @@ if (circle) {
     );
     if (feedRes.ok) feed = (await feedRes.json()) as CircleFeedHabit[];
   } catch {}
+  // Slice 24d: list the new member's own shares so the wizard's
+  // "already shared" filter is accurate and the "What you've shared"
+  // counter starts at the real number.
+  try {
+    const mineRes = await backendFetch(
+      Astro.cookies,
+      `/api/v1/circles/${circleId}/members/me/habits`,
+      { method: 'GET', headers },
+    );
+    if (mineRes.ok) {
+      mySharedHabits = (await mineRes.json()) as CircleSharedHabit[];
+    }
+  } catch {}
 }
 
 try {
@@ -86,10 +100,12 @@ try {
   });
   if (habitsRes.ok) {
     const allHabits = (await habitsRes.json()) as Array<{ id: string; name: string }>;
-    // Don't propose habits the user already shared with this circle.
-    const alreadyShared = new Set(
-      (circle?.shared_habits ?? []).map(sh => sh.habit_id),
-    );
+    // Don't propose habits the user already shared with this circle —
+    // includes both the owner's shares (from circle.shared_habits) AND
+    // the member's own previous shares (from /members/me/habits).
+    const alreadyShared = new Set<string>();
+    for (const sh of (circle?.shared_habits ?? [])) alreadyShared.add(sh.habit_id);
+    for (const sh of mySharedHabits) alreadyShared.add(sh.habit_id);
     myHabits = allHabits.filter(h => !alreadyShared.has(h.id));
   }
 } catch {}
@@ -98,8 +114,8 @@ try {
 const ownersSharedHabits = feed.filter(item => item.owner_email === circle?.owner_email);
 const ownersSharedCount = ownersSharedHabits.length;
 
-// What the new member has shared back (start at 0):
-const mySharedCount: number = 0;
+// What the new member has shared back (real value, not a placeholder).
+const mySharedCount: number = mySharedHabits.length;
 ---
 
 <Layout title={circle ? `Joined ${circle.name}` : 'Joined circle'}>
@@ -258,7 +274,8 @@ const mySharedCount: number = 0;
   </main>
 
   <script define:vars={{ circleId }}>
-    // Share-your-habit wizard: POST to /api/v1/circles/{id}/habits and
+    // Share-your-habit wizard: POST to /api/v1/circles/{id}/members/me/habits
+    // (the member-shares-own-habit endpoint added in slice 24d) and
     // update the inline counters without a full page reload.
     (() => {
       const form = document.getElementById('share-my-habit-form');
@@ -279,7 +296,7 @@ const mySharedCount: number = 0;
           return;
         }
         try {
-          const res = await fetch(`/api/v1/circles/${circleId}/habits`, {
+          const res = await fetch(`/api/v1/circles/${circleId}/members/me/habits`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ habit_id, visibility }),
