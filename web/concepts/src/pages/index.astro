@@ -42,7 +42,7 @@ try {
 ---
 
 <Layout title="Castor — Dam good habits">
-  <main class="mx-auto max-w-2xl px-6 py-16 space-y-16">
+  <main class="mx-auto max-w-2xl px-6 py-16 flex flex-col gap-8">
 
     {/* ─── Hero ─── */}
     <section class="space-y-6 pt-4">
@@ -192,16 +192,41 @@ try {
 
   </main>
 
-  {/* ─── Footer (server status + project links) ───
-      Small monospace line at the bottom of the page. Visible to ops-minded
-      visitors; invisible to everyone else. Keeps the hero clean. */}
+  {/* ─── Footer (server status badge + project links) ───
+      Small inline badge in the bottom-left corner. The word "Status"
+      is always visible (so it's discoverable, not just an anonymous
+      dot); the colour encodes the state (green = up, red = down,
+      amber = unknown). A `title` attribute exposes the full /health
+      response for ops-minded visitors who hover. */}
   <footer class="mx-auto max-w-2xl px-6 pb-10">
-    <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground font-mono">
-      <span>
-        Server: {backendStatus === 'ok' ? 'ok' : 'down'}
-        {' · '}/health → {backendMessage}
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <span
+        class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium"
+        style={`background: ${
+          backendStatus === 'ok'
+            ? 'color-mix(in oklab, var(--positive) 12%, transparent)'
+            : backendStatus === 'down'
+              ? 'color-mix(in oklab, var(--destructive) 12%, transparent)'
+              : 'color-mix(in oklab, var(--destructive) 8%, transparent)'
+        }; color: ${
+          backendStatus === 'ok' ? 'var(--positive)' : 'var(--destructive)'
+        }; border-color: ${
+          backendStatus === 'ok'
+            ? 'color-mix(in oklab, var(--positive) 30%, transparent)'
+            : 'color-mix(in oklab, var(--destructive) 30%, transparent)'
+        };`}
+        title={`Server ${backendStatus} · /health → ${backendMessage}`}
+        aria-label={`Server status: ${backendStatus}`}
+      >
+        <span
+          class="inline-block h-1.5 w-1.5 rounded-full"
+          style={`background: ${
+            backendStatus === 'ok' ? 'var(--positive)' : 'var(--destructive)'
+          };`}
+        ></span>
+        Status
       </span>
-      <nav class="flex gap-4 not-italic font-sans">
+      <nav class="flex gap-4 text-xs text-muted-foreground font-sans">
         <a href="/help" class="hover:underline">Help</a>
         <a href="/terms" class="hover:underline">Terms</a>
         <a href="/privacy" class="hover:underline">Privacy</a>
