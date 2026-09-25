@@ -3,11 +3,11 @@
 > One-stop doc for resuming the Astro+shadcn migration of the
 > NiceGUI/Quasar habit tracker. Updated 2026-09-25 after slice 21.
 
-## Status: NOT ready to cut over — post-dogfood UI pass landed
+## Status: NOT ready to cut over — slice 22x + 23c landed
 
-- Branch head on `release/astro-migration`: **`4c85b7f`** (slice 22).
+- Branch head on `release/astro-migration`: **`5a8ca1c`** (slice 23c).
 - `astro check`: 0 errors / 0 warnings / 58 hints.
-- `pytest tests/ --ignore=tests/test_batch4_live.py`: **374 passed
+- `pytest tests/ --ignore=tests/test_batch4_live.py`: **383 passed**
   + 12 skipped** (368 baseline + 6 new slice-23a tests).
 - Demo seed: `demo@castor.example.com / DemoPass1234!` — re-seeded
   every time `dev-up.sh` is run.
