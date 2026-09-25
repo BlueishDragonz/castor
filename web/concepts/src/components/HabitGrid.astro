@@ -205,7 +205,15 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 )}
 
 <!-- Sticky Date Headers (matching main branch design) -->
-<div class="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border pb-2 mt-6">
+{/*
+  The dogfood 2026-09-25 walkthrough found the date strip floated
+  disconnected above the rows with a big gap (mt-6) and no visual
+  band. We now wrap the strip in the same Card chrome as the habit
+  rows below so the eye reads it as one continuous panel: header
+  strip on top, divider, row cards. The grid is sticky so it stays
+  pinned on scroll.
+*/}
+<div class="sticky top-0 z-20 bg-card/95 backdrop-blur-sm border border-b-0 border-border rounded-t-lg px-2 pt-2 pb-3 mt-4">
   <div class="grid gap-x-1 px-2"
        style={`grid-template-columns: minmax(0, 1fr) repeat(${sortedDays.length}, 1.75rem) ${showStreak ? '2.75rem' : '0'} ${showTotal ? '2.75rem' : '0'}`}
        aria-hidden="true">
@@ -244,7 +252,7 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 
     return (
       <>
-        <article class="border border-border rounded-lg bg-card p-2" role="listitem">
+        <article class="border border-border rounded-b-lg bg-card p-2 first:border-t-0" role="listitem">
           <div class="grid items-center gap-x-1" style={`grid-template-columns: minmax(0, 1fr) repeat(${sortedDays.length}, 1.75rem) ${showStreak ? '2.75rem' : '0'} ${showTotal ? '2.75rem' : '0'}`}>
             {/* Habit name column - link with drawsheet. min-w-0 + truncate so
                 long names ellipsise and the right-aligned tick icons keep

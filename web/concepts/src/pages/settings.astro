@@ -46,6 +46,8 @@ import { Separator } from '../components/ui/separator';
 import HelpDialog from '../components/HelpDialog.tsx';
 import SettingsClient from '../components/SettingsClient.tsx';
 import DisplayCard from '../components/DisplayCard.tsx';
+import PageHeader from '../components/PageHeader.astro';
+import { DesktopMenu } from '../components/DesktopMenu.tsx';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -79,15 +81,9 @@ if (Astro.request.method === 'POST') {
 
 <Layout title="Settings — Castor">
   <main class="mx-auto max-w-2xl px-6 py-12 space-y-8 pb-24">
-    <header class="flex items-center justify-between gap-4">
-      <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
-      <a
-        href="/habits"
-        class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        &larr; Back to habits
-      </a>
-    </header>
+    <PageHeader title="Settings" back="/habits">
+      <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />
+    </PageHeader>
 
     <Card>
       <CardHeader>

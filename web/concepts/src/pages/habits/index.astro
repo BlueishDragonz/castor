@@ -19,6 +19,8 @@
 import Layout from '../../layouts/Layout.astro';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import HabitGrid from '../../components/HabitGrid.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import { DesktopMenu } from '../../components/DesktopMenu.tsx';
 import { clearStaleSession } from '../../lib/auth';
 
 if (!Astro.locals.session) {
@@ -166,29 +168,39 @@ try {
 }
 ---
 <Layout title="Habits — Castor">
-  <main class="mx-auto max-w-2xl px-4 py-12 pb-24">
-    <header class="flex items-end justify-between gap-4">
-      <div>
-        <h1 class="text-3xl font-semibold tracking-tight">Habits</h1>
-        <p class="text-sm text-muted-foreground mt-0.5">
-          {habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
-        </p>
-      </div>
-      <!-- Slice 10 — sort menu (parity row 2.10) -->
-      <div class="flex items-center gap-2">
-        <label for="sort-select" class="text-xs text-muted-foreground">Sort by</label>
-        <select
-          id="sort-select"
-          class="rounded-md border bg-background px-2 py-1 text-sm"
-          onchange="window.location.search = this.value ? '?order_by=' + this.value : window.location.pathname"
-          aria-label="Sort habits"
-        >
-          <option value="manual" selected={orderBy === 'manual'}>Manually</option>
-          <option value="name" selected={orderBy === 'name'}>Name</option>
-          <option value="category" selected={orderBy === 'category'}>Category</option>
-        </select>
-      </div>
-    </header>
+  {/*
+    Slice 22 — widened the centered content area from max-w-2xl (672px)
+    to max-w-5xl (1024px). The dogfood walkthrough flagged the home
+    grid as feeling cramped with massive white space on desktop;
+    the habit row already lays out name + 7 day columns + optional
+    streak/total badges, and at 672px the day columns squeezed
+    the day numbers. 1024px keeps the row readable without going
+    edge-to-edge.
+  */}
+  <main class="mx-auto max-w-5xl px-4 py-12 pb-24">
+    <PageHeader
+      title="Habits"
+      subtitle={habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
+    >
+      <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />
+    </PageHeader>
+
+    {/* Slice 10 — sort menu (parity row 2.10). Kept its own row so the
+        PageHeader doesn't have to host three controls; the actions
+        slot only carries the global DesktopMenu. */}
+    <div class="flex items-center justify-end gap-2 mb-4">
+      <label for="sort-select" class="text-xs text-muted-foreground">Sort by</label>
+      <select
+        id="sort-select"
+        class="rounded-md border bg-background px-2 py-1 text-sm"
+        onchange="window.location.search = this.value ? '?order_by=' + this.value : window.location.pathname"
+        aria-label="Sort habits"
+      >
+        <option value="manual" selected={orderBy === 'manual'}>Manually</option>
+        <option value="name" selected={orderBy === 'name'}>Name</option>
+        <option value="category" selected={orderBy === 'category'}>Category</option>
+      </select>
+    </div>
     {error && (
       <Card className="border-destructive/50 mt-4">
         <CardContent className="text-destructive py-4">{error}</CardContent>

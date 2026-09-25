@@ -185,16 +185,12 @@ export function SecurityContent() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-12 space-y-4 pb-24">
-      <header className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Security</h1>
-        <a
-          href="/habits"
-          className="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          &larr; Back to habits
-        </a>
-      </header>
+    <>
+      {/*
+        Slice 22: removed the SecurityContent-local `<header>` (which
+        duplicated the page title) and the inner `<main>` wrapper
+        (the Astro page now provides one). Renders only the cards.
+      */}
 
       {/* Passkeys Section */}
       <Card className="w-full">
@@ -322,6 +318,6 @@ export function SecurityContent() {
           </Alert>
         </CardContent>
       </Card>
-    </main>
+    </>
   );
 }

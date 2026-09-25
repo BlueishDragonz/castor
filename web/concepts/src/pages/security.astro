@@ -6,6 +6,8 @@
  */
 import Layout from '../layouts/Layout.astro';
 import { SecurityContent } from '../components/SecurityContent.tsx';
+import PageHeader from '../components/PageHeader.astro';
+import { DesktopMenu } from '../components/DesktopMenu.tsx';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -15,8 +17,20 @@ const token = Astro.locals.session.token;
 ---
 
 <Layout title="Security">
+  {/*
+    Slice 22: kept the inline token write because SecurityContent still
+    reads it from `window.__SECURITY_TOKEN__`. The deeper fix (move to
+    cookie-only fetch via /api/v1/webauthn/* BFF) is tracked for a
+    later slice — see dogfood-2026-09-25 §11 "Bottom-nav leak on
+    /security" and the Loading... investigation in slice-22 report.
+  */}
   <script is:inline>
     window.__SECURITY_TOKEN__ = '{token}';
   </script>
-  <SecurityContent client:load />
+  <main class="mx-auto max-w-2xl px-6 py-12 space-y-6 pb-24">
+    <PageHeader title="Security" back="/habits">
+      <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />
+    </PageHeader>
+    <SecurityContent client:load />
+  </main>
 </Layout>

@@ -17,6 +17,8 @@ import {
   CardContent,
 } from '../components/ui/card';
 import Heatmap from '../components/Heatmap.astro';
+import PageHeader from '../components/PageHeader.astro';
+import { DesktopMenu } from '../components/DesktopMenu.tsx';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -160,21 +162,23 @@ const defaultStart = new Date();
 defaultStart.setMonth(defaultStart.getMonth() - 3);
 const defaultStartIso = isoDate(defaultStart);
 
-// Month headers for heatmap
+// Month headers for heatmap. `days` is weekday-major (see the loop
+// above): days[d*WEEKS+w] is the date for weekday d, week w. We label
+// each column by the most-recent day in it — the Sunday (weekday 6)
+// that closes the week.
 const heatmapHeaders: string[] = [];
 let lastMonth = -1;
 let lastYear = -1;
-for (const day of heatmapDays.slice(0, DAYS_IN_WEEK)) {
-  const curMonth = day.getMonth();
-  const curYear = day.getFullYear();
-  if (curMonth !== lastMonth) {
-    heatmapHeaders.push(day.toLocaleDateString('en-GB', { month: 'short' }));
-    lastMonth = curMonth;
+for (let w = 0; w < WEEKS_TO_DISPLAY; w++) {
+  const d = heatmapDays[(DAYS_IN_WEEK - 1) * WEEKS_TO_DISPLAY + w];
+  if (d.getMonth() !== lastMonth) {
+    heatmapHeaders.push(d.toLocaleDateString('en-GB', { month: 'short' }));
+    lastMonth = d.getMonth();
     continue;
   }
-  if (curYear !== lastYear) {
-    heatmapHeaders.push(day.getFullYear().toString());
-    lastYear = curYear;
+  if (d.getFullYear() !== lastYear) {
+    heatmapHeaders.push(d.getFullYear().toString());
+    lastYear = d.getFullYear();
     continue;
   }
   heatmapHeaders.push('');
@@ -188,15 +192,9 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 ---
 <Layout title="Stats — Castor">
   <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
-    <header class="flex items-center justify-between">
-      <h1 class="text-2xl font-semibold tracking-tight">Stats</h1>
-      <a
-        href="/habits"
-        class="text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        &larr; Back to habits
-      </a>
-    </header>
+    <PageHeader title="Stats" back="/habits">
+      <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />
+    </PageHeader>
 
     {loadError && (
       <Card className="border-destructive/50">

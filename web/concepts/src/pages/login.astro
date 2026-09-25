@@ -84,13 +84,27 @@ const stage = url.searchParams.get('stage') ?? 'email';
 const emailQS = (url.searchParams.get('email') ?? '').toString().trim();
 const errorQS = (url.searchParams.get('error') ?? '').toString();
 
+// Slice 23b: thread an optional ?next=... URL through the login flow
+// so a user who clicked an invite link can land back on the invite
+// URL (or the welcome page) after authenticating. Only same-origin
+// paths are honoured; everything else falls through to /habits.
+function safeNext(raw: string | null): string {
+  if (!raw) return '/habits';
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/habits';
+  return raw;
+}
+const nextQS = safeNext(url.searchParams.get('next'));
+function nextQSParam(): string {
+  return nextQS !== '/habits' ? `&next=${encodeURIComponent(nextQS)}` : '';
+}
+
 // Already signed in? Skip the form. BUT, on the offer_passkey stage
 // the user JUST authenticated (we wrote the cookie seconds earlier in
 // this same handler chain, or via a cross-handler redirect). Showing
 // them the offer is the whole point of that stage — never auto-bounce
 // signed-in users away from it.
 if (Astro.locals.session && stage !== 'offer_passkey') {
-  return Astro.redirect('/habits');
+  return Astro.redirect(nextQS);
 }
 let errorMessage: string | null = null;
 const expiredQS = url.searchParams.get('expired') === '1';
@@ -136,7 +150,7 @@ if (Astro.request.method === 'POST') {
           ? 'passkey'
           : 'password_or_register';
       return Astro.redirect(
-        new URL(`/login?stage=${nextStage}&email=${encodeURIComponent(email)}`, url).toString()
+        new URL(`/login?stage=${nextStage}&email=${encodeURIComponent(email)}${nextQSParam()}`, url).toString()
       );
     } catch {
       // Probe failure: fall back to password-or-register. The user
@@ -145,7 +159,7 @@ if (Astro.request.method === 'POST') {
       // typing "Sign in" with wrong creds returns 401).
       return Astro.redirect(
         new URL(
-          `/login?stage=password_or_register&email=${encodeURIComponent(email)}`,
+          `/login?stage=password_or_register&email=${encodeURIComponent(email)}${nextQSParam()}`,
           url
         ).toString()
       );
@@ -202,12 +216,12 @@ if (Astro.request.method === 'POST') {
       if (offer) {
         return Astro.redirect(
           new URL(
-            `/login?stage=offer_passkey&email=${encodeURIComponent(email)}`,
+            `/login?stage=offer_passkey&email=${encodeURIComponent(email)}${nextQSParam()}`,
             url
           ).toString()
         );
       }
-      return Astro.redirect('/habits');
+      return Astro.redirect(nextQS);
     }
     if (loginRes.status === 400 || loginRes.status === 401) {
       // User likely doesn't exist OR password wrong. We can't tell.
@@ -256,7 +270,7 @@ if (Astro.request.method === 'POST') {
           // Brand new account → show the offer once.
           return Astro.redirect(
             new URL(
-              `/login?stage=offer_passkey&email=${encodeURIComponent(email)}`,
+              `/login?stage=offer_passkey&email=${encodeURIComponent(email)}${nextQSParam()}`,
               url
             ).toString()
           );
@@ -291,7 +305,7 @@ if (Astro.request.method === 'POST') {
       // Ignore — the page can show again, but the next step of any
       // non-appended behaviour we don't care about.
     }
-    return Astro.redirect('/habits');
+    return Astro.redirect(nextQS);
   }
 
   if (action === 'enrol_passkey') {
@@ -431,7 +445,7 @@ if (Astro.request.method === 'POST') {
           <p class="text-center text-xs text-muted-foreground space-x-2">
             <a href={`/forgot-password?email=${encodeURIComponent(emailQS)}`} class="hover:underline">I forgot my password</a>
             <span class="opacity-50">·</span>
-            <a href={`/login?stage=register&email=${encodeURIComponent(emailQS)}`} class="hover:underline">Create an account instead</a>
+            <a href={`/register?email=${encodeURIComponent(emailQS)}${nextQSParam()}`} class="hover:underline">Create an account instead</a>
             <span class="opacity-50">·</span>
             <a href="/login?stage=email" class="hover:underline">Try a different email</a>
           </p>
@@ -542,7 +556,7 @@ if (Astro.request.method === 'POST') {
 
       {stage === 'email' && (
         <p class="text-center text-xs text-muted-foreground">
-          First time here? <a href="/login?stage=register&email=" class="hover:underline">Create an account</a>
+          First time here? <a href={`/register${nextQS !== '/habits' ? `?next=${encodeURIComponent(nextQS)}` : ''}`} class="hover:underline">Create an account</a>
         </p>
       )}
     </div>
@@ -568,6 +582,13 @@ if (Astro.request.method === 'POST') {
     document.addEventListener('DOMContentLoaded', () => {
       const params = new URLSearchParams(window.location.search);
       const email = params.get('email') || '';
+      // Honor a same-origin ?next= so invite links land back on the
+      // circle join / welcome page after passkey auth.
+      const next = (() => {
+        const raw = params.get('next') || '';
+        if (!raw.startsWith('/') || raw.startsWith('//')) return '/habits';
+        return raw;
+      })();
       const btn = document.getElementById('webauthn-login-btn') as HTMLButtonElement | null;
       btn?.addEventListener('click', async () => {
         if (!email) return;
@@ -613,7 +634,7 @@ if (Astro.request.method === 'POST') {
             const err = await completeRes.json().catch(() => ({ detail: 'We could not sign you in with the passkey right now.' }));
             throw new Error(err.detail || 'We could not sign you in with the passkey right now.');
           }
-          window.location.href = '/habits';
+          window.location.href = next;
         } catch (e) {
           const status = document.getElementById('passkey-error');
           if (status) status.textContent = `We could not sign you in with the passkey: ${(e as Error).message}. Please try again, or use your password.`;
@@ -632,6 +653,12 @@ if (Astro.request.method === 'POST') {
 
       const params = new URLSearchParams(window.location.search);
       const email = params.get('email') || '';
+      // Honor the same-origin ?next= (set by the invite join flow).
+      const next = (() => {
+        const raw = params.get('next') || '';
+        if (!raw.startsWith('/') || raw.startsWith('//')) return '/habits';
+        return raw;
+      })();
 
       const reportError = (msg: string): void => {
         if (errorEl) {
@@ -694,7 +721,7 @@ if (Astro.request.method === 'POST') {
             const err = (await completeRes.json().catch(() => ({ detail: 'Passkey registration failed' }))) as { detail?: string };
             throw new Error(err.detail || 'Passkey registration failed');
           }
-          window.location.href = '/habits';
+          window.location.href = next;
         } catch (err) {
           // Surface the most common platform conditions in plain,
           // compassionate language, so the user isn't left guessing.

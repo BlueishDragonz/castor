@@ -32,9 +32,13 @@ const tickedSet = new Set(tickedDays);
 const DAYS_IN_WEEK = 7;
 const WEEKS_TO_DISPLAY = 15;
 
-// Organize days by week (columns) and weekday (rows)
-// days array is organized: for each weekday, 15 weeks of dates
-// We need to transpose for display: rows = weekdays, columns = weeks
+// Organize days by week (columns) and weekday (rows).
+// `days` is expected to be weekday-major from the caller:
+//   days[weekday * WEEKS_TO_DISPLAY + week_index]
+// So days[0..14] are all the Mondays of weeks 0..14, days[15..29] are
+// all the Tuesdays, and so on. We transpose that into weekColumns so
+// the table renders as 7 rows (weekdays) × 15 cols (weeks), which is
+// how a calendar grid reads naturally.
 const weekColumns: Date[][] = [];
 for (let w = 0; w < WEEKS_TO_DISPLAY; w++) {
   const column: Date[] = [];
