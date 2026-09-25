@@ -193,39 +193,45 @@ try {
   </main>
 
   {/* ─── Footer (server status badge + project links) ───
-      Small inline badge in the bottom-left corner. The word "Status"
-      is always visible (so it's discoverable, not just an anonymous
-      dot); the colour encodes the state (green = up, red = down,
-      amber = unknown). A `title` attribute exposes the full /health
-      response for ops-minded visitors who hover. */}
+      Two-part footer indicator. The word "Status" is a plain label
+      on the left (so it's always legible), then a small pill badge
+      with a dot and the state word ("healthy" / "down" / "unknown")
+      encodes the actual health via colour (--positive green or
+      --destructive red). The full /health response is available
+      via title (hover) and aria-label (screen readers). */}
   <footer class="mx-auto max-w-2xl px-6 pb-10">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <span
-        class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium"
-        style={`background: ${
-          backendStatus === 'ok'
-            ? 'color-mix(in oklab, var(--positive) 12%, transparent)'
-            : backendStatus === 'down'
-              ? 'color-mix(in oklab, var(--destructive) 12%, transparent)'
-              : 'color-mix(in oklab, var(--destructive) 8%, transparent)'
-        }; color: ${
-          backendStatus === 'ok' ? 'var(--positive)' : 'var(--destructive)'
-        }; border-color: ${
-          backendStatus === 'ok'
-            ? 'color-mix(in oklab, var(--positive) 30%, transparent)'
-            : 'color-mix(in oklab, var(--destructive) 30%, transparent)'
-        };`}
-        title={`Server ${backendStatus} · /health → ${backendMessage}`}
-        aria-label={`Server status: ${backendStatus}`}
-      >
+      <div class="flex items-center gap-2 text-xs">
+        <span class="text-muted-foreground font-medium uppercase tracking-wider">Status</span>
         <span
-          class="inline-block h-1.5 w-1.5 rounded-full"
+          class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium"
           style={`background: ${
+            backendStatus === 'ok'
+              ? 'color-mix(in oklab, var(--positive) 12%, transparent)'
+              : 'color-mix(in oklab, var(--destructive) 12%, transparent)'
+          }; color: ${
             backendStatus === 'ok' ? 'var(--positive)' : 'var(--destructive)'
+          }; border-color: ${
+            backendStatus === 'ok'
+              ? 'color-mix(in oklab, var(--positive) 30%, transparent)'
+              : 'color-mix(in oklab, var(--destructive) 30%, transparent)'
           };`}
-        ></span>
-        Status
-      </span>
+          title={`Server ${backendStatus} · /health → ${backendMessage}`}
+          aria-label={`Server status: ${backendStatus}`}
+        >
+          <span
+            class="inline-block h-1.5 w-1.5 rounded-full"
+            style={`background: ${
+              backendStatus === 'ok' ? 'var(--positive)' : 'var(--destructive)'
+            };`}
+          ></span>
+          {backendStatus === 'ok'
+            ? 'healthy'
+            : backendStatus === 'down'
+              ? 'down'
+              : 'unknown'}
+        </span>
+      </div>
       <nav class="flex gap-4 text-xs text-muted-foreground font-sans">
         <a href="/help" class="hover:underline">Help</a>
         <a href="/terms" class="hover:underline">Terms</a>
