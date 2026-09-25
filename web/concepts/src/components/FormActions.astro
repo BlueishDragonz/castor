@@ -1,0 +1,50 @@
+---
+/**
+ * FormActions — Cancel + Submit button row.
+ *
+ * Locked by the 2026-09-25 dogfood walkthrough. Replaces the
+ * inconsistent "Cancel as plain text right next to a green button"
+ * pattern that existed on /circles/new, /habits/new, etc.
+ *
+ * Renders Cancel as a proper shadcn outline Button (not bare text) and
+ * Submit as the primary button. Stacked vertically on narrow viewports,
+ * horizontal on wide ones with a gap.
+ *
+ * Usage:
+ *   <FormActions cancelHref="/circles" submitLabel="Create circle" />
+ *
+ * The submit button is rendered with `form="form-id"` so it can live
+ * outside the form element. Pass `formId` if your form has a non-default
+ * id (default "castor-form").
+ */
+import { Button } from './ui/button';
+
+interface Props {
+  /** Where Cancel navigates to. Set to null to omit Cancel. */
+  cancelHref?: string | null;
+  /** Label for the primary button. */
+  submitLabel: string;
+  /** Disable the primary button. */
+  submitDisabled?: boolean;
+  /** Optional form id to associate the submit button with. */
+  formId?: string;
+}
+
+const {
+  cancelHref = null,
+  submitLabel,
+  submitDisabled = false,
+  formId = 'castor-form',
+} = Astro.props;
+---
+
+<div class="flex flex-col-reverse sm:flex-row sm:items-center gap-3 mt-6">
+  {cancelHref && (
+    <Button asChild variant="outline" className="sm:mr-auto">
+      <a href={cancelHref}>Cancel</a>
+    </Button>
+  )}
+  <Button type="submit" form={formId} disabled={submitDisabled} className="sm:ml-auto">
+    {submitLabel}
+  </Button>
+</div>

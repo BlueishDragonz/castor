@@ -1,0 +1,35 @@
+---
+/**
+ * EmptyState — zero-data screen.
+ *
+ * Used by /circles, /habits (when no habits exist), and any future
+ * "you haven't X yet" surface. Centres icon + title + optional
+ * description + optional CTA.
+ */
+import { Button } from './ui/button';
+import { Card, CardContent } from './ui/card';
+
+interface Props {
+  title: string;
+  description?: string;
+  ctaHref?: string;
+  ctaLabel?: string;
+}
+
+const { title, description = '', ctaHref, ctaLabel } = Astro.props;
+---
+
+<Card className="max-w-md mx-auto">
+  <CardContent className="flex flex-col items-center text-center py-10">
+    <div class="text-muted-foreground mb-3 text-3xl" aria-hidden="true">○</div>
+    <p class="font-medium text-foreground">{title}</p>
+    {description && (
+      <p class="text-sm text-muted-foreground mt-1 max-w-sm">{description}</p>
+    )}
+    {ctaHref && ctaLabel && (
+      <Button asChild className="mt-5">
+        <a href={ctaHref}>{ctaLabel}</a>
+      </Button>
+    )}
+  </CardContent>
+</Card>

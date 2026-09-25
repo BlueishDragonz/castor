@@ -1,0 +1,71 @@
+---
+/**
+ * PageHeader — the canonical page header pattern.
+ *
+ * Locked by the 2026-09-25 dogfood walkthrough. Every page in the app
+ * renders its title block through this component so the layout stays
+ * consistent:
+ *
+ *   [<back arrow>] <title>                 <right slot>
+ *                 <subtitle?>
+ *
+ * - `back` is an href (or null); when set, an icon-only ghost
+ *   Button is rendered to the left of the title.
+ * - `actions` is a slot — pass right-aligned controls (a "New circle"
+ *   button, a sort menu, an "Edit" button, etc.).
+ * - `subtitle` is the small muted line under the title (e.g.
+ *   "5 active habits.").
+ *
+ * Replaces the inconsistent "back link right of title" pattern that
+ * existed on most pages before this slice.
+ */
+import { Button } from './ui/button';
+
+interface Props {
+  title: string;
+  subtitle?: string;
+  back?: string | null;
+  /** Optional decorative icon (e.g. crown for owned circle). */
+  icon?: 'crown' | 'users' | 'shield' | 'settings' | 'home' | null;
+}
+
+const { title, subtitle = '', back = null, icon = null } = Astro.props;
+
+const BACK_LABELS: Record<string, string> = {
+  '/habits': 'habits',
+  '/circles': 'circles',
+  '/settings': 'settings',
+  '/': 'home',
+};
+const backAriaLabel = back ? (BACK_LABELS[back] ?? 'previous page') : '';
+
+const IconMap: Record<string, string> = {
+  crown: '👑',
+  users: '👥',
+  shield: '🛡',
+  settings: '⚙',
+  home: '🏠',
+};
+---
+
+<header class="flex items-center justify-between gap-4 mb-6">
+  <div class="flex items-center gap-3 min-w-0">
+    {back && (
+      <Button asChild variant="ghost" size="icon" className="h-9 w-9 shrink-0" aria-label={`Back to ${backAriaLabel}`}>
+        <a href={back}>←</a>
+      </Button>
+    )}
+    <div class="min-w-0">
+      <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 truncate">
+        {icon && <span aria-hidden="true">{IconMap[icon]}</span>}
+        <span class="truncate"><slot name="title">{title}</slot></span>
+      </h1>
+      {subtitle && (
+        <p class="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
+      )}
+    </div>
+  </div>
+  <div class="flex items-center gap-2 shrink-0">
+    <slot name="actions" />
+  </div>
+</header>

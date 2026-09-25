@@ -120,7 +120,7 @@ export function DesktopMenu({ email = null }: DesktopMenuProps) {
   ];
 
   return (
-    <div className="hidden lg:block fixed top-4 right-4 z-50">
+    <div className="hidden lg:block">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <Button

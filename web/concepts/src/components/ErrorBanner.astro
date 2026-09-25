@@ -1,0 +1,43 @@
+---
+/**
+ * ErrorBanner — surface ?err=... query params visibly.
+ *
+ * Reads `?err=...` from the current URL. If it matches a known error
+ * key, renders an Alert with a friendly message. Unknown err values
+ * fall through to a generic "Something went wrong" message.
+ *
+ * Locked by the 2026-09-25 dogfood — /circles/[id]/join used to
+ * redirect with `?err=join_no_token` and never show the user why.
+ */
+import { Alert, AlertDescription } from './ui/alert';
+
+const errParam = Astro.url.searchParams.get('err');
+
+const MESSAGES: Record<string, string> = {
+  join_no_token:
+    "We couldn't find an invite token in that link. Ask the person who invited you to send it again.",
+  join_invalid_token:
+    'That invite link is no longer valid. It may have been revoked.',
+  join_already_member: 'You are already a member of this circle.',
+  join_expired: 'That invite link has expired. Ask for a new one.',
+};
+
+const HEADINGS: Record<string, string> = {
+  join_no_token: 'Invite link is missing a token',
+  join_invalid_token: 'Invite link is no longer valid',
+  join_already_member: 'Already a member',
+  join_expired: 'Invite link has expired',
+};
+
+const message = errParam ? (MESSAGES[errParam] ?? 'Something went wrong. Please try again.') : null;
+const heading = errParam ? (HEADINGS[errParam] ?? 'Something went wrong') : '';
+---
+
+{message && (
+  <Alert variant="destructive" className="mb-4">
+    <AlertDescription>
+      <strong class="block mb-1">{heading}</strong>
+      {message}
+    </AlertDescription>
+  </Alert>
+)}
