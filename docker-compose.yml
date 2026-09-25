@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: beaverhabits                 # keep legacy name; rename is a separate cutover decision
+    container_name: castor                        # renamed from 'beaverhabits' at cutover (slice-19 runbook §7)
     network_mode: "container:wg-easy"
     image: castor:custom-2026-09-XX             # PIN a custom tag — never :latest
     environment:
@@ -20,8 +20,14 @@ services:
       # BACKEND_URL points Astro at the in-container backend (the
       # Dockerfile supervisor launches gunicorn on 127.0.0.1:8081
       # in the background). Astro's backendFetch() targets this URL
-      # directly; no middleware proxy needed because all browser
-      # traffic goes through Astro pages or pages/api/ BFF routes.
+      # directly for server-side calls (Astro pages, BFF routes).
+      #
+      # /auth/webauthn/*, /users/*, /webauthn/*, and /health are
+      # browser-callable (e.g. SecurityContent.tsx passkey UI). These
+      # are proxied by Astro middleware to BACKEND_URL in production
+      # (vite proxy handles dev). /auth/login stays on Astro per
+      # the slice-19 runbook §7 option B (Astro owns it server-side
+      # via backendFetch).
       - BACKEND_URL=http://127.0.0.1:8081
       # ─── Secrets (sourced from /opt/castor/.user/.secrets.env on
       # apollo; values here are placeholders — Docker compose reads

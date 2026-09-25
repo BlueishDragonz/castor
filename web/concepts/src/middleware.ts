@@ -34,21 +34,29 @@ import { readSession } from './lib/auth';
 // Production-only proxy prefixes. In dev, the Vite proxy in
 // astro.config.mjs handles these (and middleware must NOT — that
 // would create a double-hop Astro → Astro via middleware → backend).
-const PROXY_PREFIXES = ['/auth/', '/users/', '/webauthn/', '/health'];
+//
+// Per the slice-19 cutover runbook §7 (option B): Astro owns
+// /auth/login server-side via backendFetch (login.astro, account
+// delete BFF, etc.); the backend still owns /auth/webauthn/*.
+// Therefore: proxy /auth/webauthn/*, /users/*, /webauthn/*, /health —
+// but NOT /auth/login (which has no browser-side caller and would
+// race with the Astro page handler if proxied).
+const PROXY_PREFIXES = ['/auth/webauthn/', '/users/', '/webauthn/', '/health'];
 
-// Paths that have Astro BFF routes — middleware must skip them so
-// the page handler runs. (BFF routes are at /api/auth/webauthn/* —
-// not in PROXY_PREFIXES, so they pass through naturally. Listed
-// here for completeness in case future routes are added at the bare
-// /auth/ prefix.)
-const BFF_PATHS = new Set<string>([
-  // /api/auth/* routes are handled by pages/api/auth/* — middleware
-  // doesn't see them (different URL prefix). Listed here in case the
-  // proxy is ever extended to /api/auth/.
+// /auth/* paths that Astro owns server-side (handled by Astro pages
+// or pages/api/ BFF routes). Middleware must skip these.
+const ASTRO_HANDLED_AUTH_PATHS = new Set<string>([
+  '/auth/login',
+  '/auth/logout',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/reset-password/check',
 ]);
 
 function shouldProxy(pathname: string): boolean {
-  if (BFF_PATHS.has(pathname)) return false;
+  // Skip Astro-handled /auth/* paths (login.astro, account BFF, etc.)
+  // even if they start with a proxy prefix.
+  if (ASTRO_HANDLED_AUTH_PATHS.has(pathname)) return false;
   return PROXY_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
