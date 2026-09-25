@@ -1,9 +1,13 @@
 ---
 /**
- * Home page — signed-out landing.
+ * Home page — signed-out landing / shop front.
  *
- * Proxies a /health check to the backend to show the connection state.
- * Signed-in users get bounced to /habits.
+ * Proxies a /health check to the backend to display the connection
+ * state in the footer (small monospace line — see the rendered HTML
+ * for the "Server: ok · /health → OK · v0.x.x · MIT · source" line).
+ * The status is intentionally NOT in the hero: the hero is reserved
+ * for the value proposition and the CTA. Signed-in users get bounced
+ * to /habits.
  *
  * The /health endpoint lives at the backend root (not under /api/v1)
  * because it is mounted by main.py directly on the FastAPI app. We
@@ -11,7 +15,6 @@
  * proxy in dev / reverse proxy in production).
  */
 import Layout from '../layouts/PublicLayout.astro';
-import { Button } from '../components/ui/button';
 import { backendFetch } from '../lib/auth';
 
 if (Astro.locals.session) {
@@ -27,7 +30,7 @@ try {
   });
   if (res.ok) {
     backendStatus = 'ok';
-    backendMessage = await res.text();
+    backendMessage = (await res.text()).trim() || 'OK';
   } else {
     backendStatus = 'down';
     backendMessage = `HTTP ${res.status}`;
@@ -38,63 +41,162 @@ try {
 }
 ---
 
-<Layout title="Castor">
-  <main class="mx-auto max-w-2xl px-6 py-16 space-y-8">
-    <div class="flex items-center gap-3">
-      <div
-        class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground"
-        style="background: var(--castor-emblem-bg-primary); border-radius: var(--castor-emblem-radius);"
-      >
-        C
-      </div>
-      <div>
-        <h1 class="text-3xl font-semibold tracking-tight">Castor</h1>
-        <p class="text-sm text-muted-foreground">
-          Privacy-first habit tracker · shadcn/ui + Astro
-        </p>
-      </div>
-    </div>
+<Layout title="Castor — Dam good habits">
+  <main class="mx-auto max-w-2xl px-6 py-16 space-y-16">
 
-    <section
-      class="rounded-2xl border border-border bg-card p-6 shadow-sm"
-      style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
-    >
-      <h2 class="mb-2 text-lg font-semibold">Backend connection</h2>
-      <div class="flex items-center gap-3 text-sm">
-        <span
-          class="inline-block h-2.5 w-2.5 rounded-full"
-          style={`background: ${
-            backendStatus === 'ok' ? 'var(--positive)' : 'var(--destructive)'
-          };`}
-        />
-        <span class="font-medium">
-          {backendStatus === 'ok' ? 'Connected' : 'Unavailable'}
-        </span>
-        <code class="text-xs text-muted-foreground">/health → {backendMessage}</code>
+    {/* ─── Hero ─── */}
+    <section class="space-y-6 pt-4">
+      <div class="flex items-center gap-3">
+        <div
+          class="h-12 w-12 flex items-center justify-center rounded-2xl text-lg font-semibold text-primary-foreground"
+          style="background: var(--castor-emblem-bg-primary); border-radius: var(--castor-emblem-radius);"
+        >
+          C
+        </div>
+        <span class="text-xl font-semibold tracking-tight">Castor</span>
+      </div>
+
+      <h1 class="text-5xl sm:text-6xl font-semibold tracking-tight leading-[1.05]">
+        Dam good habits.
+      </h1>
+
+      <p class="text-lg text-muted-foreground max-w-prose">
+        A self-hosted habit tracker for people who want their data to stay theirs.
+      </p>
+
+      <div class="flex flex-wrap gap-3 pt-2">
+        <a
+          href="/register"
+          class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-6"
+        >Create an account</a>
+        <a
+          href="/login"
+          class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 px-6"
+        >Sign in</a>
       </div>
     </section>
 
-    <section
-      class="rounded-2xl border border-border bg-card p-6 shadow-sm"
-      style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
-    >
-      <h2 class="mb-3 text-lg font-semibold">What you can do here</h2>
-      <ul class="space-y-2 text-sm text-muted-foreground">
-        <li>✓ Register a new account and sign in</li>
-        <li>✓ Add habits to your private list</li>
-        <li>✓ Mark habits done each day</li>
-        <li>✓ Sign out and clear your session</li>
-        <li>○ Concepts 02/04/09 (Cue Atlas, Memory Drawer, Private Circle) — coming next</li>
-        <li>○ PWA shell, dark mode parity, OAuth — coming next</li>
+    {/* ─── What it does (feature cards) ─── */}
+    <section class="space-y-4">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        What it does
+      </h2>
+
+      <div class="grid gap-4 sm:grid-cols-3">
+        <article
+          class="rounded-2xl border border-border bg-card p-5 space-y-2"
+          style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
+        >
+          <h3 class="font-semibold">Daily check-ins</h3>
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            Tick the boxes that match what you actually did today.
+            No streaks designed to shame you for a sick day.
+          </p>
+        </article>
+
+        <article
+          class="rounded-2xl border border-border bg-card p-5 space-y-2"
+          style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
+        >
+          <h3 class="font-semibold">Streaks that hold up</h3>
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            See the calendar, see the run, see when you lapsed.
+            The numbers are honest.
+          </p>
+        </article>
+
+        <article
+          class="rounded-2xl border border-border bg-card p-5 space-y-2"
+          style="border-radius: var(--castor-card-radius); padding: var(--castor-card-padding);"
+        >
+          <h3 class="font-semibold">Private Circles</h3>
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            Share a habit with the people you live with.
+            They see what you choose. Nothing more.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    {/* ─── Why people pick Castor ─── */}
+    <section class="space-y-4">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        Why people pick Castor
+      </h2>
+
+      <ul class="space-y-4 text-base leading-relaxed">
+        <li>
+          <span class="font-semibold">Private by default.</span>
+          <span class="text-muted-foreground">
+            {' '}Your data lives on a server you control. No analytics,
+            no telemetry, no ads, no third-party fonts.
+          </span>
+        </li>
+        <li>
+          <span class="font-semibold">Yours forever.</span>
+          <span class="text-muted-foreground">
+            {' '}Export your habits, ticks, and notes to JSON anytime.
+            Re-import on another server. No lock-in.
+          </span>
+        </li>
+        <li>
+          <span class="font-semibold">Made for showing up, not for streaks.</span>
+          <span class="text-muted-foreground">
+            {' '}Miss a day? The streak doesn't reset in a way designed
+            to hurt you. The goal is the practice, not the streak.
+          </span>
+        </li>
       </ul>
-      <div class="mt-5 flex gap-3">
-        <Button asChild>
-          <a href="/login">Sign in</a>
-        </Button>
-        <Button variant="outline" asChild>
-          <a href="/register">Create account</a>
-        </Button>
-      </div>
     </section>
+
+    {/* ─── What people make with it (examples) ─── */}
+    <section class="space-y-4">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        What people make with it
+      </h2>
+
+      <ul class="space-y-3 text-sm">
+        <li class="flex items-baseline gap-3">
+          <span class="text-muted-foreground">·</span>
+          <span><em>Morning pages before coffee</em> — 1 habit, 14-day streak</span>
+        </li>
+        <li class="flex items-baseline gap-3">
+          <span class="text-muted-foreground">·</span>
+          <span><em>Two walks with the dog</em> — 2 habits, 90-day streak</span>
+        </li>
+        <li class="flex items-baseline gap-3">
+          <span class="text-muted-foreground">·</span>
+          <span><em>Family hydration</em> — 3 people, 1 shared habit, weekly wins</span>
+        </li>
+      </ul>
+    </section>
+
+    {/* ─── On self-hosting ─── */}
+    <section class="space-y-3">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        On self-hosting
+      </h2>
+      <p class="text-base text-muted-foreground leading-relaxed max-w-prose">
+        Castor runs in a single Docker container on anything that runs containers.
+      </p>
+    </section>
+
   </main>
+
+  {/* ─── Footer (server status + project links) ───
+      Small monospace line at the bottom of the page. Visible to ops-minded
+      visitors; invisible to everyone else. Keeps the hero clean. */}
+  <footer class="mx-auto max-w-2xl px-6 pb-10">
+    <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground font-mono">
+      <span>
+        Server: {backendStatus === 'ok' ? 'ok' : 'down'}
+        {' · '}/health → {backendMessage}
+      </span>
+      <nav class="flex gap-4 not-italic font-sans">
+        <a href="/help" class="hover:underline">Help</a>
+        <a href="/terms" class="hover:underline">Terms</a>
+        <a href="/privacy" class="hover:underline">Privacy</a>
+      </nav>
+    </div>
+  </footer>
 </Layout>
