@@ -26,6 +26,7 @@ import ErrorBanner from '../../../components/ErrorBanner.astro';
 import { VISIBILITY_LABEL, VISIBILITY_DESCRIPTION } from '../../../lib/circles';
 import type { CircleDetail, CircleFeedHabit, CircleSharedHabit } from '../../../lib/circles';
 import { backendFetch } from '../../../lib/auth';
+import { Crown } from 'lucide-react';
 
 if (!Astro.locals.session) {
   // If the user landed here without a session, send them through login
@@ -116,6 +117,14 @@ const ownersSharedCount = ownersSharedHabits.length;
 
 // What the new member has shared back (real value, not a placeholder).
 const mySharedCount: number = mySharedHabits.length;
+
+// Who else is in the circle (the new member + owner + other members).
+// Used for the "Who else is in this circle" card so the new member
+// has a concrete picture of who can see what they share — slice 24f.
+const viewerEmail = Astro.locals.session?.email ?? '';
+const otherMembers = (circle?.members ?? []).filter(
+  m => m.email !== viewerEmail,
+);
 ---
 
 <Layout title={circle ? `Joined ${circle.name}` : 'Joined circle'}>
@@ -170,6 +179,38 @@ const mySharedCount: number = mySharedHabits.length;
             )}
           </CardContent>
         </Card>
+
+        <!-- Who else can see what you share — slice 24f: surface the full
+             member roster (excluding the viewer) so the privacy picture
+             is concrete, not abstract. The owner is listed first and
+             marked with a crown; other members follow. -->
+        {otherMembers.length > 0 && (
+          <Card className="w-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-medium">
+                Who else is in this circle
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-2 text-sm">
+              <p class="text-xs text-muted-foreground">
+                When you share a habit with this circle, these people will be able to see it according to the visibility you pick.
+              </p>
+              <ul class="divide-y divide-border" role="list" data-testid="other-members-list">
+                {otherMembers.map(m => (
+                  <li class="py-2 flex items-center gap-2">
+                    {m.is_owner && (
+                      <Crown className="h-4 w-4 text-amber-500 shrink-0" aria-hidden="true" />
+                    )}
+                    <span class="font-medium">{m.email}</span>
+                    {m.is_owner && (
+                      <span class="text-xs text-muted-foreground">owner</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
 
         <!-- What you've shared -->
         <Card className="w-full" data-testid="my-shared-card">
