@@ -1,0 +1,132 @@
+---
+/**
+ * Castor PublicLayout — page shell for unauthenticated journeys.
+ *
+ * Used by: /, /login, /register, /forgot-password, /verify-reset,
+ * /reset-password, /help, /terms, /privacy.
+ *
+ * Differences from the authenticated Layout:
+ *   - Renders the vanta.js dots background (three.r134 + vanta.dots)
+ *     behind the page content. VANTA.DOTS paints its own
+ *     backgroundColor: 0xffffff solid behind the dot field, so the
+ *     body is transparent and the canvas IS the page background.
+ *   - No BottomNav (only signed-in users have a "bottom" of nav items).
+ *
+ * The vanta effect needs the wrapped element to exist in the DOM
+ * before the script runs. Astro inlines the script with `is:inline`
+ * and we wait for `DOMContentLoaded` (or run immediately if the
+ * event has already fired) so VANTA.DOTS can find `#vanta-bg`.
+ */
+import '../styles/tokens.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'Castor',
+  description = 'A privacy-first habit tracker you can self-host.',
+} = Astro.props;
+
+const theme = Astro.cookies.get('castor-theme')?.value ?? 'light';
+
+const umamiId = import.meta.env.PUBLIC_UMAMI_ANALYTICS_ID ?? '';
+const umamiScript = import.meta.env.PUBLIC_UMAMI_SCRIPT_URL
+  ?? 'https://cloud.umami.is/script.js';
+const umamiEnabled = !!umamiId;
+---
+
+<!doctype html><html lang="en" data-theme={theme}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Castor" />
+    <meta name="application-name" content="Castor" />
+    <meta name="theme-color" content="#f9f9f9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    {umamiEnabled && (
+      <script
+        defer
+        src={umamiScript}
+        data-website-id={umamiId}
+      ></script>
+    )}
+
+    <title>{title}</title>
+
+    <!-- vanta.js dots background — three.r134 first, then vanta.dots
+         which extends three.js with the DOTS effect. Both are
+         bundled in /libs/ under the Astro public dir. -->
+    <script is:inline src="/libs/three.r134.min.js"></script>
+    <script is:inline src="/libs/vanta.dots.min.js"></script>
+  </head>
+  <body class="min-h-screen antialiased bg-transparent">
+    {/* vanta-bg: fixed full-viewport layer behind the page content.
+         z-0 (background); page content wraps in z-10+ via .vanta-content.
+         The body bg is transparent so the canvas's white
+         backgroundColor: 0xffffff shows through and acts as the page
+         background. */}
+    <div
+      id="vanta-bg"
+      class="fixed inset-0 z-0"
+      aria-hidden="true"
+    ></div>
+    <div class="vanta-content relative z-10">
+      <slot />
+    </div>
+
+    <script is:inline>
+      // Initialize VANTA.DOTS once both scripts are loaded. Three.js
+      // and VANTA both attach to window; if the user navigates between
+      // public pages (Astro client-side nav), this script re-runs on
+      // the new page and starts a fresh effect on the new #vanta-bg
+      // element (the old canvas gets GC'd along with its parent).
+      (function initVanta() {
+        if (typeof window.VANTA === 'undefined' || !window.VANTA.DOTS) {
+          // Three.js or vanta didn't load yet — wait for it.
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initVanta, { once: true });
+          } else {
+            // Retry on next tick — covers the case where this script
+            // ran before three.r134 finished parsing.
+            window.setTimeout(initVanta, 50);
+          }
+          return;
+        }
+        const el = document.getElementById('vanta-bg');
+        if (!el) return;
+        try {
+          window.VANTA.DOTS({
+            el: '#vanta-bg',
+            mouseControls: true,
+            touchControls: true,
+            gyroControls: false,
+            minHeight: 200.00,
+            minWidth: 200.00,
+            scale: 1.00,
+            scaleMobile: 1.00,
+            color: 0x7cbb,
+            backgroundColor: 0xffffff,
+            size: 6.00,
+            spacing: 36.00,
+            showLines: false,
+          });
+        } catch (e) {
+          // Vanta throws if WebGL is unavailable. The background is
+          // a non-critical enhancement — log + carry on with the
+          // solid-colour page underneath.
+          console.warn('VANTA.DOTS failed to initialise', e);
+        }
+      })();
+    </script>
+  </body>
+</html>
