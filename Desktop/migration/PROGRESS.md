@@ -3,19 +3,39 @@
 > One-stop doc for resuming the Astro+shadcn migration of the
 > NiceGUI/Quasar habit tracker. Updated 2026-09-25 after slice 21.
 
-## Status: ready to cut over
+## Status: NOT ready to cut over — post-dogfood UI pass landed
 
-- Branch head on `release/astro-migration`: **`17a48bd`**
-  (slice 21 — apply runbook answers).
-- `astro check`: 0 errors / 0 warnings / 62 hints.
-- `pytest tests/ --ignore=tests/test_batch4_live.py`: **368 passed
-  + 12 skipped** (baseline since slice 13; slices 14–21 didn't
-  touch Python).
-- Parity matrix open rows: 9 (3 high/medium, 6 low, 5 intentional
-  drops — see `parity-matrix.md` §"Remaining open rows").
-- BFF coverage audit: **0 client-side BFF bugs**.
+- Branch head on `release/astro-migration`: **`4c85b7f`** (slice 22).
+- `astro check`: 0 errors / 0 warnings / 58 hints.
+- `pytest tests/ --ignore=tests/test_batch4_live.py`: **374 passed
+  + 12 skipped** (368 baseline + 6 new slice-23a tests).
 - Demo seed: `demo@castor.example.com / DemoPass1234!` — re-seeded
-  every time `dev-up.sh` is run (5 habits, 21-day tick history).
+  every time `dev-up.sh` is run.
+- **2026-09-25 walkthrough** — see `dogfood-2026-09-25.md`. Slices
+  22, 23a, 23b landed in this session; see `slice-reports/`.
+- Slices 22x, 23c still open (small remaining gaps — see below).
+
+## Slices completed this session
+
+| # | Title | Commit | Report |
+|---|---|---|---|
+| 22-prep | Shared PageHeader / FormActions / EmptyState / ErrorBanner primitives | `8c58c12` | (this is Phase 0 of the dogfood fix) |
+| 22 | UI consistency pass on 12 Astro pages | `4c85b7f` | `slice-reports/slice-22-ui-consistency.md` |
+| 23a | Self-join guard + raw_token return + slice backend tests | `45e7548` | `slice-reports/slice-23a-circles-backend.md` |
+| 23b | Circles frontend — welcome page, copyable invite, ErrorBanner, ?next= login, crown a11y | `b349f96` | `slice-reports/slice-23b-circles-frontend.md` |
+
+**Total slices in repo**: 1–23 (slices 1–14 from prior sessions; slices
+15–21 from earlier this session; slices 22-prep + 22 + 23a + 23b from
+this dogfood response).
+
+## What's still open (post-slice-23b)
+
+| # | Item | Severity | Plan |
+|---|---|---|---|
+| 22x | `/habits` day-of-week header strip still floats above first row | Low | tighten HabitGrid.astro container |
+| 22x | `+ Add habit` still plain text (HabitGrid.astro) | Low | shadcn Button |
+| 22x | `/security` Loading bug (SecurityContent.tsx) | Medium | investigate + fix the inline-script / hydration race |
+| 23c | Email delivery + HTML template + SMTP wiring | Medium | dogfood finding A; apollo SMTP env needed |
 
 ## Slices completed this session
 
