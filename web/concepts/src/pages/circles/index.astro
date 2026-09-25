@@ -3,13 +3,14 @@
  * /circles — list of circles the user owns or belongs to.
  *
  * Server-rendered. Fetches via /api/v1/circles (authenticated) and
- * renders a card per circle with create-cta at the top.
+ * renders a card per circle with create-cta in the page header.
  */
 import Layout from '../../layouts/Layout.astro';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
-import { Separator } from '../../components/ui/separator';
-import { Users, Plus, Crown } from 'lucide-react';
+import { Crown } from 'lucide-react';
+import PageHeader from '../../components/PageHeader.astro';
+import EmptyState from '../../components/EmptyState.astro';
 import { backendFetch } from '../../lib/auth';
 import type { CircleSummary } from '../../lib/circles';
 
@@ -34,32 +35,11 @@ try {
 
 <Layout title="Private Circles">
   <main class="mx-auto max-w-2xl px-4 py-12 space-y-4 pb-24">
-    <header class="flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <Users className="h-6 w-6" />
-        <h1 class="text-2xl font-semibold tracking-tight">Private Circles</h1>
-      </div>
-      <div class="flex items-center gap-3">
-        <a
-          href="/habits"
-          class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          &larr; Back to habits
-        </a>
-        <Button asChild>
-          <a href="/circles/new" aria-label="Create new circle">
-            <Plus className="h-4 w-4 mr-2" />
-            New circle
-          </a>
-        </Button>
-      </div>
-    </header>
-
-    <p class="text-sm text-muted-foreground">
-      A Private Circle is a small (3–8) trusted group that can see each
-      other's habit ticks, streak, and (opt-in) notes. Circles are never
-      public and never discoverable — membership requires an invite.
-    </p>
+    <PageHeader title="Private Circles" subtitle="Small, trusted groups that see each other's habit ticks. Membership requires an invite.">
+      <Button slot="actions" asChild>
+        <a href="/circles/new" aria-label="Create new circle">New circle</a>
+      </Button>
+    </PageHeader>
 
     {error && (
       <Card className="w-full border-destructive">
@@ -70,17 +50,12 @@ try {
     )}
 
     {!error && circles.length === 0 && (
-      <Card className="w-full">
-        <CardContent className="py-8 text-center space-y-3">
-          <Users className="h-10 w-10 mx-auto text-muted-foreground" />
-          <p class="text-sm text-muted-foreground">
-            You don't belong to any circles yet.
-          </p>
-          <Button asChild>
-            <a href="/circles/new">Create your first circle</a>
-          </Button>
-        </CardContent>
-      </Card>
+      <EmptyState
+        title="You don't belong to any circles yet."
+        description="Create one to share habit ticks with a small, trusted group."
+        ctaHref="/circles/new"
+        ctaLabel="Create your first circle"
+      />
     )}
 
     {circles.length > 0 && (
@@ -89,7 +64,7 @@ try {
           <Card className="w-full">
             <CardHeader className="pb-2">
               <CardTitle className="text-base font-medium flex items-center gap-2">
-                {c.is_owner && <Crown className="h-4 w-4 text-amber-500" aria-label="You own this circle" />}
+                {c.is_owner && <Crown className="h-4 w-4 text-amber-500" aria-hidden="true" />}
                 <a href={`/circles/${c.id}`} class="hover:underline">
                   {c.name}
                 </a>

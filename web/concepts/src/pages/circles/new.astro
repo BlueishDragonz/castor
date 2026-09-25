@@ -10,8 +10,10 @@
  */
 import Layout from '../../layouts/Layout.astro';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { ArrowLeft } from 'lucide-react';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import PageHeader from '../../components/PageHeader.astro';
+import FormActions from '../../components/FormActions.astro';
 import { backendFetch } from '../../lib/auth';
 
 if (!Astro.locals.session) {
@@ -49,36 +51,28 @@ if (Astro.request.method === 'POST') {
 
 <Layout title="New Circle">
   <main class="mx-auto max-w-2xl px-4 py-12 space-y-4 pb-24">
-    <header class="flex items-center gap-3">
-      <Button asChild variant="ghost" size="icon" aria-label="Back to circles">
-        <a href="/circles"><ArrowLeft className="h-5 w-5" /></a>
-      </Button>
-      <h1 class="text-2xl font-semibold tracking-tight">New Private Circle</h1>
-    </header>
+    <PageHeader title="New Private Circle" back="/circles" />
 
     <Card className="w-full">
       <CardHeader>
         <CardTitle className="text-base font-medium">Circle details</CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
-        <form method="post" action="/circles/new" class="space-y-4">
-          <div>
-            <label for="name" class="block text-sm font-medium mb-1.5">
-              Circle name
-            </label>
-            <input
+        <form id="castor-form" method="post" action="/circles/new" class="space-y-4">
+          <div class="space-y-2">
+            <Label htmlFor="name">Circle name</Label>
+            <Input
               id="name"
               name="name"
               type="text"
               required
-              minlength="1"
-              maxlength="80"
-              autocomplete="off"
+              minLength={1}
+              maxLength={80}
+              autoComplete="off"
               value={name}
               placeholder="e.g. Family wellness"
-              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-            <p class="mt-1 text-xs text-muted-foreground">
+            <p class="text-xs text-muted-foreground">
               1–80 characters. The owner (you) can rename it later.
             </p>
           </div>
@@ -86,15 +80,10 @@ if (Astro.request.method === 'POST') {
           {error && (
             <p class="text-sm text-destructive">{error}</p>
           )}
-
-          <div class="flex gap-2">
-            <Button type="button" variant="outline" asChild>
-              <a href="/circles">Cancel</a>
-            </Button>
-            <Button type="submit">Create circle</Button>
-          </div>
         </form>
       </CardContent>
     </Card>
+
+    <FormActions cancelHref="/circles" submitLabel="Create circle" />
   </main>
 </Layout>

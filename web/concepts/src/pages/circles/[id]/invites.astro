@@ -48,8 +48,18 @@ if (!res.ok) {
   return Astro.redirect(`/circles/${circleId}?err=${code}`);
 }
 
-const invite = (await res.json()) as { id: number; raw_token: string };
-// Show the raw token once via query string. The detail page reads it from
-// `?new_token=...` and renders it as a copyable code.
-return Astro.redirect(`/circles/${circleId}?new_invite=${invite.id}&new_token=${encodeURIComponent(invite.raw_token)}`);
+const invite = (await res.json()) as { id: number; raw_token: string; invite_url?: string | null };
+// Show the raw token + URL once via query string. The detail page reads
+// it from `?new_token=...` and renders it as a copyable link. Slice 23a
+// adds an `invite_url` field on the create response; we fall back to
+// assembling one here so this page still works without the backend
+// change.
+const inviteUrl =
+  invite.invite_url ??
+  `${Astro.url.origin}/circles/${circleId}/join?token=${encodeURIComponent(invite.raw_token)}`;
+return Astro.redirect(
+  `/circles/${circleId}?new_invite=${invite.id}` +
+    `&new_token=${encodeURIComponent(invite.raw_token)}` +
+    `&new_invite_url=${encodeURIComponent(inviteUrl)}`,
+);
 ---

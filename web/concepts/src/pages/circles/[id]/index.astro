@@ -16,6 +16,10 @@
  *   - /circles/{id}/share     (POST, owner only): share a habit
  *   - /circles/{id}/leave     (POST, member only): leave
  *   - /circles/{id}/delete    (POST, owner only): delete circle
+ *
+ * Slice 23b: copyable invite URL on mint; crown icon is decorative
+ * (aria-hidden); invite form is stacked (FormActions); destructive
+ * action is de-emphasised, not promoted; ?err= banners via ErrorBanner.
  */
 import Layout from '../../../layouts/Layout.astro';
 import {
@@ -25,16 +29,17 @@ import {
   CardContent,
 } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
-import { Separator } from '../../../components/ui/separator';
+import { Input } from '../../../components/ui/input';
+import { Label } from '../../../components/ui/label';
 import { Badge } from '../../../components/ui/badge';
+import PageHeader from '../../../components/PageHeader.astro';
+import FormActions from '../../../components/FormActions.astro';
+import ErrorBanner from '../../../components/ErrorBanner.astro';
 import {
-  ArrowLeft,
   Crown,
   Users,
   Trash2,
   Copy,
-  Check,
-  AlertTriangle,
 } from 'lucide-react';
 import { backendFetch } from '../../../lib/auth';
 import { VISIBILITY_LABEL, VISIBILITY_DESCRIPTION } from '../../../lib/circles';
@@ -117,26 +122,84 @@ if (circle?.is_owner) {
     if (habitsRes.ok) myHabits = (await habitsRes.json()) as Array<{ id: string; name: string }>;
   } catch {}
 }
+
+// One-shot invite token shown after the owner mints a new invite. The
+// invites.astro POST handler redirects here with ?new_invite=ID and
+// ?new_token=RAW; slice 23a also adds ?new_invite_url=... so the
+// inviter sees a single copy-pasteable URL.
+const newInviteIdRaw = Astro.url.searchParams.get('new_invite');
+const newToken = Astro.url.searchParams.get('new_token') ?? '';
+const newInviteUrl = Astro.url.searchParams.get('new_invite_url') ?? '';
+const newInviteId = newInviteIdRaw ? Number(newInviteIdRaw) : NaN;
+// Prefer the server-built URL (slice 23a); fall back to assembling one
+// ourselves if only the token was returned.
+const inviteUrl = newInviteUrl
+  ? newInviteUrl
+  : newToken
+    ? `${Astro.url.origin}/circles/${circleId}/join?token=${encodeURIComponent(newToken)}`
+    : '';
 ---
 
 <Layout title={circle ? circle.name : 'Circle'}>
   <main class="mx-auto max-w-2xl px-4 py-12 space-y-4 pb-24">
-    <header class="flex items-center gap-3">
-      <Button asChild variant="ghost" size="icon" aria-label="Back to circles">
-        <a href="/circles"><ArrowLeft className="h-5 w-5" /></a>
-      </Button>
-      {circle && (
-        <h1 class="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          {circle.is_owner && <Crown className="h-5 w-5 text-amber-500" aria-label="You own this circle" />}
-          {circle.name}
-        </h1>
-      )}
-    </header>
+    <ErrorBanner />
+
+    {circle && (
+      <PageHeader
+        title={circle.name}
+        subtitle={`${circle.members.length} member${circle.members.length === 1 ? '' : 's'}`}
+        back="/circles"
+      >
+        <span slot="title" class="inline-flex items-center gap-2 min-w-0">
+          {circle.is_owner && <Crown className="h-5 w-5 text-amber-500" aria-hidden="true" />}
+          <span class="truncate">{circle.name}</span>
+        </span>
+      </PageHeader>
+    )}
 
     {error && (
       <Card className="w-full border-destructive">
         <CardContent className="py-4">
           <p class="text-sm text-destructive">{error}</p>
+        </CardContent>
+      </Card>
+    )}
+
+    {inviteUrl && Number.isFinite(newInviteId) && (
+      <Card className="w-full border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-medium">Invite link ready</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-3">
+          <p class="text-sm text-muted-foreground">
+            Send this link to the person you want to invite. Anyone with
+            the link can join until it expires.
+          </p>
+          <div class="flex flex-col sm:flex-row gap-2">
+            <Input
+              id="new-invite-url"
+              value={inviteUrl}
+              readOnly
+              aria-readonly="true"
+              aria-label="Invite URL"
+              className="font-mono text-xs"
+              data-testid="new-invite-url"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0"
+              data-copy-target="new-invite-url"
+              data-copy-original="Copy link"
+            >
+              <Copy className="h-4 w-4 mr-1" aria-hidden="true" />
+              <span data-copy-label-text>Copy link</span>
+            </Button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            The token is shown here once and never again. Copy it now or
+            send the link yourself — the backend doesn't email it.
+          </p>
         </CardContent>
       </Card>
     )}
@@ -147,7 +210,7 @@ if (circle?.is_owner) {
         <Card className="w-full">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Users className="h-4 w-4" />
+              <Users className="h-4 w-4" aria-hidden="true" />
               Members ({circle.members.length})
             </CardTitle>
           </CardHeader>
@@ -155,12 +218,12 @@ if (circle?.is_owner) {
             <ul class="divide-y divide-border" role="list">
               {circle.members.map(m => (
                 <li class="py-2 flex items-center gap-2 text-sm">
-                  {m.is_owner && <Crown className="h-4 w-4 text-amber-500" aria-label="Owner" />}
+                  {m.is_owner && <Crown className="h-4 w-4 text-amber-500" aria-hidden="true" />}
                   <span class="font-medium">{m.email}</span>
                   {!m.is_owner && circle.is_owner && (
                     <form method="post" action={`/circles/${circleId}/members/${m.user_id}/remove`} class="ml-auto">
                       <Button type="submit" variant="ghost" size="icon" aria-label={`Remove ${m.email}`}>
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     </form>
                   )}
@@ -191,7 +254,7 @@ if (circle?.is_owner) {
                   {circle.is_owner && (
                     <form method="post" action={`/circles/${circleId}/habits/${sh.habit_id}/unshare`} class="ml-auto">
                       <Button type="submit" variant="ghost" size="icon" aria-label="Unshare this habit">
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     </form>
                   )}
@@ -200,14 +263,14 @@ if (circle?.is_owner) {
             </ul>
 
             {circle.is_owner && myHabits.length > 0 && (
-              <form method="post" action={`/circles/${circleId}/share`} class="mt-4 flex flex-wrap items-end gap-2">
-                <div class="flex-1 min-w-[200px]">
-                  <label for="habit-id" class="block text-xs font-medium mb-1">Add a habit</label>
+              <form id="share-habit-form" method="post" action={`/circles/${circleId}/share`} class="mt-4 space-y-4">
+                <div class="space-y-2">
+                  <Label htmlFor="habit-id">Add a habit</Label>
                   <select
                     id="habit-id"
                     name="habit_id"
                     required
-                    class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="">Select a habit…</option>
                     {myHabits
@@ -217,25 +280,23 @@ if (circle?.is_owner) {
                       ))}
                   </select>
                 </div>
-                <div>
-                  <label for="visibility" class="block text-xs font-medium mb-1">Visibility</label>
+                <div class="space-y-2">
+                  <Label htmlFor="visibility">Visibility</Label>
                   <select
                     id="visibility"
                     name="visibility"
-                    class="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="ticks">Ticks only</option>
                     <option value="ticks+streak">Ticks + streak</option>
                     <option value="ticks+streak+notes">Ticks + streak + notes</option>
                   </select>
+                  <p class="text-xs text-muted-foreground">
+                    {VISIBILITY_DESCRIPTION['ticks+streak+notes']}
+                  </p>
                 </div>
-                <Button type="submit">Share</Button>
+                <FormActions cancelHref={`/circles/${circleId}`} submitLabel="Share" formId="share-habit-form" />
               </form>
-            )}
-            {circle.is_owner && (
-              <p class="mt-2 text-xs text-muted-foreground">
-                {VISIBILITY_DESCRIPTION['ticks+streak+notes']}
-              </p>
             )}
           </CardContent>
         </Card>
@@ -288,39 +349,47 @@ if (circle?.is_owner) {
               <CardTitle className="text-base font-medium">Invites</CardTitle>
             </CardHeader>
             <CardContent className="pt-0 space-y-3">
-              <form method="post" action={`/circles/${circleId}/invites`} class="flex flex-wrap items-end gap-2">
-                <div>
-                  <label for="delivery" class="block text-xs font-medium mb-1">Delivery</label>
-                  <select id="delivery" name="delivery" class="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
-                    <option value="link">Shareable link</option>
+              <form id="mint-invite-form" method="post" action={`/circles/${circleId}/invites`} class="space-y-4">
+                <div class="space-y-2">
+                  <Label htmlFor="delivery">Delivery</Label>
+                  <select
+                    id="delivery"
+                    name="delivery"
+                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="link">Shareable link (token shown to you)</option>
                     <option value="email">Email (token shown to you)</option>
                   </select>
+                  <p class="text-xs text-muted-foreground">
+                    Either way, the invite link is shown to you above after
+                    you mint it — Castor doesn't email it for you.
+                  </p>
                 </div>
-                <div class="flex-1 min-w-[200px]">
-                  <label for="invited-email" class="block text-xs font-medium mb-1">Invitee email (optional for link)</label>
-                  <input
+                <div class="space-y-2">
+                  <Label htmlFor="invited-email">Invitee email (optional for link)</Label>
+                  <Input
                     id="invited-email"
                     name="invited_email"
                     type="email"
-                    autocomplete="off"
+                    autoComplete="off"
                     placeholder="member@example.com"
-                    class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
                   />
                 </div>
-                <div>
-                  <label for="ttl-hours" class="block text-xs font-medium mb-1">Expires (hours)</label>
-                  <input
+                <div class="space-y-2">
+                  <Label htmlFor="ttl-hours">Expires (hours)</Label>
+                  <Input
                     id="ttl-hours"
                     name="ttl_hours"
                     type="number"
                     min="1"
                     max="720"
                     value="72"
-                    class="flex h-9 w-24 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                    className="w-32"
                   />
                 </div>
-                <Button type="submit">Mint invite</Button>
+                <FormActions cancelHref={`/circles/${circleId}`} submitLabel="Mint invite" formId="mint-invite-form" />
               </form>
+
               {invites.length > 0 && (
                 <ul class="divide-y divide-border" role="list">
                   {invites.map(inv => (
@@ -332,13 +401,10 @@ if (circle?.is_owner) {
                           ? `used ${new Date(inv.used_at).toLocaleString('en-GB')}`
                           : `expires ${new Date(inv.expires_at).toLocaleString('en-GB')}`}
                       </span>
-                      {inv.raw_token && (
-                        <code class="ml-auto text-xs bg-muted px-2 py-0.5 rounded font-mono">{inv.raw_token}</code>
-                      )}
                       {!inv.used_at && (
-                        <form method="post" action={`/circles/${circleId}/invites/${inv.id}/revoke`}>
+                        <form method="post" action={`/circles/${circleId}/invites/${inv.id}/revoke`} class="ml-auto">
                           <Button type="submit" variant="ghost" size="icon" aria-label="Revoke invite">
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
                           </Button>
                         </form>
                       )}
@@ -350,24 +416,75 @@ if (circle?.is_owner) {
           </Card>
         )}
 
-        <Separator />
-
-        <!-- Danger zone -->
-        {circle.is_owner ? (
-          <form method="post" action={`/circles/${circleId}/delete`} onsubmit="return confirm('Delete this circle for everyone? This cannot be undone.')">
-            <Button type="submit" variant="destructive">
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete circle
-            </Button>
-          </form>
-        ) : (
-          <form method="post" action={`/circles/${circleId}/leave`} onsubmit="return confirm('Leave this circle?')">
-            <Button type="submit" variant="outline">
-              Leave circle
-            </Button>
-          </form>
-        )}
+        <!-- Danger zone: de-emphasised, not promoted -->
+        <Card className="w-full bg-destructive/5 border-destructive/20">
+          <CardContent className="pt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium">
+                {circle.is_owner ? 'Delete this circle' : 'Leave this circle'}
+              </p>
+              <p class="text-xs text-muted-foreground">
+                {circle.is_owner
+                  ? 'Removes the circle for everyone. Members lose access immediately.'
+                  : 'You will no longer see this circle\'s shared habits.'}
+              </p>
+            </div>
+            {circle.is_owner ? (
+              <form method="post" action={`/circles/${circleId}/delete`} onsubmit="return confirm('Delete this circle for everyone? This cannot be undone.')">
+                <Button type="submit" variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+                  <Trash2 className="h-4 w-4 mr-1" aria-hidden="true" />
+                  Delete circle
+                </Button>
+              </form>
+            ) : (
+              <form method="post" action={`/circles/${circleId}/leave`} onsubmit="return confirm('Leave this circle?')">
+                <Button type="submit" variant="ghost" size="sm">
+                  Leave circle
+                </Button>
+              </form>
+            )}
+          </CardContent>
+        </Card>
       </>
     )}
   </main>
+
+  <script>
+    // Copy-invite-URL affordance. Click "Copy link" → write the URL
+    // out of the readonly input to the clipboard, swap the button
+    // label briefly. No deps; falls back to selecting the input if
+    // navigator.clipboard is unavailable.
+    document.addEventListener('DOMContentLoaded', () => {
+      const buttons = document.querySelectorAll<HTMLButtonElement>('[data-copy-target]');
+      buttons.forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const targetId = btn.getAttribute('data-copy-target');
+          if (!targetId) return;
+          const input = document.getElementById(targetId) as HTMLInputElement | null;
+          if (!input) return;
+          const text = input.value;
+          let ok = false;
+          try {
+            if (navigator.clipboard && window.isSecureContext) {
+              await navigator.clipboard.writeText(text);
+              ok = true;
+            } else {
+              input.select();
+              ok = document.execCommand('copy');
+            }
+          } catch {
+            ok = false;
+          }
+          const label = btn.querySelector('[data-copy-label-text]');
+          const original = btn.getAttribute('data-copy-original') ?? 'Copy link';
+          if (label) {
+            label.textContent = ok ? 'Copied' : 'Press ⌘C';
+          }
+          window.setTimeout(() => {
+            if (label) label.textContent = original;
+          }, 1500);
+        });
+      });
+    });
+  </script>
 </Layout>

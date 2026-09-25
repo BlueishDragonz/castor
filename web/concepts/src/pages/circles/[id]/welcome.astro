@@ -1,0 +1,335 @@
+---
+/**
+ * /circles/{id}/welcome — landing page shown to a brand-new member
+ * after they accept an invite.
+ *
+ * - Reads `?token=...` from the URL.
+ * - Loads circle detail (name, members, owner's email).
+ * - Loads the feed so we can show what the new member can now see.
+ * - Optionally shows a "Share your habits" wizard IF the user has any
+ *   habits (calls GET /api/v1/habits). The wizard lets them pick a
+ *   habit + visibility and POSTs to /api/v1/circles/{id}/habits; on
+ *   success it updates the inline "What you shared" count without
+ *   a full page reload.
+ */
+import Layout from '../../../layouts/Layout.astro';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
+import { Badge } from '../../../components/ui/badge';
+import PageHeader from '../../../components/PageHeader.astro';
+import ErrorBanner from '../../../components/ErrorBanner.astro';
+import { VISIBILITY_LABEL, VISIBILITY_DESCRIPTION } from '../../../lib/circles';
+import type { CircleDetail, CircleFeedHabit } from '../../../lib/circles';
+import { backendFetch } from '../../../lib/auth';
+
+if (!Astro.locals.session) {
+  // If the user landed here without a session, send them through login
+  // with ?next= so they come back to this page after authenticating.
+  const here = new URL(Astro.request.url);
+  return Astro.redirect(
+    `/login?next=${encodeURIComponent(here.pathname + here.search)}`,
+  );
+}
+
+const { id } = Astro.params;
+if (!id) return Astro.redirect('/circles');
+const circleId = Number(id);
+if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+const token = (Astro.url.searchParams.get('token') ?? '').trim();
+
+let circle: CircleDetail | null = null;
+let feed: CircleFeedHabit[] = [];
+let myHabits: Array<{ id: string; name: string }> = [];
+let error: string | null = null;
+
+const headers = { Accept: 'application/json' };
+
+try {
+  const detailRes = await backendFetch(
+    Astro.cookies,
+    `/api/v1/circles/${circleId}`,
+    { method: 'GET', headers },
+  );
+  if (!detailRes.ok) {
+    if (detailRes.status === 403 || detailRes.status === 404) {
+      return Astro.redirect(`/circles?err=forbidden`);
+    }
+    error = `Could not load circle (HTTP ${detailRes.status}).`;
+  } else {
+    circle = (await detailRes.json()) as CircleDetail;
+  }
+} catch (e) {
+  error = (e as Error).message;
+}
+
+if (circle) {
+  try {
+    const feedRes = await backendFetch(
+      Astro.cookies,
+      `/api/v1/circles/${circleId}/feed?days=14`,
+      { method: 'GET', headers },
+    );
+    if (feedRes.ok) feed = (await feedRes.json()) as CircleFeedHabit[];
+  } catch {}
+}
+
+try {
+  const habitsRes = await backendFetch(Astro.cookies, '/api/v1/habits', {
+    method: 'GET',
+    headers,
+  });
+  if (habitsRes.ok) {
+    const allHabits = (await habitsRes.json()) as Array<{ id: string; name: string }>;
+    // Don't propose habits the user already shared with this circle.
+    const alreadyShared = new Set(
+      (circle?.shared_habits ?? []).map(sh => sh.habit_id),
+    );
+    myHabits = allHabits.filter(h => !alreadyShared.has(h.id));
+  }
+} catch {}
+
+// What the owner has shared (for "What you can see"):
+const ownersSharedHabits = feed.filter(item => item.owner_email === circle?.owner_email);
+const ownersSharedCount = ownersSharedHabits.length;
+
+// What the new member has shared back (start at 0):
+const mySharedCount: number = 0;
+---
+
+<Layout title={circle ? `Joined ${circle.name}` : 'Joined circle'}>
+  <main class="mx-auto max-w-2xl px-4 py-12 space-y-4 pb-24">
+    <ErrorBanner />
+
+    {circle ? (
+      <PageHeader
+        title={`You joined ${circle.name}`}
+        subtitle="Welcome! Here's a quick summary of what you can see and what you can share."
+        back="/circles"
+      />
+    ) : (
+      <PageHeader title="Joined circle" back="/circles" />
+    )}
+
+    {error && (
+      <Card className="w-full border-destructive">
+        <CardContent className="py-4">
+          <p class="text-sm text-destructive">{error}</p>
+        </CardContent>
+      </Card>
+    )}
+
+    {circle && (
+      <>
+        <!-- What you can see -->
+        <Card className="w-full">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">
+              What you can see
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2 text-sm">
+            <p>
+              <span data-testid="owners-shared-count">{ownersSharedCount}</span> habit{ownersSharedCount === 1 ? '' : 's'} owned by <span class="font-medium">{circle.owner_email}</span> shared with this circle.
+            </p>
+            {ownersSharedHabits.length > 0 && (
+              <ul class="space-y-1 text-xs text-muted-foreground" role="list">
+                {ownersSharedHabits.map(item => (
+                  <li class="flex items-center gap-2">
+                    <span>{item.name}</span>
+                    <Badge variant="outline">{VISIBILITY_LABEL[item.visibility]}</Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {ownersSharedHabits.length === 0 && (
+              <p class="text-xs text-muted-foreground">
+                {circle.owner_email} hasn't shared any habits yet. You'll see them here as soon as they do.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <!-- What you've shared -->
+        <Card className="w-full" data-testid="my-shared-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">
+              What you've shared
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-sm space-y-2">
+            <p>
+              <span data-testid="my-shared-count">{mySharedCount}</span> of your habit{mySharedCount === 1 ? '' : 's'} shared with this circle so far.
+            </p>
+            {!token && (
+              <p class="text-xs text-muted-foreground">
+                (The invite token wasn't passed to this page; you can still
+                share habits from the circle page.)
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <!-- Share your habits wizard -->
+        {myHabits.length > 0 && (
+          <Card className="w-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-medium">
+                Share your habits
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-4">
+              <p class="text-sm text-muted-foreground">
+                Pick a habit to share with the circle. Visibility
+                controls what members see on your ticks.
+              </p>
+              <form id="share-my-habit-form" class="space-y-4">
+                <div class="space-y-2">
+                  <label for="share-habit-id" class="text-sm font-medium block">Habit</label>
+                  <select
+                    id="share-habit-id"
+                    name="habit_id"
+                    required
+                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Select a habit…</option>
+                    {myHabits.map(h => (
+                      <option value={h.id}>{h.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label for="share-visibility" class="text-sm font-medium block">Visibility</label>
+                  <select
+                    id="share-visibility"
+                    name="visibility"
+                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="ticks">Ticks only</option>
+                    <option value="ticks+streak">Ticks + streak</option>
+                    <option value="ticks+streak+notes">Ticks + streak + notes</option>
+                  </select>
+                  <p class="text-xs text-muted-foreground">
+                    {VISIBILITY_DESCRIPTION['ticks+streak+notes']}
+                  </p>
+                </div>
+                <div id="share-my-habit-error" class="text-sm text-destructive" aria-live="polite"></div>
+                <div class="flex flex-col-reverse sm:flex-row sm:items-center gap-3 mt-6">
+                  <Button asChild variant="outline" className="sm:mr-auto">
+                    <a href={`/circles/${circleId}`}>Skip for now</a>
+                  </Button>
+                  <Button type="submit" className="sm:ml-auto">
+                    Share with circle
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {myHabits.length === 0 && (
+          <Card className="w-full">
+            <CardContent className="pt-6 text-sm text-muted-foreground">
+              You don't have any habits to share yet. Create one from the
+              <a href="/habits/new" class="underline ml-1">new habit</a> page and
+              come back to share it.
+            </CardContent>
+          </Card>
+        )}
+
+        <!-- Final CTA -->
+        <Card className="w-full">
+          <CardContent className="pt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p class="text-sm">
+              Ready to see the circle?
+            </p>
+            <Button asChild>
+              <a href={`/circles/${circleId}`}>Go to circle</a>
+            </Button>
+          </CardContent>
+        </Card>
+      </>
+    )}
+  </main>
+
+  <script define:vars={{ circleId }}>
+    // Share-your-habit wizard: POST to /api/v1/circles/{id}/habits and
+    // update the inline counters without a full page reload.
+    (() => {
+      const form = document.getElementById('share-my-habit-form');
+      if (!form) return;
+      const errEl = document.getElementById('share-my-habit-error');
+      const countEl = document.querySelector('[data-testid="my-shared-count"]');
+      const cardEl = document.querySelector('[data-testid="my-shared-card"]');
+      const habitSelect = document.getElementById('share-habit-id');
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (errEl) errEl.textContent = '';
+        const fd = new FormData(form);
+        const habit_id = fd.get('habit_id');
+        const visibility = fd.get('visibility') || 'ticks';
+        if (!habit_id) {
+          if (errEl) errEl.textContent = 'Pick a habit first.';
+          return;
+        }
+        try {
+          const res = await fetch(`/api/v1/circles/${circleId}/habits`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ habit_id, visibility }),
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => null);
+            const detail = body?.detail ?? `HTTP ${res.status}`;
+            if (errEl) errEl.textContent = `Could not share: ${detail}`;
+            return;
+          }
+          // Update count
+          const cur = parseInt((countEl?.textContent ?? '0'), 10) || 0;
+          const next = cur + 1;
+          if (countEl) countEl.textContent = String(next);
+          if (cardEl) {
+            const p = cardEl.querySelector('p');
+            if (p) {
+              p.innerHTML = `<span data-testid="my-shared-count">${next}</span> of your habit${next === 1 ? '' : 's'} shared with this circle so far.`;
+            }
+          }
+          // Remove the shared habit from the dropdown
+          const opt = habitSelect?.querySelector(`option[value="${habit_id}"]`);
+          if (opt) opt.remove();
+          // If nothing left, replace the wizard card with an EmptyState-like note
+          if (habitSelect && habitSelect.querySelectorAll('option').length <= 1) {
+            const wizard = form.closest('[data-testid]') || form.parentElement;
+            if (wizard && wizard.parentElement) {
+              const note = document.createElement('div');
+              note.className = 'w-full';
+              note.innerHTML = '<div class="rounded-lg border border-border bg-card text-card-foreground p-6 text-sm text-muted-foreground">All your habits are now shared with this circle.</div>';
+              wizard.parentElement.replaceChild(note, wizard);
+            }
+          }
+          // Briefly show success
+          if (errEl) {
+            errEl.classList.remove('text-destructive');
+            errEl.classList.add('text-emerald-600');
+            errEl.textContent = 'Shared!';
+            window.setTimeout(() => {
+              if (errEl) {
+                errEl.textContent = '';
+                errEl.classList.remove('text-emerald-600');
+                errEl.classList.add('text-destructive');
+              }
+            }, 1500);
+          }
+        } catch (e) {
+          if (errEl) errEl.textContent = `Could not share: ${(e).message}`;
+        }
+      });
+    })();
+  </script>
+</Layout>

@@ -2,16 +2,46 @@
 /**
  * /circles/{id}/join — any user accepts an invite with {token}.
  *
- * POST: forwards to backend POST /api/v1/circles/{id}/join.
- * On success, redirect to /circles/{id}.
+ * GET with ?token=...  → POST to backend with that token.
+ * POST {token}        → forward to backend POST /api/v1/circles/{id}/join.
+ * On success, redirect to /circles/{id}/welcome?token=... so the new
+ * member sees the join summary.
+ *
+ * No-session users are bounced to /login?next=<this URL> (so the
+ * invite context survives the round-trip) and given a sibling link
+ * to /register?next=<this URL> for new accounts.
+ *
+ * Slice 23b:
+ *   - preserves the invite token through login via ?next=
+ *   - redirects to /welcome (not /circles/{id}) on success
+ *   - maps backend 403 self-join guard (slice 23a) to a dedicated
+ *     `err=join_self_blocked` so the destination page can explain
+ *   - normalises 404/410/409 to the canonical ErrorBanner keys
  */
 import { backendFetch } from '../../../lib/auth';
 
-if (!Astro.locals.session) return Astro.redirect('/login');
 const { id } = Astro.params;
 if (!id) return Astro.redirect('/circles');
 const circleId = Number(id);
 if (!Number.isFinite(circleId)) return Astro.redirect('/circles');
+
+// Reconstruct the "where I came from" URL so we can thread it through
+// /login → /register → back here after the user authenticates. Strip
+// any err=... param so we don't re-surface it after login.
+const here = new URL(Astro.request.url);
+const tokenQS = (here.searchParams.get('token') ?? '').trim();
+const nextURL = (() => {
+  const clone = new URL(here);
+  clone.searchParams.delete('err');
+  return clone.pathname + (clone.search ? clone.search : '');
+})();
+
+if (!Astro.locals.session) {
+  if (tokenQS) {
+    return Astro.redirect(`/login?next=${encodeURIComponent(nextURL)}`);
+  }
+  return Astro.redirect(`/circles/${circleId}?err=join_no_token`);
+}
 
 let token = '';
 if (Astro.request.method === 'POST') {
@@ -21,12 +51,11 @@ if (Astro.request.method === 'POST') {
 
 if (!token) {
   // Token may have been passed in the URL for shareable-link flow:
-  // /circles/123/join?token=xyz  (auto-submit a server-side POST).
-  token = (Astro.url.searchParams.get('token') ?? '').trim();
+  // /circles/123/join?token=xyz  → auto-submit a server-side POST.
+  token = tokenQS;
   if (!token) {
     return Astro.redirect(`/circles/${circleId}?err=join_no_token`);
   }
-  // Fall through to backend call below.
 }
 
 const res = await backendFetch(Astro.cookies, `/api/v1/circles/${circleId}/join`, {
@@ -36,12 +65,21 @@ const res = await backendFetch(Astro.cookies, `/api/v1/circles/${circleId}/join`
 });
 
 if (!res.ok) {
-  const code = res.status === 404 ? 'invite_invalid'
-    : res.status === 410 ? 'invite_used_or_expired'
-    : res.status === 403 ? 'forbidden'
+  // Map backend statuses to user-friendly err keys.
+  //   404 → invalid/used token
+  //   409 → self-join blocked (owner tried to accept own invite) OR
+  //          already a member (we can't distinguish, but both are
+  //          "this link isn't useful to you anymore")
+  //   410 → expired
+  //   403 → reserved for future "you're not authorised to join"
+  const code =
+    res.status === 404 ? 'join_invalid_token'
+    : res.status === 409 ? 'join_self_blocked'
+    : res.status === 410 ? 'join_expired'
+    : res.status === 403 ? 'join_self_blocked'
     : 'join_failed';
   return Astro.redirect(`/circles/${circleId}?err=${code}`);
 }
 
-return Astro.redirect(`/circles/${circleId}`);
+return Astro.redirect(`/circles/${circleId}/welcome?token=${encodeURIComponent(token)}`);
 ---

@@ -20,6 +20,9 @@ const MESSAGES: Record<string, string> = {
     'That invite link is no longer valid. It may have been revoked.',
   join_already_member: 'You are already a member of this circle.',
   join_expired: 'That invite link has expired. Ask for a new one.',
+  join_self_blocked:
+    "You can't accept your own invite to a circle you own. Try inviting a different email.",
+  join_failed: "We couldn't add you to that circle. Please try again.",
 };
 
 const HEADINGS: Record<string, string> = {
@@ -27,6 +30,8 @@ const HEADINGS: Record<string, string> = {
   join_invalid_token: 'Invite link is no longer valid',
   join_already_member: 'Already a member',
   join_expired: 'Invite link has expired',
+  join_self_blocked: "Can't accept your own invite",
+  join_failed: 'Could not join circle',
 };
 
 const message = errParam ? (MESSAGES[errParam] ?? 'Something went wrong. Please try again.') : null;
