@@ -19,7 +19,6 @@
  * Replaces the inconsistent "back link right of title" pattern that
  * existed on most pages before this slice.
  */
-import { Button } from './ui/button';
 
 interface Props {
   title: string;
@@ -48,24 +47,24 @@ const IconMap: Record<string, string> = {
 };
 ---
 
-<header class="flex items-center justify-between gap-4 mb-6">
+<header class="mb-6">
   <div class="flex items-center gap-3 min-w-0">
     {back && (
-      <Button asChild variant="ghost" size="icon" className="h-9 w-9 shrink-0" aria-label={`Back to ${backAriaLabel}`}>
-        <a href={back}>←</a>
-      </Button>
+      <a
+        href={back}
+        aria-label={`Back to ${backAriaLabel}`}
+        class="inline-flex items-center justify-center shrink-0 h-8 w-8 rounded-md text-lg leading-none transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >←</a>
     )}
-    <div class="min-w-0">
-      <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 truncate">
-        {icon && <span aria-hidden="true">{IconMap[icon]}</span>}
-        <span class="truncate"><slot name="title">{title}</slot></span>
-      </h1>
-      {subtitle && (
-        <p class="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
-      )}
-    </div>
+    <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 truncate min-w-0">
+      {icon && <span aria-hidden="true">{IconMap[icon]}</span>}
+      <span class="truncate"><slot name="title">{title}</slot></span>
+    </h1>
   </div>
-  <div class="flex items-center gap-2 shrink-0">
+  {subtitle && (
+    <p class="text-sm text-muted-foreground mt-1 ml-11">{subtitle}</p>
+  )}
+  <div class="flex items-center gap-2 shrink-0 mt-4">
     <slot name="actions" />
   </div>
 </header>
