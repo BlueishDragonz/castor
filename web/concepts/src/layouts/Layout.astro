@@ -10,7 +10,6 @@
  */
 import '../styles/tokens.css';
 import BottomNav from '../components/BottomNav.astro';
-import { DesktopMenu } from '../components/DesktopMenu.tsx';
 
 interface Props {
   title?: string;
@@ -64,6 +63,5 @@ const umamiEnabled = !!umamiId;
   </head>
   <body class="min-h-screen antialiased"><slot />{Astro.locals.session && (<>
         <BottomNav />
-        <DesktopMenu client:load email={Astro.locals.session.email} />
       </>)}</body>
 </html>

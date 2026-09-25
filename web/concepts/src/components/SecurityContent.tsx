@@ -37,11 +37,20 @@ export function SecurityContent() {
       if (!token) return;
 
       const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+      // Slice 22x: was `${origin}/auth/webauthn/credentials` directly,
+      // which the browser blocked as cross-origin (the backend serves
+      // no Access-Control-Allow-Origin and the dev origin is on a
+      // different port). Same fix for recovery-email — use relative
+      // URLs that hit Vite's /auth/webauthn/* dev proxy
+      // (astro.config.mjs proxies both prefixes to the backend), so the
+      // browser sees same-origin while the request still reaches the
+      // backend with the Authorization header. In production the
+      // middleware proxy does the same job.
       const [passkeysRes, recoveryRes] = await Promise.all([
-        fetch(`${origin}/auth/webauthn/credentials`, {
+        fetch('/auth/webauthn/credentials', {
           headers: { 'Authorization': `Bearer ${token}` },
         }),
-        fetch(`${origin}/auth/webauthn/recovery-email`, {
+        fetch('/auth/webauthn/recovery-email', {
           headers: { 'Authorization': `Bearer ${token}` },
         }),
       ]);
