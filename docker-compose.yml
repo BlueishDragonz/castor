@@ -36,6 +36,23 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - RESET_PASSWORD_TOKEN_SECRET=${RESET_PASSWORD_TOKEN_SECRET}
       - NICEGUI_STORAGE_SECRET=${NICEGUI_STORAGE_SECRET}
+      # ─── SMTP — Circles invite email (slice 23c) ─────────────────────
+      # SMTP_HOST/PORT/TLS/USER/PASSWORD/FROM all read in
+      # castor/configs.py::Settings. Empty SMTP_HOST keeps the legacy
+      # smtp.gmail.com:465 SSL fallback; non-empty triggers the env
+      # path. Castor's send_email uses these plus the local-outbox
+      # path (SMTP_DEV_LOCAL_OUTBOX) in dev/CI.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - SMTP_EMAIL_USERNAME=${SMTP_EMAIL_USERNAME:-}
+      - SMTP_EMAIL_PASSWORD=${SMTP_EMAIL_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-Castor <noreply@castor.example>}
+      # ─── Frontend origin (used to build join URLs in invite emails).
+      # In Apollo deployment this should match the reverse-proxy origin
+      # clients hit (https://castor.example or http://10.8.0.1:8080 for
+      # VPN clients). Default matches the docker compose listening port.
+      - FRONTEND_URL=${FRONTEND_URL:-http://10.8.0.1:8080}
     env_file:
       - ./.user/.secrets.env   # optional: if present, overrides above
     volumes:

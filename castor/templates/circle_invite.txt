@@ -1,0 +1,16 @@
+$inviter_email invited you to join '$circle_name' on Castor.
+
+$circle_name is a small, trusted group on Castor. Members see each other's
+habit ticks — what they completed, when, and (if you choose) the streak counts
+and notes. Nothing else is shared.
+
+Open this link to accept the invite:
+
+  $join_url
+
+This invite expires in $expires_hours hours and can be used once. If you
+didn't expect this, you can ignore the email — the circle will not see you.
+
+--
+Sent by Castor on behalf of $inviter_email.
+$frontend_origin

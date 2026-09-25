@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # Email
     SMTP_EMAIL_USERNAME: str = ""
     SMTP_EMAIL_PASSWORD: str = ""
+    # Slice 23c: previously hard-coded to smtp.gmail.com:465 in
+    # castor/utils.py::send_email. Empty SMTP_HOST keeps the legacy
+    # behaviour so existing single-user Gmail setups work unchanged;
+    # any non-empty value triggers the new env-driven path (host +
+    # port + optional STARTTLS).
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_FROM: str = ""
+    SMTP_USE_TLS: bool = True
 
     # NiceGUI
     NICEGUI_STORAGE_SECRET: str = "dev"
@@ -90,6 +99,14 @@ class Settings(BaseSettings):
     ENABLE_IOS_STANDALONE: bool = True
     TAG_SELECTION_MODE: TagSelectionMode = TagSelectionMode.MULTI
     ENABLE_TAG_FILTERS: bool = True
+
+    # Slice 23c: public origin of the Astro frontend. Used to build
+    # join URLs in outgoing emails. Defaults to localhost for dev so a
+    # fresh checkout works without extra config; in production set
+    # this to the externally reachable origin (e.g. https://castor.example).
+    # The Astro BFF passes X-Forwarded-Host which the email-send path
+    # can fall back to if FRONTEND_URL is unset.
+    FRONTEND_URL: str = "http://localhost:4321"
 
     # TLS termination (reverse proxy with HTTPS) - set True when behind nginx/Caddy with HTTPS
     # When False (direct HTTP), CSP allows ws: for WebSocket; when True, only wss: allowed

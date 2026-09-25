@@ -27,6 +27,10 @@ EVENTS = frozenset({
     "circle_create", "circle_delete", "circle_join", "circle_leave",
     "circle_habit_share", "circle_habit_unshare",
     "circle_invite_create", "circle_invite_accept", "circle_invite_revoke",
+    # Slice 23c: distinct from circle_invite_create — we now record
+    # whether the email actually went out (sent vs failed) so an SMTP
+    # outage doesn't disappear silently.
+    "circle_invite_sent",
 })
 OUTCOMES = frozenset({"success", "failure", "denied"})
 

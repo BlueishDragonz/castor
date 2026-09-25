@@ -23,6 +23,7 @@ Endpoint summary:
   GET    /{circle_id}/feed                  members: per-habit today/yesterday streak + notes
 """
 import datetime
+import urllib.parse
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -37,6 +38,10 @@ from castor.app.db import User, async_session_maker
 from castor.configs import settings
 from castor.core.completions import get_habit_date_completion
 from castor.storage.storage import HabitListNotFoundError
+# Slice 23c: send_email imported at module scope so tests can
+# `patch.object(circle_routes, 'send_email')` without resorting to
+# the trick used in slice 23a (try/except AttributeError).
+from castor.utils import send_email
 
 from sqlalchemy import delete, select
 
@@ -418,7 +423,68 @@ async def create_invite(
             await session.flush()
             invite_id = invite.id
             created_at = invite.created_at
+    # Slice 23c: fetch the circle for its name (used in the email).
+    # Cheap because Circle rows are keyed on id and we already have
+    # the auth session warm.
+    async with async_session_maker() as session:
+        circle = await _load_circle(session, circle_id)
     await record("circle_invite_create", user_id=user.id)
+
+    # Slice 23c: when the inviter picked Delivery: Email, render the
+    # HTML/plaintext templates, build the join URL, and call
+    # castor.utils.send_email. We do this AFTER committing the invite
+    # row so an SMTP outage doesn't roll back a perfectly good mint —
+    # the user can copy the raw_token (we still return it in the
+    # response) and resend later. Failure here logs but does NOT 5xx
+    # the request because the invite is already persisted.
+    if body.delivery == "email":
+        try:
+            from castor.configs import settings as _settings
+            from castor.app.circle_emails import render_invite_email
+
+            origin = _settings.FRONTEND_URL.rstrip("/")
+            join_url = (
+                f"{origin}/circles/{circle_id}/join?token="
+                f"{urllib.parse.quote(raw)}"
+            )
+            rendered = render_invite_email(
+                inviter_email=user.email,
+                circle_name=circle.name,
+                join_url=join_url,
+                frontend_origin=origin,
+                expires_hours=body.ttl_hours,
+            )
+            subject = (
+                f"{user.email} invited you to join "
+                f"'{circle.name}' on Castor"
+            )
+
+            sent_path = send_email(
+                subject=subject,
+                body=rendered["text"],
+                recipients=[body.invited_email],  # type: ignore[list-item]
+                html_body=rendered["html"],
+            )
+            await record(
+                "circle_invite_sent",
+                user_id=user.id,
+                outcome="success",
+            )
+            logger.info(
+                "circle_invite_sent id={} to={} delivery={}",
+                invite_id, body.invited_email, body.delivery,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "circle_invite email send failed (invite {}): {}",
+                invite_id, exc,
+            )
+            await record(
+                "circle_invite_sent",
+                user_id=user.id,
+                outcome="failure",
+            )
+
     return CircleInviteRead(
         id=invite_id,
         delivery=body.delivery,

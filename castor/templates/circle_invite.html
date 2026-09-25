@@ -1,0 +1,145 @@
+<!--
+  Circle invitation — HTML email body
+  Sent by castor.app.circle_routes.create_invite when the inviter
+  chooses Delivery: Email. Rendered by castor.app.circle_emails
+  using string.Template (substitution marker is $var / ${var}).
+  CSS rules with literal `{ }` need no escaping.
+  Variables:
+    inviter_email, inviter_name, circle_name, circle_id,
+    join_token, join_url, expires_hours, frontend_origin.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>$inviter_email invited you to join '$circle_name' on Castor</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f6f5f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f6f5f3;padding:32px 16px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="480" style="max-width:480px;background-color:#ffffff;border-radius:12px;border:1px solid #e8e6e1;">
+
+        <!-- Header: wordmark + tagline -->
+        <tr>
+          <td style="padding:28px 32px 8px 32px;">
+            <div style="font-size:22px;font-weight:600;color:#1a1a1a;letter-spacing:-0.01em;">Castor</div>
+            <div style="font-size:13px;color:#6b6b6b;margin-top:2px;">privacy-first habit tracker</div>
+          </td>
+        </tr>
+
+        <!-- Eyebrow -->
+        <tr>
+          <td style="padding:24px 32px 0 32px;">
+            <div style="font-size:13px;font-weight:500;color:#6b6b6b;text-transform:uppercase;letter-spacing:0.05em;">
+              Private Circle invite
+            </div>
+          </td>
+        </tr>
+
+        <!-- Headline -->
+        <tr>
+          <td style="padding:8px 32px 0 32px;">
+            <h1 style="margin:0;font-size:22px;line-height:1.35;font-weight:600;color:#1a1a1a;">
+              $inviter_email invited you to join '$circle_name' on Castor
+            </h1>
+          </td>
+        </tr>
+
+        <!-- Body copy -->
+        <tr>
+          <td style="padding:16px 32px 0 32px;">
+            <p style="margin:0;font-size:15px;line-height:1.55;color:#1a1a1a;">
+              <strong style="color:#1a1a1a;">$circle_name</strong> is a small, trusted
+              group on Castor. Members see each other's habit ticks — what they
+              completed, when, and (if you choose) the streak counts and notes.
+              Nothing else is shared.
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:14px 32px 0 32px;">
+            <p style="margin:0;font-size:15px;line-height:1.55;color:#1a1a1a;">
+              Joining takes a minute. If you don't already have an account, you'll
+              create one on the next page. If you're signed in, click below to
+              accept.
+            </p>
+          </td>
+        </tr>
+
+        <!-- CTA button -->
+        <tr>
+          <td align="left" style="padding:28px 32px 4px 32px;">
+            <a href="$join_url"
+               style="display:inline-block;background-color:#1a1a1a;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 22px;border-radius:8px;">
+              Accept invite
+            </a>
+          </td>
+        </tr>
+
+        <!-- Fallback link (always visible) -->
+        <tr>
+          <td style="padding:18px 32px 0 32px;">
+            <p style="margin:0;font-size:13px;color:#6b6b6b;line-height:1.5;">
+              If the button doesn't work, copy and paste this link into your
+              browser:<br>
+              <a href="$join_url" style="color:#1a1a1a;word-break:break-all;">$join_url</a>
+            </p>
+          </td>
+        </tr>
+
+        <!-- Expiry / privacy notes -->
+        <tr>
+          <td style="padding:22px 32px 0 32px;">
+            <p style="margin:0;font-size:13px;color:#6b6b6b;line-height:1.55;">
+              This invite expires in <strong style="color:#1a1a1a;">$expires_hours hours</strong>.
+              It can be used once. If you didn't expect this, you can ignore the
+              email — the circle will not see you.
+            </p>
+          </td>
+        </tr>
+
+        <!-- Plaintext fallback explicitly signposted (RFC 2046 alternative
+             part is preferred, but the visible footer helps in clients that
+             strip the multipart and render only HTML) -->
+        <tr>
+          <td style="padding:22px 32px 0 32px;">
+            <details style="font-size:13px;color:#6b6b6b;">
+              <summary style="cursor:pointer;color:#6b6b6b;">View a plain-text version</summary>
+              <pre style="white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.5;background-color:#f6f5f3;padding:12px;border-radius:6px;margin-top:8px;">$inviter_email invited you to join '$circle_name' on Castor.
+
+$circle_name is a small, trusted group on Castor. Members see each other's
+habit ticks — what they completed, when, and (if you choose) the streak counts
+and notes. Nothing else is shared.
+
+Open this link to accept:
+$join_url
+
+This invite expires in $expires_hours hours and can be used once.
+If you didn't expect this, you can ignore the email.
+              </pre>
+            </details>
+          </td>
+        </tr>
+
+      </table>
+
+      <!-- Footer -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="480" style="max-width:480px;">
+        <tr>
+          <td style="padding:16px 32px 0 32px;">
+            <p style="margin:0;font-size:12px;color:#9a9a9a;line-height:1.55;">
+              Sent by Castor on behalf of $inviter_email.
+              You're receiving this because someone with access to your address
+              entered it as an invitee at <a href="$frontend_origin" style="color:#9a9a9a;text-decoration:underline;">$frontend_origin</a>.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

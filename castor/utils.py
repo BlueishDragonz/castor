@@ -31,6 +31,7 @@ import functools
 import hashlib
 import os
 import smtplib
+import ssl
 import time
 from functools import wraps
 from typing import Literal, TypeAlias
@@ -151,8 +152,22 @@ def send_email(subject: str, body: str, recipients: list[str], html_body: str | 
         codes easy in tests. Used heavily in migration-branch's
         forgot/reset/recovery-email integration tests; harmless in
         production (the env var is unset in deployed environments).
+
+    Host configuration (Slice 23c):
+        settings.SMTP_HOST  — empty = legacy smtp.gmail.com:465 SSL;
+                              non-empty = use this host.
+        settings.SMTP_PORT  — defaults to 587 (STARTTLS).
+        settings.SMTP_USE_TLS — True = STARTTLS on the chosen port;
+                                False = plaintext relay.
+        settings.SMTP_FROM — sender shown in the From header.
+                              Empty = falls back to SMTP_EMAIL_USERNAME.
+
+    The legacy gmail:465 path is preserved so single-user Gmail
+    setups continue to work without setting new env vars. Anything
+    beyond that (Mailgun/SES/Postmark/relay/MX of choice) honours
+    SMTP_HOST + SMTP_PORT + SMTP_USE_TLS.
     """
-    sender = settings.SMTP_EMAIL_USERNAME
+    sender = settings.SMTP_FROM or settings.SMTP_EMAIL_USERNAME
     password = settings.SMTP_EMAIL_PASSWORD
 
     if html_body:
@@ -191,6 +206,36 @@ def send_email(subject: str, body: str, recipients: list[str], html_body: str | 
             fh.write(f"To: {recipients[0]}\nSubject: {subject}\n\n{body}\n")
         return path
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp_server:
-        smtp_server.login(sender, password)
-        smtp_server.sendmail(sender, recipients, msg.as_string())
+    # Slice 23c: route by SMTP_HOST. Empty = legacy Gmail path;
+    # otherwise honour SMTP_PORT + SMTP_USE_TLS.
+    host = settings.SMTP_HOST
+    if not host:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp_server:
+            smtp_server.login(sender, password)
+            smtp_server.sendmail(sender, recipients, msg.as_string())
+        return None
+
+    port = settings.SMTP_PORT
+    if settings.SMTP_USE_TLS:
+        # STARTTLS on the chosen port (587 by default).
+        server = smtplib.SMTP(host, port, timeout=10)
+        try:
+            server.ehlo()
+            server.starttls(context=ssl.create_default_context())
+            server.ehlo()
+            if password:
+                server.login(sender, password)
+            server.sendmail(sender, recipients, msg.as_string())
+        finally:
+            server.quit()
+    else:
+        # Plaintext relay — only safe on a private network.
+        server = smtplib.SMTP(host, port, timeout=10)
+        try:
+            server.ehlo()
+            if password:
+                server.login(sender, password)
+            server.sendmail(sender, recipients, msg.as_string())
+        finally:
+            server.quit()
+    return None
