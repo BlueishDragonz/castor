@@ -1303,7 +1303,7 @@ and the evidence command(s) used to verify status.
 **Slice 13 (2026-09-24) — bulk triage of stale matrix evidence.** Eleven
 rows previously marked open (🔵/❌/🟡) are now closed because the
 underlying files exist and were verified by
-`Desktop/migration/scripts/audit_parity_matrix.py` + astro dev probe:
+`docs/migration/scripts/audit_parity_matrix.py` + astro dev probe:
 
 - 2.7 Duplicate habit ✅
 - 4.2 Custom CSS persistence ✅ (slice 11)

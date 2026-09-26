@@ -179,9 +179,9 @@ curl -s -o /dev/null -w "Dev: %{http_code}\n" http://127.0.0.1:4321/login
 cd web/concepts && pnpm exec astro check | tail -3
 
 # 3. Re-orient on phase 4 work by reading:
-#    - Desktop/migration/slice-reports/slice-19-cutover-runbook.md
-#    - Desktop/migration/slice-reports/slice-21-apply-runbook-answers.md
-#    - Desktop/migration/parity-matrix.md §"Remaining open rows"
+#    - docs/migration/slice-reports/slice-19-cutover-runbook.md
+#    - docs/migration/slice-reports/slice-21-apply-runbook-answers.md
+#    - docs/migration/parity-matrix.md §"Remaining open rows"
 
 # 4. Decide: cutover day ops vs. Phase-4 polish vs. new slices
 ```
@@ -197,7 +197,7 @@ cd web/concepts && pnpm exec astro check | tail -3
   `${paramName}` syntax doesn't match Astro's `[paramName]` path
   param syntax. Three iterations needed to land on **path-shape
   matching** (segment counts + non-variable literal segments). The
-  script is now in `Desktop/migration/scripts/audit_bff_coverage.py`.
+  script is now in `docs/migration/scripts/audit_bff_coverage.py`.
 - **Sharp forces bookworm-slim**. Alpine would need a source build
   of libvips (~5min build penalty, historically flaky). Sticking
   with bookworm is the right choice.
@@ -214,17 +214,17 @@ cd web/concepts && pnpm exec astro check | tail -3
 
 ## Files of interest
 
-- `Desktop/migration/slice-reports/` — 22 slice reports (1–21, plus
+- `docs/migration/slice-reports/` — 22 slice reports (1–21, plus
   the cutover runbook).
-- `Desktop/migration/scripts/audit_parity_matrix.py` — matrix
+- `docs/migration/scripts/audit_parity_matrix.py` — matrix
   stale-evidence detector.
-- `Desktop/migration/scripts/audit_bff_coverage.py` — BFF
+- `docs/migration/scripts/audit_bff_coverage.py` — BFF
   route-coverage detector with path-shape matching.
-- `Desktop/migration/parity-matrix.md` — single source of truth for
+- `docs/migration/parity-matrix.md` — single source of truth for
   legacy ↔ migration feature parity.
-- `Desktop/migration/architecture-target.md` — full architecture of
+- `docs/migration/architecture-target.md` — full architecture of
   the migrated app (Astro + React + shadcn/ui).
-- `Desktop/migration/risks-and-decisions.md` — risk register.
+- `docs/migration/risks-and-decisions.md` — risk register.
 - `web/concepts/src/middleware.ts` — production proxy + session
   handling.
 - `docker/Dockerfile` — monorepo image (slice 20).

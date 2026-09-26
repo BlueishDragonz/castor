@@ -30,7 +30,7 @@ files, then flags:
     case that breaks at runtime in production.
 
 Run from repo root:
-    python3 Desktop/migration/scripts/audit_bff_coverage.py
+    python3 docs/migration/scripts/audit_bff_coverage.py
 """
 import os, re, sys
 

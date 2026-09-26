@@ -21,12 +21,12 @@ stale-evidence candidate with a manual event-chain inspection before
 marking the row ✅.
 
 Run from repo root:
-    python Desktop/migration/scripts/audit_parity_matrix.py
+    python docs/migration/scripts/audit_parity_matrix.py
 """
 import os, re, sys
 
 ROOT = '/home/joel/castor-repo'
-MATRIX = f'{ROOT}/Desktop/migration/parity-matrix.md'
+MATRIX = f'{ROOT}/docs/migration/parity-matrix.md'
 
 # Statuses we care about: untracked work or known partials.
 OPEN_STATUSES = ('❌', '🔵', '🟡')
