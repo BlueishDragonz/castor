@@ -24,19 +24,25 @@ cd /home/joel/castor-repo
 # Astro type-check + lint
 cd web/concepts && pnpm exec astro check
 # Expect: 0 errors, 0 warnings. Hints are fine.
+# (slice 27 baseline: 0 errors / 0 warnings / 58 hints, 108 files)
 
 # Python tests (no live integration)
 cd ../..
 .venv/bin/python -m pytest tests/ --ignore=tests/test_batch4_live.py -q
-# Expect: 368 + new tests passed, 12 skipped. As of slice 17 baseline.
+# Expect (slice 27/28 baseline): 392 passed, 12 skipped.
 
 # Parity matrix audit (catches stale evidence)
 python3 Desktop/migration/scripts/audit_parity_matrix.py | head -10
-# Expect: "0 stale-evidence candidates".
+# Expect: open-status rows limited to the 7 intentional/deferred gaps
+# (3.4, 6.2, 6.4, 7.3, 11.2, 12.2, 12.5) — anything else is a
+# regression. The script prints file-existence evidence for each.
 
 # BFF coverage audit (catches missing Astro BFF proxies)
 python3 Desktop/migration/scripts/audit_bff_coverage.py | head -5
-# Expect: "0 client-side BFF bugs".
+# Expect: "(none)" under "Client-side callers of /api/v1/* without an
+# Astro BFF proxy". (slice 28: the last gap — the circles
+# share-your-habit wizard POST — got its BFF route; before that this
+# audit caught a real production-404 bug the dev Vite proxy masked.)
 
 # Browser smoke walk-through on the demo seed (see scripts/dev-up.sh)
 bash scripts/dev-up.sh
@@ -51,6 +57,44 @@ bash scripts/stop-dev.sh
 
 If any of the above fails, **stop and fix the regression before
 cutover**. Cutting with broken tests means rolling back under load.
+
+### 0b. Docker image gate (slice 27) — verify BEFORE cutover day
+
+The image must be built and smoke-tested on apollo ahead of time;
+slice 27 proved the image can be built and pass all runtime gates.
+Re-run the build + smoke on cutover day only if source changed since:
+
+```bash
+# 1. Ship source to the apollo build dir (NOT /opt/castor — that is
+#    the live legacy tree). From the dev box:
+tar czf /tmp/src.tgz --exclude=.git --exclude=node_modules \
+  --exclude=.venv --exclude='*.db' --exclude=.user \
+  --exclude=Desktop --exclude=.hermes .
+scp /tmp/src.tgz apollo:/opt/castor-build/
+ssh apollo 'cd /opt/castor-build && tar xzf src.tgz'
+
+# 2. Build (subsequent builds reuse the pnpm/uv layer cache):
+ssh apollo 'cd /opt/castor-build && docker build -f docker/Dockerfile \
+  -t castor:custom-<DATE> .'
+
+# 3. Import gate (runbook step 3 equivalent):
+ssh apollo 'docker run --rm --entrypoint /opt/pysetup/.venv/bin/python \
+  castor:custom-<DATE> -c "import castor.main; print(\"ok\")"'
+
+# 4. Throwaway smoke (full sequence, all gates, ~10 min):
+#    see slice-reports/slice-27-docker-gate.md "Commands" —
+#    volume + chown 65534, run on 127.0.0.1:9095 with DEBUG=true,
+#    verify /health, pages, register+login form, habit create + tick
+#    in SQLite, restart persistence, logout token_version bump.
+# 5. Clean up: docker rm -f castor-smoke && docker volume rm castor_smoke
+```
+
+Gates that must pass before cutover day proceeds (all verified in
+slice 27 on castor:custom-2026-09-25): import, dual-process boot,
+/health via proxy, page smoke, register + auto-login via the real
+form path, BFF habit create + form tick verified in SQLite,
+docker-restart persistence, logout + token_version bump, and
+backup/restore + integrity + re-login on the throwaway volume.
 
 ---
 
@@ -178,14 +222,36 @@ tokens, circles, audit events):
 sudo /usr/bin/docker volume inspect beaver_data --format '{{.Name}}'
 # If you want a clean name, alias it:
 sudo /usr/bin/docker volume create castor_data
-# Then point compose at castor_data and migrate data with sqlite3
+# Then point compose at castor_data and migrate data with the sqlite3
 # backup API (per apollo-beaverhabits skill):
-sudo /usr/bin/docker exec beaverhabits \
-  sqlite3 /app/.user/habits.db ".backup '/app/.user/habits.db.castor-backup'"
+#
+# NOTE (slice 28): the legacy image has NO sqlite3 CLI (verified
+# 2026-09-26: `docker exec beaverhabits which sqlite3` → not found),
+# so use the app's own Python. The heredoc form is deliberate: it
+# avoids the nested-quote traps that break `python -c "…VACUUM INTO
+# '…'…"` when run through ssh. Validated verbatim on a throwaway
+# volume (slice 28): writes a real 270KB backup as the app user.
+sudo /usr/bin/docker exec -i beaverhabits /opt/pysetup/.venv/bin/python - <<'PY'
+import sqlite3
+c = sqlite3.connect('/app/.user/habits.db')
+c.execute("VACUUM INTO '/app/.user/habits.db.castor-backup'")
+print('backup written')
+c.close()
+PY
 sudo /usr/bin/docker run --rm \
   -v beaver_data:/from -v castor_data:/to \
   alpine sh -c "cp /from/* /to/ && chown -R 65534:65534 /to"
 ```
+
+**Ownership is load-bearing** (slice 27 rehearsal finding): both the
+legacy and migration images run as `nobody` (uid 65534). Any volume
+copy/restore done by a root sidecar (or any file written by root into
+the volume) leaves the DB root-owned and the next container boot dies
+with `sqlite3.OperationalError: attempt to write a readonly database`
+(gunicorn worker exit 3). The `chown -R 65534:65534` above is NOT
+optional cleanup — without it the app will not start. If a restore is
+ever done with a different sidecar, re-run the chown before `docker
+compose up`.
 
 **Decision required**: keep `beaver_data` (zero-effort) or rename to
 `castor_data` (cleaner but requires a brief cutover outage for the
@@ -202,22 +268,24 @@ this **once** on apollo BEFORE pointing compose at the new image:
 
 ```bash
 # On apollo, inside the running container:
+# (slice 28: cursor.rowcount — connection.rowcount does not exist and
+#  would crash before commit, bumping nobody. Validated 2026-09-26.)
 sudo /usr/bin/docker exec beaverhabits /opt/pysetup/.venv/bin/python -c "
 import sqlite3
 c = sqlite3.connect('/app/.user/habits.db')
-c.execute('UPDATE user SET token_version = token_version + 1')
-print('Bumped', c.rowcount, 'users')
+cur = c.execute('UPDATE user SET token_version = token_version + 1')
+print('Bumped', cur.rowcount, 'users')
 c.commit()
 c.close()
 "
 
 # Verify:
-sudo python3 -c "
+sudo python3 - <<'PY'
 import sqlite3
 c = sqlite3.connect('/var/lib/docker/volumes/beaver_data/_data/habits.db')
 print('token_version distribution:',
       c.execute('SELECT token_version, COUNT(*) FROM user GROUP BY token_version').fetchall())
-"
+PY
 ```
 
 The image restart (which `docker compose up -d` will trigger) loads
@@ -294,9 +362,18 @@ sudo /usr/bin/docker run --rm castor:custom-2026-09-XX \
   /opt/pysetup/.venv/bin/python -c "import castor.main; print('ok')"
 
 # 4. Backup the DB BEFORE touching the running container
-sudo /usr/bin/docker exec beaverhabits \
-  sqlite3 /app/.user/habits.db \
-  ".backup '/app/.user/habits.db.pre-cutover-$(date -u +%Y%m%dT%H%M%SZ)'"
+# (slice 28: legacy image has no sqlite3 CLI; heredoc form avoids
+#  nested-quote breakage over ssh — validated on a throwaway volume)
+sudo /usr/bin/docker exec -i beaverhabits /opt/pysetup/.venv/bin/python - <<'PY'
+import sqlite3, subprocess
+c = sqlite3.connect('/app/.user/habits.db')
+target = '/app/.user/habits.db.pre-cutover-' + subprocess.run(
+    ['date', '-u', '+%Y%m%dT%H%M%SZ'], capture_output=True, text=True
+).stdout.strip()
+c.execute("VACUUM INTO '" + target + "'")
+print('backup written:', target)
+c.close()
+PY
 ```
 
 ### Cutover (T+0, ~5 min downtime)
@@ -308,18 +385,29 @@ sudo /usr/bin/docker compose stop castor
 # (or 'beaverhabits' if you kept the old service name)
 
 # 6. Bump token_version (see §4)
-sudo /usr/bin/docker run --rm \
+# (slice 28: stock alpine has no sqlite3 CLI — verified 2026-09-26.
+#  Use the venv Python from the already-built new image instead.
+#  Validated verbatim on a throwaway volume: cursor.rowcount, not
+#  connection.rowcount — the §4 phrasing would have crashed before
+#  commit and silently bumped nobody.)
+sudo /usr/bin/docker run --rm -i \
   -v beaver_data:/app/.user \
   --user 65534:65534 \
-  alpine sqlite3 /app/.user/habits.db \
-  "UPDATE user SET token_version = token_version + 1;"
+  castor:custom-2026-09-25 /opt/pysetup/.venv/bin/python - <<'PY'
+import sqlite3
+c = sqlite3.connect('/app/.user/habits.db')
+cur = c.execute('UPDATE user SET token_version = token_version + 1')
+print('Bumped', cur.rowcount, 'users')
+c.commit()
+c.close()
+PY
 
 # 7. Verify the bump
-sudo python3 -c "
+sudo python3 - <<'PY'
 import sqlite3
 c = sqlite3.connect('/var/lib/docker/volumes/beaver_data/_data/habits.db')
-print(c.execute('SELECT MIN(token_version), MAX(token_version) FROM user').fetchone())
-"
+print('MIN,MAX token_version:', c.execute('SELECT MIN(token_version), MAX(token_version) FROM user').fetchone())
+PY
 # Expect: (N, N) where N > 0 (everyone bumped by 1).
 
 # 8. Update compose env (WEBAUTHN_RP_ID) — DO THIS BEFORE RESTART
@@ -394,11 +482,23 @@ sudo /usr/bin/docker inspect castor --format '{{index .Config.Image}}'
 # Expect: castor:custom-2026-09-14
 
 # Restore DB if you took a snapshot in step 4
-sudo /usr/bin/docker exec beaverhabits sh -c "
-  cp /app/.user/habits.db.pre-cutover-* /app/.user/habits.db
-  sqlite3 /app/.user/habits.db 'PRAGMA integrity_check;'
-"
-# Expect: ok
+# (slice 28: sqlite3 CLI doesn't exist in the app image either —
+#  use Python; heredoc form. The restore runs INSIDE the app
+#  container, so files are written as the app user — no chown needed
+#  on this path. Replace RESTORE_THIS with the actual filename.)
+sudo /usr/bin/docker exec -i beaverhabits /opt/pysetup/.venv/bin/python - <<'PY'
+import glob, shutil, sqlite3
+candidates = sorted(glob.glob('/app/.user/habits.db.pre-cutover-*'))
+if not candidates:
+    raise SystemExit('No pre-cutover backup found in /app/.user/')
+latest = candidates[-1]
+print('Restoring from:', latest)
+shutil.copy(latest, '/app/.user/habits.db')
+c = sqlite3.connect('/app/.user/habits.db')
+print('integrity:', c.execute('PRAGMA integrity_check').fetchone()[0])
+c.close()
+PY
+# Expect: integrity: ok
 
 # Confirm rollback by re-running post-cutover verification (steps 12-13)
 ```
