@@ -161,10 +161,16 @@ USER nobody
 # sends an operator hunting a fault that does not exist.
 #
 # 10s is still well inside the 30s interval, so a genuinely dead container is
-# detected within one interval either way, but a busy host no longer produces
-# a false negative. The probe itself has a 2s socket timeout, so a hung
-# service fails fast regardless.
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=45s \
+# detected within one interval either way. The probe's own 2s socket timeout
+# means a hung service fails fast regardless.
+#
+# start-period is 90s because the app does not bind :8080 until after
+# create_db_and_tables, gunicorn fork and the demo seed — measured at ~70s from
+# container start on apollo, and 45s produced three spurious failures before
+# the first success. Failing checks during the start period do not count
+# towards the failure streak, so this removes a misleading "unhealthy" blip
+# from every single restart without masking a genuine later failure.
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=90s \
     CMD python healthcheck.py
 
 # DRIFT-1 (audit 2026-09-26): the running image was built from a directory
