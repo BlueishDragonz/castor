@@ -17,9 +17,10 @@ Last updated: 2026-09-26
 | Status | Count | Findings |
 | --- | --- | --- |
 | FIXED | 18 | F1 F2 F4 F5 F6 F7 F8 F9 F11 F12 F15 F16 F17 F18 F19 F21 F22 F23 |
+| FIXED, race eliminated | 1 | F17 (second pass — count-then-insert replaced by an atomic seat claim) |
 | FIXED, DEPLOY PENDING | 2 | F20, F26 |
 | DEPLOY ACTION | 2 | F3, F13 |
-| CONFIRMED, ACTION HELD | 1 | F10 |
+| CONFIRMED, DONE | 1 | F10 |
 | BENIGN / NO ACTION NEEDED | 1 | F14 |
 | NOT CODE-FIXABLE | 2 | F24(partly), DRIFT-2 |
 
@@ -277,11 +278,11 @@ for an app holding personal data. Now opt-in via `SENTRY_SEND_PII` (default
 Test: a subprocess boots `castor.main` with a DSN set and `sentry_sdk` import
 blocked, asserting `BOOT_OK`.
 
-### F10 — Legacy NiceGUI session files — CONFIRMED DEAD, DELETION HELD
+### F10 — Legacy NiceGUI session files — CONFIRMED DEAD, DELETED
 
-**Invalidation is confirmed against the live data. The deletion has not been
-performed** — see "F10 — invalidation confirmed" below for the evidence and
-the reasoning.
+**Invalidation confirmed against the live data, then deleted** (operator
+decision F10-A). See "F10 — invalidation confirmed" below for the evidence
+and the reasoning.
 
 What is done: the app no longer writes this pattern;
 `test_f10_sessions_stay_in_memory_with_bounded_ttl` asserts the session
@@ -291,15 +292,60 @@ reaps the leftovers without ever printing a token.
 
 **Requires:** one command, after the F1 backup exists.
 
-### F13 — Monitoring, log rotation, stale images — PARTIAL
+### F13 — Monitoring, log rotation, stale images — MOSTLY FIXED
 
 - Log rotation: **FIXED** in `docker-compose.yml` (`max-size: 10m`,
   `max-file: 3`).
 - Stale images (19 on the host, 1 dangling): **DEPLOY ACTION** — needs a prune
   policy on apollo.
-- **No alerting exists.** This is the real gap. The fixes above make an OOM
-  kill and a backup failure *survivable*, but nothing tells an operator they
-  happened. A backup that silently stops running is nearly as bad as no backup.
+- **Monitoring: FIXED via Sentry**, for both the Astro frontend and the Python
+  backend, wired end to end.
+
+  This was the audit's standing gap — "no detection of any of the above" —
+  and the reason an OOM kill or a post-deploy crash was something a user
+  found out before an operator did.
+
+  F11's privacy posture is enforced explicitly rather than inherited.
+  Sentry's defaults attach request bodies, headers, cookies, user identity
+  and URL query strings to every event; this app handles passwords, recovery
+  codes and habit data. So both SDKs run `sendDefaultPii: false`,
+  `dataCollection` is off for `userInfo`/`headers`/`cookies`/`formData`, query
+  strings and fragments are stripped, session replay is pinned to 0, the
+  server config discards the request object entirely, and `beforeSend` scrubs
+  JWT- and SHA256-shaped values from anywhere they can appear — including
+  breadcrumbs and interpolated error messages, which a blocklist on request
+  keys would not reach.
+
+  `web/concepts/scripts/check-sentry-config.mjs` asserts all of that, **and**
+  that the DSN is genuinely present in `dist/` — an SDK that is installed but
+  never injected produces a build that looks fine and reports nothing. That
+  check's first version had inverted `find` exit handling and reported
+  sourcemaps that did not exist.
+
+  **Source maps are not shipped**: the build deletes `dist/**/*.map` after
+  upload, verified as zero `.map` files. Leaving them would publish the
+  application's full source.
+
+  ### One thing is not working
+
+  **The supplied `SENTRY_AUTH_TOKEN` is rejected by Sentry** — `401
+  Unauthorized` from `sentry.io`, confirmed directly against the API, not
+  inferred from the build output. So source maps are **not** being uploaded
+  and stack traces in Sentry will be minified.
+
+  Runtime error reporting is unaffected: that needs only the public DSN, which
+  works. The build is green, and the failure is a warning rather than a build
+  error, which is precisely why it needed saying out loud — a revoked token
+  and a successful upload look identical from the build output.
+
+  A valid org auth token for `jr-w2` is needed. Until then: the project will
+  receive error events, and the traces in them will not be symbolicated.
+
+  The token is passed by BuildKit secret mount, never as a build-arg or an
+  inline ENV. An earlier version wrote it in plaintext to the build log, which
+  is recorded in the commit history along with the reason; the log was
+  scrubbed. Verified: zero occurrences in the current build log and zero in
+  `docker history`.
 
 ### F26 — Duplicate, weaker cookie mirroring — FIXED, DEPLOY PENDING
 
@@ -346,13 +392,14 @@ scratch, correctly ignored) remains untracked.
 
 ## Additional findings — not in the audit
 
-These were found while remediating and are not in the original report. All five
-were real defects, and three are the kind that silently break the very mechanism
-meant to fix a finding.
+These were found while remediating and are not in the original report. All
+**eight** were real defects, and five are the kind that silently break the very
+mechanism meant to fix a finding — or report a fault that is not there.
 
-Number 5 is the strongest argument in this document for testing what is actually
-deployed: it survived the whole suite, `astro check`, Pyright and a 446-test
-run, and was found only by starting the container.
+Numbers 5, 7 and 8 are the argument for this whole section: every one of them
+passed the full suite, `astro check`, Pyright and a green build, and was found
+only by starting the container. Number 7 is the worst of them — a monitoring
+control that reported a fault which did not exist.
 
 ### 1. The test suite was writing to the live development database — FIXED
 
@@ -413,6 +460,7 @@ type check as part of the verification and not only the tests. Log lines should
 now identify a record by its `customer_id`, which is a stable identifier and
 carries no personal data.
 
+
 ### 5. Misleading migration diagnostics — FIXED
 
 Found only by running the container, not by any test. A start with the data
@@ -430,6 +478,52 @@ Widening that filter to re-admit `already exists` was itself a mistake on the
 first attempt: the existing concurrency test caught it immediately, which is
 the argument for keeping that test.
 
+### 6. The version marker outlived the schema it described — FIXED
+
+`_schema_is_current` trusted the recorded `SCHEMA_VERSION` on its own. But a
+version marker is a *claim* about what was applied, and a claim can outlive
+the thing it describes: `Base.metadata.drop_all` in a test fixture, a partial
+restore, or a hand-run script drops the application tables while leaving
+`schema_migration` behind. The gate then read "current", skipped every
+migration, and the first real query died with "no such table".
+
+Boot now confirms the schema-defining tables exist before trusting the marker.
+
+Surfaced as "F17 tests fail in the full suite but pass alone" — the ordering
+was the symptom, the version gate was the cause.
+
+### 7. The health check reported unhealthy while serving perfectly — FIXED
+
+`healthcheck.py` used `requests.get`, and `import requests` alone costs
+**9.1s** in this image. The probe took 5.5s against a `--timeout=3s` health
+check, so it never once completed in time.
+
+The container booted, logged "Application startup complete", served `/health`
+200 on both ports — and Docker reported `unhealthy` with a failing streak of
+5. A health check that reports an outage which does not exist is worse than no
+health check: it sends an operator hunting a fault that isn't there, and as a
+rollout gate it would block healthy deploys.
+
+Now uses `urllib.request` (0.8s to import, 0.5s for the request), with
+`--timeout=10s` and `--start-period=90s`. The start period is measured, not
+guessed: the container takes **42s** to reach "Application startup complete"
+before the port binds, and 45s produced three spurious failures before the
+first success.
+
+### 8. The Sentry token leaked into the build log — FIXED
+
+Two wrong ways to pass a secret to a build, both found by running one:
+
+- `--build-arg` with no matching `ARG` is **accepted and silently discarded** —
+  green build, no warning, no source maps uploaded.
+- An inline env var on the `RUN` is expanded and echoed by buildkit into the
+  build log. The first real build wrote the token in plaintext to
+  `/tmp/deploy-build.log`.
+
+Replaced with a BuildKit secret mount. Verified: zero occurrences in the build
+log, zero in `docker history`. The log was scrubbed and the staged token file
+deleted.
+
 ---
 
 ## Verification performed
@@ -443,10 +537,12 @@ the argument for keeping that test.
 | `/health` in the container | `GET /health 200` (F8) |
 | **F2 graceful shutdown** | **`docker stop` → trap fired → `Handling signal: term` → `Flushed pending habit-list writes on shutdown` → `Application shutdown complete` → exit 143 in 4s (not 137/SIGKILL)** |
 | DRIFT-1 | `docker inspect ... image.revision` → `87bfe740e0cb` |
-| Full backend suite | **458 passed, 12 skipped** (excluding `test_batch4_live.py`) |
+| Full backend suite | **466 passed, 12 skipped** (excluding `test_batch4_live.py`) |
 | `astro check` | 0 errors, 0 warnings |
 | `pnpm build` | succeeds |
 | F7 gate vs. vulnerable code | exits 1 (vulnerable) / 0 (fixed) |
+| F13 Sentry config gate | 19 checks, all pass; fails if the integration is re-gated on the token |
+| F13 Sentry build output | DSN present in `dist/`, zero `.map` files shipped |
 | F22 CI gate vs. vulnerable code | exits 1, reporting the live off-site redirect |
 | F22 gate live, 6 cases | pass (absolute, protocol-relative, backslash, javascript:, same-site control) |
 | F7 BFF 401 gate live, 6 cases | pass (GET/POST/DELETE on the new routes) |
@@ -458,6 +554,7 @@ the argument for keeping that test.
 | `docker compose config` (apollo) | valid |
 | Backup against corrupt source | exits 1, leaves no partial file |
 | Build artifact token scan | no `__SECURITY_TOKEN__`, no client-side `Bearer` |
+| F17 concurrency, vs. racy code | fails as required (grants exceed the limit) |
 | Pyright vs. baseline | 8 vs. 7 pre-existing; the one addition is `Result.rowcount`, a false positive (same pattern already used in `webauthn_routes.py`, `users.py`, `auth.py`) and proven correct at runtime by the conflict test |
 
 ## Not verified — stated plainly
@@ -468,10 +565,10 @@ the argument for keeping that test.
   host. Both are deliberate, separate steps.
 * **The audit's exploits were reasoned, not run**, and were never run against
   Apollo. Negative controls here were run against *local* code only.
-* **F10: invalidation CONFIRMED, deletion NOT performed.** See below.
+* **F10: invalidation CONFIRMED, and the files deleted.** See below.
 
 
-## F10 — invalidation confirmed, deletion held for your approval
+## F10 — invalidation confirmed, then deleted
 
 The audit said: confirm all are invalid, *then* delete. Do not delete before
 confirming. So the confirmation was done first, with a tool that will not
@@ -499,13 +596,16 @@ Summary: 11 dead, 0 live, 0 unknown, 11 total
 
 Run against a copy, with production untouched and the 11 files still in place.
 
-### Why I did not just delete them
+### Order of operations
 
-The reaper ran report-only. Deleting live-volume state is a one-way action on
-production data, and the remaining two files are the only record that those
-credentials ever existed. Confirming invalidity is the reversible half; the
-deletion is the irreversible half. That is your call, and the tool is built to
-make it a single, safe command:
+The F1 backup was taken and verified first (off-volume, root-owned 0600,
+`PRAGMA integrity_check` = ok, 16 users, 2 habit lists), so the deletion had a
+real undo before it happened. The reaper was then re-run report-only against
+the live volume — still 11 dead, 0 live, 0 unknown — and only then run with
+`--delete`. It removed all 11 and left a copy at
+`.nicegui-backup-20260926T213417` in the same volume.
+
+The command, for the record:
 
 ```
 # after the F1 backup timer has produced at least one good snapshot
