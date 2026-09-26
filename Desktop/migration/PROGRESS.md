@@ -1,19 +1,29 @@
 # Castor migration — progress + next-session handoff
 
 > One-stop doc for resuming the Astro+shadcn migration of the
-> NiceGUI/Quasar habit tracker. Updated 2026-09-25 after slice 21.
+> NiceGUI/Quasar habit tracker. Updated 2026-09-25 (late) after
+> slices 24–26; baseline re-verified fresh this session.
 
-## Status: NOT ready to cut over — slice 22x + 23c landed
+## Status: NOT ready to cut over — slices 24–26 landed; Phase-4 gates outstanding
 
-- Branch head on `release/astro-migration`: **`5a8ca1c`** (slice 23c).
-- `astro check`: 0 errors / 0 warnings / 58 hints.
-- `pytest tests/ --ignore=tests/test_batch4_live.py`: **383 passed**
-  + 12 skipped** (368 baseline + 6 new slice-23a tests).
-- Demo seed: `demo@castor.example.com / DemoPass1234!` — re-seeded
-  every time `dev-up.sh` is run.
+- Branch head on `release/astro-migration`: **`96a6a41`** (slice 26d).
+- `astro check`: 0 errors / 0 warnings / 58 hints (108 files).
+- `pytest tests/ --ignore=tests/test_batch4_live.py`: **392 passed**
+  + 12 skipped** (fresh run 2026-09-25 late, 365s).
+- `audit_parity_matrix.py`: 9 open rows — 7 genuine, all
+  intentional/deferred (3.4, 6.2, 6.4, 7.3, 11.2, 12.2, 12.5).
+- Slice-22x fixes **verified in browser** this session: `/security`
+  renders all four sections when authenticated (was stuck Loading),
+  `/habits` header strip flush + styled Add-habit, one Open menu per
+  page. Login → tick → persistence confirmed: the ticked record
+  landed in `.user/habits.db` (`habit_list.data` JSON blob);
+  `circle_member` empty (self-join fix holds).
+- Phase-4 cutover gates NOT yet exercised: Docker smoke on the built
+  image, backup/restore rehearsal, 24h monitoring (slice-19 runbook).
+  `docker-compose.yml` image tag still `castor:custom-2026-09-XX`
+  (pinned at cutover, per plan).
 - **2026-09-25 walkthrough** — see `dogfood-2026-09-25.md`. Slices
-  22, 23a, 23b landed in this session; see `slice-reports/`.
-- Slices 22x, 23c still open (small remaining gaps — see below).
+  22, 23a, 23b, 23c, 24d–g, 25, 26 landed after it; see `slice-reports/`.
 
 ## Slices completed this session
 
@@ -28,14 +38,15 @@
 15–21 from earlier this session; slices 22-prep + 22 + 23a + 23b from
 this dogfood response).
 
-## What's still open (post-slice-23b)
+## What's still open (post-slice-26d)
 
 | # | Item | Severity | Plan |
 |---|---|---|---|
-| 22x | `/habits` day-of-week header strip still floats above first row | Low | tighten HabitGrid.astro container |
-| 22x | `+ Add habit` still plain text (HabitGrid.astro) | Low | shadcn Button |
-| 22x | `/security` Loading bug (SecurityContent.tsx) | Medium | investigate + fix the inline-script / hydration race |
-| 23c | Email delivery + HTML template + SMTP wiring | Medium | dogfood finding A; apollo SMTP env needed |
+| 22x | day-of-week strip + Add-habit + /security Loading | — | DONE — `956cec2`; browser-verified 2026-09-25 late |
+| 23c | Email delivery + HTML template + SMTP wiring | — | DONE — `5a8ca1c`; apollo SMTP env still needed for real delivery (dev uses SMTP_DEV_LOCAL_OUTBOX) |
+| 24d–g | member shares + welcome roster + empty-state | — | DONE — `1b53fcc`…`7dd8d42` |
+| 25 / 26 | vanta public surface + landing shopfront + /help cards | — | DONE — `f546c20`…`96a6a41` |
+| — | Cutover gates (Phase 4) | High | Docker smoke on built image + backup/restore rehearsal + 24h monitoring — not yet run |
 
 ## Slices completed this session
 

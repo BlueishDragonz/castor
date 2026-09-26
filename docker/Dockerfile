@@ -50,14 +50,49 @@ done
 # ─────────────────────────────────────────────────────────────────────
 FROM node:22.12-bookworm-slim AS astro-builder
 WORKDIR /build
-RUN corepack enable
-COPY web/concepts/package.json web/concepts/pnpm-lock.yaml ./
+# Install pnpm directly via npm instead of corepack. node:22.12's
+# bundled corepack has a stale npm signing-key keyring and hard-fails
+# ("Cannot find matching keyid") when fetching pnpm from the registry
+# after npm's 2026 key rotation. npm treats registry signatures as
+# advisory and installs fine; pinning pnpm@12.5.1 matches the local
+# dev toolchain (lockfileVersion '9.0') and makes the image build
+# deterministic. Trade-off: no corepack "known good versions"
+# protection — accepted because corepack itself is what is broken.
+RUN npm install -g pnpm@12.5.1
+# pnpm-workspace.yaml is REQUIRED in the install layer: pnpm ≥10 no
+# longer reads the "pnpm" field from package.json (prints "no longer
+# read" warning), and the build approvals (allowBuilds: esbuild,
+# @tailwindcss/oxide, sharp) live in the workspace file. Without it,
+# pnpm 12 hard-fails with ERR_PNPM_IGNORED_BUILDS on esbuild.
+# Verified in a clean-dir repro before patching (2026-09-25).
+COPY web/concepts/package.json web/concepts/pnpm-lock.yaml web/concepts/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/concepts ./
+# BACKEND_URL as a BUILD env (declared after the cached dependency
+# layers so changing it doesn't re-run pnpm install): Vite inlines
+# import.meta.env.* at build time (unlike process.env, read at
+# runtime). ~15 server files (pages/api/v1/habits*.ts,
+# habits/[id].astro, tokens.astro, ...) use
+# import.meta.env.BACKEND_URL and silently fell back to dev's
+# localhost:8085 in the built image — the habits BFF 500'd in the
+# Phase-4 Docker smoke until this was set. Value matches the
+# production-stage ENV and docker-compose BACKEND_URL.
+# Trade-off: changing the backend port now requires an image rebuild.
+ENV BACKEND_URL=http://127.0.0.1:8081
 RUN pnpm exec astro build
 
 
 FROM python-base AS production
+# Node runtime for the Astro standalone server. The production base is
+# python:3.14-slim (trixie) which ships no Node; the slice-20 CMD execs
+# `node web/concepts/dist/server/entry.mjs` and the container died with
+# "exec: node: not found" (exit 127) until this was added. The bookworm
+# node binary only needs libstdc++/libgcc/glibc — all satisfied on trixie.
+# apt: libstdc++6 explicitly because slim images don't include it.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libstdc++6 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY --from=astro-builder /usr/local/bin/node /usr/local/bin/node
 EXPOSE 8080
 COPY --from=builder-base $PYSETUP_PATH $PYSETUP_PATH
 WORKDIR /app
