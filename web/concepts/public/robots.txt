@@ -1,0 +1,30 @@
+# Castor - robots.txt
+# Self-hosted instances are typically VPN-only; this file exists so that
+# publicly-exposed deployments are crawled correctly.
+
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /register
+Allow: /terms
+Allow: /privacy
+Allow: /help
+
+# Disallow authenticated pages
+Disallow: /habits
+Disallow: /circles
+Disallow: /stats
+Disallow: /settings
+Disallow: /security
+Disallow: /tokens
+Disallow: /admin
+Disallow: /account
+
+# Disallow API endpoints
+Disallow: /api/
+Disallow: /auth/
+Disallow: /metrics
+Disallow: /health
+
+# Crawl delay to be polite
+Crawl-delay: 1

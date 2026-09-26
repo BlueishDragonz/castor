@@ -98,7 +98,6 @@ COPY --from=builder-base $PYSETUP_PATH $PYSETUP_PATH
 WORKDIR /app
 COPY start.sh .
 COPY castor ./castor
-COPY statics ./statics
 COPY healthcheck.py .
 
 # Astro build output + node_modules tree (the standalone server entry

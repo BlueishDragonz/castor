@@ -101,12 +101,11 @@ init_auth_routes(app)
 app.include_router(reset_router)
 init_api_routes(app)
 app.include_router(admin_router)
-if settings.ENABLE_PLAN:
-    from castor.plan.paddle import init_paddle_routes
-    from castor.routes.astro import init_astro_routes
-
-    init_astro_routes(app)
-    init_paddle_routes(app)
+# Paid-plan / landing-page surface (Paddle billing, statics/astro mount) was
+# removed at slice 30: ENABLE_PLAN was never enabled in production and the
+# Paddle integration was dropped during the migration (parity 12.3). The
+# ENABLE_PLAN setting and the PADDLE_* env vars remain in configs.py as
+# upstream-merge ballast; nothing reads them.
 
 from castor.app.http_security import BrowserOriginMiddleware
 from castor.app.rate_limits import IPRateLimitMiddleware
