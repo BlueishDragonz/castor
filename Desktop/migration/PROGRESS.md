@@ -20,9 +20,17 @@
   persistence, logout + token_version bump, backup/restore +
   integrity + re-login. Evidence:
   `slice-reports/slice-27-docker-gate.md`.
-- Remaining before cutover: pick date/tag, runbook T-1h pre-flight,
-  SMTP env on apollo (slice 23c), rpId check from a VPN client,
-  and the runbook-rollback chown note (slice-27 rehearsal finding).
+- Slice-28 (runbook hardening) landed: every cutover-day backup /
+  token_version-bump / rollback-restore command in the slice-19
+  runbook was rewritten (no sqlite3 CLI exists in any of the three
+  images; Connection.rowcount crash-before-commit bug; heredoc
+  form for ssh safety) and executed verbatim on throwaway apollo
+  containers. Bonus fix: the circles share-your-habit wizard POST
+  had no BFF route (would 404 in production; dev Vite proxy masked
+  it) — fixed + verified; `audit_bff_coverage.py` now clean.
+- Remaining before cutover: pick date/tag, SMTP env on apollo
+  (slice 23c), rpId check from a VPN client (cutover day), and
+  the runbook T-1h pre-flight run on the day.
 
 ## Slices completed this session
 
