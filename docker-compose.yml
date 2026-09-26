@@ -2,13 +2,13 @@
 # The live copy on the host is /opt/castor/docker-compose.yml; keep the
 # two in sync (image tag + volume name will differ per environment).
 #
-# Real secrets live in .user/.secrets.env INSIDE the castor_data volume
+# Real secrets live in .user/.secrets.env INSIDE the data volume
 # (the container loads them at startup via castor/configs.py). Nothing
 # secret goes in this file.
 
 services:
   castor:
-    image: castor:custom-2026-09-XX   # PIN a custom tag — never :latest
+    image: castor:custom-2026-09-26-f1   # PIN a custom tag — never :latest
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -46,7 +46,7 @@ services:
       # NICEGUI_STORAGE_SECRET, SMTP_EMAIL_USERNAME/PASSWORD) come from
       # .user/.secrets.env inside the volume — set them there.
     volumes:
-      - castor_data:/app/.user/
+      - beaverhabits_beaver_data:/app/.user/
     restart: unless-stopped
 
     # ─── F3: resource limits ─────────────────────────────────────────────
@@ -95,10 +95,25 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      # F3/F8: give a slow-starting database time to come up before the first
-      # probe, so a restart loop is not triggered by a cold start.
-      start_period: 20s
+      # F3/F8: the application takes ~42s to reach "Application startup complete"
+      # before it binds. A short start_period makes every restart look like a
+      # failure, so this must exceed the real cold-start time — the image's own
+      # HEALTHCHECK sets 90s, and compose overrides it, so the two are kept
+      # identical deliberately. An earlier 20s here produced three spurious
+      # unhealthy results on every boot.
+      start_period: 90s
 
 volumes:
-  castor_data:
+  # NOTE the name. Production does not use `castor_data`; the live volume is
+  # `beaverhabits_beaver_data`, which holds every account, habit and secret.
+  #
+  # Declared `external: true` so compose will NEVER create it. If the name is
+  # wrong, compose fails loudly with "external volume not found" rather than
+  # silently creating an empty one — and then starting a container with no
+  # data in it, which looks like a working deploy until someone opens the
+  # site and finds an empty app.
+  #
+  # That is not hypothetical: this exact mismatch was hit during the cutover
+  # and caught only because `external: true` did its job.
+  beaverhabits_beaver_data:
     external: true

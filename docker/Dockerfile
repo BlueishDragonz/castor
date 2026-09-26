@@ -21,7 +21,14 @@ RUN sh /uv-installer.sh && rm /uv-installer.sh
 ENV PATH="/root/.local/bin/:$PATH"
 
 COPY uv.lock pyproject.toml ./
-RUN uv sync --frozen --no-install-project --no-dev -v
+# F25/F13: `--extra sentry` is required, not optional.
+#
+# Without it the production image has no sentry-sdk, and the app logs
+# "SENTRY_DSN is set but the sentry-sdk package is not installed" on every
+# boot — the graceful-degradation path working exactly as designed, while
+# silently providing no error reporting at all. That is the worst outcome:
+# a monitoring control that is installed, configured, and inert.
+RUN uv sync --frozen --no-install-project --no-dev --extra sentry -v
 
 # [Experimental] Remove unused nicegui libs
 ENV NICEGUI_LIB_PATH="$VENV_PATH/lib/python*/site-packages/nicegui/elements/lib"
