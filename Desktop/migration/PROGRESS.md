@@ -42,8 +42,14 @@
 - Health streak (currently 0 failing; compose healthcheck 10s).
 - First real logins from VPN devices (passkey users may need one
   re-registration due to rpId change localhost → 10.8.0.1).
-- SMTP env for circles invite email still unset (slice 23c) —
-  invites are link-only until configured.
+- ~~SMTP env for circles invite email still unset~~ RESOLVED
+  2026-09-26: production volume `.secrets.env` already carries valid
+  Gmail app-password credentials; empty SMTP_HOST routes through the
+  preserved smtp.gmail.com:465 SSL path. Verified with a real login
+  + two test sends (plaintext + HTML, the exact `send_email` code
+  path circles invites use) from the production container. Circles
+  invite emails are fully operational; no action needed unless
+  migrating away from Gmail (then set SMTP_HOST/PORT/USE_TLS/FROM).
 - Slice-28 (runbook hardening) landed: every cutover-day backup /
   token_version-bump / rollback-restore command in the slice-19
   runbook was rewritten (no sqlite3 CLI exists in any of the three
