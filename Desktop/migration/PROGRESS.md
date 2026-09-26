@@ -1,25 +1,49 @@
 # Castor migration — progress + next-session handoff
 
 > One-stop doc for resuming the Astro+shadcn migration of the
-> NiceGUI/Quasar habit tracker. Updated 2026-09-25 (late) after
-> slices 24–26; baseline re-verified fresh this session.
+> NiceGUI/Quasar habit tracker. Updated 2026-09-26 — CUTOVER DONE.
 
-## Status: NOT ready to cut over — Phase-4 Docker gates now PASSED on the built image
+## Status: CUTOVER COMPLETE — Astro app live in production
 
-- Branch head on `release/astro-migration`: **`906f4bd`** (slice 27 —
-  Docker gate: image built + all gates passed on apollo).
-- **Image `castor:custom-2026-09-25` (1.5GB) exists on apollo**, built
-  at `/opt/castor-build/` from a clean source tarball. Legacy
-  `/opt/castor/` + `beaverhabits` container untouched throughout.
+- **Production now runs `castor:custom-2026-09-26`** (image from branch
+  HEAD `a867213`, includes slice-28 circles BFF fix), container
+  `castor`, compose `/opt/castor/docker-compose.yml` (project `castor`),
+  volume `beaverhabits_beaver_data`, VPN URL http://10.8.0.1:8080.
+- Legacy `beaverhabits` container removed; stale orphan volumes
+  (`beaver_data`, `castor_beaver_data`) deleted (user-approved sunset).
+- Data preserved: 15 users, 2 habit lists, 1 webauthn credential,
+  audit history. token_version bumped for all (one forced re-login).
+- Post-cutover E2E verified on prod URL: login → habit create → tick →
+  SQLite record → restart persistence → logout revocation → probe
+  account deleted via the app's own path. Evidence:
+  `slice-reports/slice-29-cutover.md`.
+- Rollback route intact: `docker-compose.yml.legacy-20260926` +
+  `castor:custom-2026-09-14` image + pre-cutover DB backup
+  (`habits.db.pre-cutover-20260926T023424Z`). Keep ≥1 week.
 - `astro check`: 0 errors / 0 warnings / 58 hints (108 files).
 - `pytest tests/ --ignore=tests/test_batch4_live.py`: **392 passed**
-  + 12 skipped** (re-run against the regenerated uv.lock).
-- Slice-27 gates passed on the image: import, boot, /health via
-  proxy, page smoke, register + auto-login via the real form path,
-  BFF habit create + form tick verified in SQLite, docker-restart
-  persistence, logout + token_version bump, backup/restore +
-  integrity + re-login. Evidence:
-  `slice-reports/slice-27-docker-gate.md`.
+  + 12 skipped** (run at cutover T-1h).
+
+### Cutover-day deployment-reality corrections (IMPORTANT for future ops)
+
+- The live compose was `/opt/castor/docker-compose.yml` (project
+  `castor`), NOT `/opt/wg-net/...` — the wg-net beaverhabits entry was a
+  dead relic. Check `docker inspect <ctr> --format {{index
+  .Config.Labels "com.docker.compose.project.config_files"}}` before
+  trusting any compose path.
+- The live volume was `beaverhabits_beaver_data`, NOT external
+  `beaver_data` (that was a stale Sep-16 orphan with 4 old users;
+  caught by user-count divergence during the dry-run; deleted in
+  sunset).
+- Legacy env still had `WEBAUTHN_RP_ID=localhost`; now `10.8.0.1`.
+
+### Post-cutover watch items (24h)
+
+- Health streak (currently 0 failing; compose healthcheck 10s).
+- First real logins from VPN devices (passkey users may need one
+  re-registration due to rpId change localhost → 10.8.0.1).
+- SMTP env for circles invite email still unset (slice 23c) —
+  invites are link-only until configured.
 - Slice-28 (runbook hardening) landed: every cutover-day backup /
   token_version-bump / rollback-restore command in the slice-19
   runbook was rewritten (no sqlite3 CLI exists in any of the three
