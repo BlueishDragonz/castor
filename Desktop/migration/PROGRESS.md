@@ -4,26 +4,25 @@
 > NiceGUI/Quasar habit tracker. Updated 2026-09-25 (late) after
 > slices 24–26; baseline re-verified fresh this session.
 
-## Status: NOT ready to cut over — slices 24–26 landed; Phase-4 gates outstanding
+## Status: NOT ready to cut over — Phase-4 Docker gates now PASSED on the built image
 
-- Branch head on `release/astro-migration`: **`96a6a41`** (slice 26d).
+- Branch head on `release/astro-migration`: **`906f4bd`** (slice 27 —
+  Docker gate: image built + all gates passed on apollo).
+- **Image `castor:custom-2026-09-25` (1.5GB) exists on apollo**, built
+  at `/opt/castor-build/` from a clean source tarball. Legacy
+  `/opt/castor/` + `beaverhabits` container untouched throughout.
 - `astro check`: 0 errors / 0 warnings / 58 hints (108 files).
 - `pytest tests/ --ignore=tests/test_batch4_live.py`: **392 passed**
-  + 12 skipped** (fresh run 2026-09-25 late, 365s).
-- `audit_parity_matrix.py`: 9 open rows — 7 genuine, all
-  intentional/deferred (3.4, 6.2, 6.4, 7.3, 11.2, 12.2, 12.5).
-- Slice-22x fixes **verified in browser** this session: `/security`
-  renders all four sections when authenticated (was stuck Loading),
-  `/habits` header strip flush + styled Add-habit, one Open menu per
-  page. Login → tick → persistence confirmed: the ticked record
-  landed in `.user/habits.db` (`habit_list.data` JSON blob);
-  `circle_member` empty (self-join fix holds).
-- Phase-4 cutover gates NOT yet exercised: Docker smoke on the built
-  image, backup/restore rehearsal, 24h monitoring (slice-19 runbook).
-  `docker-compose.yml` image tag still `castor:custom-2026-09-XX`
-  (pinned at cutover, per plan).
-- **2026-09-25 walkthrough** — see `dogfood-2026-09-25.md`. Slices
-  22, 23a, 23b, 23c, 24d–g, 25, 26 landed after it; see `slice-reports/`.
+  + 12 skipped** (re-run against the regenerated uv.lock).
+- Slice-27 gates passed on the image: import, boot, /health via
+  proxy, page smoke, register + auto-login via the real form path,
+  BFF habit create + form tick verified in SQLite, docker-restart
+  persistence, logout + token_version bump, backup/restore +
+  integrity + re-login. Evidence:
+  `slice-reports/slice-27-docker-gate.md`.
+- Remaining before cutover: pick date/tag, runbook T-1h pre-flight,
+  SMTP env on apollo (slice 23c), rpId check from a VPN client,
+  and the runbook-rollback chown note (slice-27 rehearsal finding).
 
 ## Slices completed this session
 
