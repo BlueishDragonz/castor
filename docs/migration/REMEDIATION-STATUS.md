@@ -19,7 +19,12 @@ Last updated: 2026-09-26
 | FIXED | 18 | F1 F2 F4 F5 F6 F7 F8 F9 F11 F12 F15 F16 F17 F18 F19 F21 F22 F23 |
 | FIXED, DEPLOY PENDING | 2 | F20, F26 |
 | DEPLOY ACTION | 2 | F3, F13 |
-| OPEN / not code-fixable here | 4 | F10, F14, F24(partly), DRIFT-* |
+| CONFIRMED, ACTION HELD | 1 | F10 |
+| BENIGN / NO ACTION NEEDED | 1 | F14 |
+| NOT CODE-FIXABLE | 2 | F24(partly), DRIFT-2 |
+
+Every ID in the audit is now accounted for: 25 findings (F1–F26 less F14 and
+DRIFT-*) plus DRIFT-1, which is closed by the image revision label.
 
 ---
 
@@ -272,19 +277,19 @@ for an app holding personal data. Now opt-in via `SENTRY_SEND_PII` (default
 Test: a subprocess boots `castor.main` with a DSN set and `sentry_sdk` import
 blocked, asserting `BOOT_OK`.
 
-### F10 — Legacy NiceGUI session files with raw JWTs — OPEN (deploy action)
+### F10 — Legacy NiceGUI session files — CONFIRMED DEAD, DELETION HELD
 
-F10 is **not** a code fix. The audit correctly warns: *"Do not delete before
-confirming invalidation."* Seven `storage-user-*.json` files with `auth_token`
-JWTs sit in the live volume. The cutover bumped `token_version` for all users,
-which should invalidate them, but that has not been verified.
+**Invalidation is confirmed against the live data. The deletion has not been
+performed** — see "F10 — invalidation confirmed" below for the evidence and
+the reasoning.
 
-What *is* done: the app no longer writes this pattern, and
-`test_f10_sessions_stay_in_memory_with_bounded_ttl` asserts the session storage
-is a bounded in-memory `TTLCache` with no file-writing surface.
+What is done: the app no longer writes this pattern;
+`test_f10_sessions_stay_in_memory_with_bounded_ttl` asserts the session
+storage is a bounded in-memory `TTLCache` with no file-writing surface; and
+`scripts/reap_legacy_nicegui_tokens.py` verifies and, on explicit request,
+reaps the leftovers without ever printing a token.
 
-**Requires:** confirm the tokens are invalid, then delete. Do not skip the
-confirmation step.
+**Requires:** one command, after the F1 backup exists.
 
 ### F13 — Monitoring, log rotation, stale images — PARTIAL
 
@@ -304,20 +309,38 @@ middleware runs on every request, *its* weaker values won. Now uses the shared
 `mirrorWebAuthnBrowserCookie` from `lib/auth.ts`. Registration completion was
 likewise switched to the shared `writeSession`.
 
-### F14 / DRIFT-1 — Deploy/repo drift — OPEN
+### DRIFT-1 — Which commit is running? — FIXED
 
-**DRIFT-1 (High) is the significant one and is not fixed.** The running image was
-built from `/opt/castor-build`, which is **not a git repository**. The audit
-established by md5 that the shipped code matches `release/astro-migration`, but
-*the audit* established that — not any build-time mechanism. **Right now there
-is no reliable way to say which commit is running.**
+**Was:** the running image was built from `/opt/castor-build`, which is **not a
+git repository**. The audit established by md5 that the shipped code matched
+`release/astro-migration` — but *the audit* established that, not any
+build-time mechanism. There was no reliable way to say which commit was
+running.
 
-Not addressed here because it is a deployment-pipeline decision, not a code
-change: the fix is to build from a tagged commit and stamp the commit SHA into
-the image (e.g. `LABEL org.opencontainers.image.revision`) so the running
-version is queryable. Recommended as its own piece of work.
+**Now:** the Dockerfile takes `GIT_SHA` and stamps it as
+`org.opencontainers.image.revision`. It defaults to `unknown`, so a build that
+forgets to pass the SHA is visibly unlabelled rather than silently
+mislabelled.
 
-`pyproject.toml` `[fly]` group drift was assessed benign by the audit.
+```
+$ docker inspect castor --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+87bfe740e0cb
+```
+
+Verified on a real image built on apollo from a `git archive` context.
+
+### F14 — pyproject/uv.lock drift — BENIGN, VERIFIED
+
+The audit's own correction concluded this is harmless: `uv sync --frozen`
+validates the pair and hard-fails on mismatch, so both the deployed and HEAD
+pairs were self-consistent. Re-checked during this pass — `uv lock --check`
+resolves cleanly. No action needed.
+
+### DRIFT-2 — Untracked prior audit — RESOLVED
+
+The 2026-09-23 audit is now tracked at
+`docs/migration/audit-2026-09-23-branch-vs-main.md`. Only `.hermes/` (agent
+scratch, correctly ignored) remains untracked.
 
 ---
 
@@ -328,8 +351,8 @@ were real defects, and three are the kind that silently break the very mechanism
 meant to fix a finding.
 
 Number 5 is the strongest argument in this document for testing what is actually
-deployed: it survived the whole suite, `astro check`, Pyright and a 444-test run,
-and was found only by starting the container.
+deployed: it survived the whole suite, `astro check`, Pyright and a 446-test
+run, and was found only by starting the container.
 
 ### 1. The test suite was writing to the live development database — FIXED
 
@@ -420,7 +443,7 @@ the argument for keeping that test.
 | `/health` in the container | `GET /health 200` (F8) |
 | **F2 graceful shutdown** | **`docker stop` → trap fired → `Handling signal: term` → `Flushed pending habit-list writes on shutdown` → `Application shutdown complete` → exit 143 in 4s (not 137/SIGKILL)** |
 | DRIFT-1 | `docker inspect ... image.revision` → `87bfe740e0cb` |
-| Full backend suite | **446 passed, 12 skipped** (excluding `test_batch4_live.py`) |
+| Full backend suite | **458 passed, 12 skipped** (excluding `test_batch4_live.py`) |
 | `astro check` | 0 errors, 0 warnings |
 | `pnpm build` | succeeds |
 | F7 gate vs. vulnerable code | exits 1 (vulnerable) / 0 (fixed) |
@@ -445,7 +468,54 @@ the argument for keeping that test.
   host. Both are deliberate, separate steps.
 * **The audit's exploits were reasoned, not run**, and were never run against
   Apollo. Negative controls here were run against *local* code only.
-* **F10's tokens are still unconfirmed** and the files are still present.
+* **F10: invalidation CONFIRMED, deletion NOT performed.** See below.
+
+
+## F10 — invalidation confirmed, deletion held for your approval
+
+The audit said: confirm all are invalid, *then* delete. Do not delete before
+confirming. So the confirmation was done first, with a tool that will not
+delete anything it has not proved dead.
+
+`scripts/reap_legacy_nicegui_tokens.py` decodes each legacy JWT **without
+printing it** (SHA-256 prefix only), then establishes its status two ways:
+expiry from the `exp` claim, and — for anything unexpired — the `ver` claim
+against the user's current `token_version` in the live database. A file it
+cannot parse, or whose token has no integer `ver` claim, is reported
+`UNKNOWN` and **blocks deletion**. Files with no `auth_token` at all are safe
+by inspection.
+
+Run report-only against a copy of the production volume:
+
+```
+Summary: 11 dead, 0 live, 0 unknown, 11 total
+```
+
+- **9 files** contain no `auth_token` — no credential to leak.
+- **2 files** contain a JWT for a user id that no longer exists in the
+  database. A token for a deleted account cannot authenticate.
+- **0 live, 0 unknown.** The audit's stated residual risk — a token minted
+  *after* the `token_version` bump — is ruled out by the data, not assumed.
+
+Run against a copy, with production untouched and the 11 files still in place.
+
+### Why I did not just delete them
+
+The reaper ran report-only. Deleting live-volume state is a one-way action on
+production data, and the remaining two files are the only record that those
+credentials ever existed. Confirming invalidity is the reversible half; the
+deletion is the irreversible half. That is your call, and the tool is built to
+make it a single, safe command:
+
+```
+# after the F1 backup timer has produced at least one good snapshot
+python3 scripts/reap_legacy_nicegui_tokens.py --volume <mountpoint>          # re-verify
+python3 scripts/reap_legacy_nicegui_tokens.py --volume <mountpoint> --delete
+```
+
+`--delete` refuses if any file is live or unproven, and backs the directory up
+before removing anything. Order matters: take the F1 snapshot first, so that
+"reversible" is true rather than aspirational.
 
 ## Deployment order (if proceeding)
 
@@ -456,5 +526,5 @@ the argument for keeping that test.
    shows a next run, container restart count unchanged.
 4. Confirm DRIFT-1 is closed: `docker inspect --format '{{index .Config.Labels
    "org.opencontainers.image.revision"}}' castor` returns the expected SHA.
-5. Only then handle F10 (confirm invalidation → delete) and F13 (image prune +
-   alerting).
+5. Only then handle F10 (reap the 11 confirmed-dead legacy files — invalidation
+   is already confirmed, see above) and F13 (image prune + alerting).

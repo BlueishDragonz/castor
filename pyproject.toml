@@ -31,6 +31,27 @@ dependencies = [
 description = ""
 readme = "README.md"
 
+# F25: `paddle_billing` and `sentry_sdk` were imported by the app but declared
+# nowhere, so setting SENTRY_DSN or ENABLE_PLAN produced a ModuleNotFoundError
+# at import time — a hard boot crash triggered by turning on error reporting.
+# The code now degrades gracefully, but a graceful message that names a
+# non-existent extra is just a slower dead end: declare them properly so the
+# operator can actually install them.
+#
+# This is an extra rather than a hard dependency so a deployment that never
+# enables Sentry does not pay for it, and so a failed install cannot break the
+# build. `uv sync --extra sentry` is what the runtime error message tells the
+# operator to run.
+#
+# Paddle is deliberately NOT declared. The `paddle_billing` import was already
+# removed at slice 30; the surviving references (ENABLE_PLAN, get_customer_list)
+# are plain SQLAlchemy, and `paddle-billing` is not resolvable from PyPI, so
+# declaring it would only break `uv lock`. Nothing imports it any more.
+[project.optional-dependencies]
+sentry = [
+    "sentry-sdk>=2.0.0,<3.0.0",
+]
+
 [dependency-groups]
 dev = [
     "icecream<3.0.0,>=2.1.3",
