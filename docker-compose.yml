@@ -1,60 +1,36 @@
+# Reference deployment — mirrors the apollo production stack.
+# The live copy on the host is /opt/castor/docker-compose.yml; keep the
+# two in sync (image tag + volume name will differ per environment).
+#
+# Real secrets live in .user/.secrets.env INSIDE the castor_data volume
+# (the container loads them at startup via castor/configs.py). Nothing
+# secret goes in this file.
+
 services:
   castor:
+    image: castor:custom-2026-09-XX   # PIN a custom tag — never :latest
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: castor                        # renamed from 'beaverhabits' at cutover (slice-19 runbook §7)
-    network_mode: "container:wg-easy"
-    image: castor:custom-2026-09-XX             # PIN a custom tag — never :latest
+    container_name: castor
+    network_mode: "container:wg-easy"  # share the VPN's network namespace
     environment:
       - HABITS_STORAGE=DATABASE
       # ─── WebAuthn ────────────────────────────────────────────────
-      # rpId MUST match the host the browser hits. VPN clients hit
-      # 10.8.0.1:8080, so the rpId is 10.8.0.1. Legacy value
-      # (localhost) only worked for sessions on the apollo host
-      # itself; VPN sessions would fail rpId validation on new
-      # passkey registrations. See slice-19 cutover runbook §5.
+      # rpId MUST match the host the browser hits (slice-19 runbook §5).
       - WEBAUTHN_RP_ID=10.8.0.1
       - WEBAUTHN_ORIGIN=http://10.8.0.1:8080
       # ─── Backend routing ─────────────────────────────────────────
-      # BACKEND_URL points Astro at the in-container backend (the
-      # Dockerfile supervisor launches gunicorn on 127.0.0.1:8081
-      # in the background). Astro's backendFetch() targets this URL
-      # directly for server-side calls (Astro pages, BFF routes).
-      #
-      # /auth/webauthn/*, /users/*, /webauthn/*, and /health are
-      # browser-callable (e.g. SecurityContent.tsx passkey UI). These
-      # are proxied by Astro middleware to BACKEND_URL in production
-      # (vite proxy handles dev). /auth/login stays on Astro per
-      # the slice-19 runbook §7 option B (Astro owns it server-side
-      # via backendFetch).
+      # BACKEND_URL points Astro at the in-container backend (the image
+      # supervisor runs gunicorn on 127.0.0.1:8081). Browser-callable
+      # backend paths (/auth/webauthn/*, /users/*, /webauthn/*, /health)
+      # are proxied to it by Astro middleware in production.
       - BACKEND_URL=http://127.0.0.1:8081
-      # ─── Secrets (sourced from /opt/castor/.user/.secrets.env on
-      # apollo; values here are placeholders — Docker compose reads
-      # from the env_file below in production). DO NOT commit real
-      # secrets to this file. ───────────────────────────────────────
-      - JWT_SECRET=${JWT_SECRET}
-      - RESET_PASSWORD_TOKEN_SECRET=${RESET_PASSWORD_TOKEN_SECRET}
-      - NICEGUI_STORAGE_SECRET=${NICEGUI_STORAGE_SECRET}
-      # ─── SMTP — Circles invite email (slice 23c) ─────────────────────
-      # SMTP_HOST/PORT/TLS/USER/PASSWORD/FROM all read in
-      # castor/configs.py::Settings. Empty SMTP_HOST keeps the legacy
-      # smtp.gmail.com:465 SSL fallback; non-empty triggers the env
-      # path. Castor's send_email uses these plus the local-outbox
-      # path (SMTP_DEV_LOCAL_OUTBOX) in dev/CI.
-      - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
-      - SMTP_EMAIL_USERNAME=${SMTP_EMAIL_USERNAME:-}
-      - SMTP_EMAIL_PASSWORD=${SMTP_EMAIL_PASSWORD:-}
-      - SMTP_FROM=${SMTP_FROM:-Castor <noreply@castor.example>}
-      # ─── Frontend origin (used to build join URLs in invite emails).
-      # In Apollo deployment this should match the reverse-proxy origin
-      # clients hit (https://castor.example or http://10.8.0.1:8080 for
-      # VPN clients). Default matches the docker compose listening port.
-      - FRONTEND_URL=${FRONTEND_URL:-http://10.8.0.1:8080}
-    env_file:
-      - ./.user/.secrets.env   # optional: if present, overrides above
+      # ─── Frontend origin (invite-link URLs, redirects) ───────────
+      - FRONTEND_URL=http://10.8.0.1:8080
+      # Secrets (JWT_SECRET, RESET_PASSWORD_TOKEN_SECRET,
+      # NICEGUI_STORAGE_SECRET, SMTP_EMAIL_USERNAME/PASSWORD) come from
+      # .user/.secrets.env inside the volume — set them there.
     volumes:
       - castor_data:/app/.user/
     restart: unless-stopped

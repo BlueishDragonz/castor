@@ -312,4 +312,4 @@ body {
              castor-fade-out 180ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }
 
-/* Inter font is already self-hosted under castor-repo/statics/fonts/. */
+/* Inter loads from the system font stack (no third-party font files). */

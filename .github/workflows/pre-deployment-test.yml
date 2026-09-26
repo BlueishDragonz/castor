@@ -16,9 +16,17 @@ jobs:
           version: "0.9.18"
           python-version: "3.14"
       - name: Install dependencies
-        run: uv sync --group fly
+        # Default groups (dev + main) suffice; the legacy 'fly' group
+        # was removed with the Fly.io deployment path.
+        run: uv sync
       - name: Test with python
-        run: DATABASE_URL="sqlite+aiosqlite:///:memory:" HABITS_STORAGE="USER_DISK" uv run pytest
+        # No env overrides: the default DATABASE_URL (temp sqlite under
+        # .user/) and HABITS_STORAGE=DATABASE match the local baseline.
+        # slice9alt (WS) + slice24d (DATABASE-mode) both pass ONLY under
+        # these defaults; overriding them produces 23 spurious failures.
+        # test_batch4_live.py probes a running production container and
+        # is deliberately excluded from CI.
+        run: uv run pytest tests/ --ignore=tests/test_batch4_live.py
 
   astro-check:
     name: Astro type-check + build
