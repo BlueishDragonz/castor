@@ -234,6 +234,15 @@ class UserStorage[L: HabitList](Protocol):
 
     async def delete_user_habit_list(self, user: User) -> None: ...
 
+    async def flush_all(self) -> None:
+        """Persist any pending writes.
+
+        Called before acknowledging a mutation (both the HTTP middleware and
+        the WebSocket handlers) and on shutdown, so an acknowledged write is
+        durable (F2). Must be safe and cheap to call when nothing is pending.
+        """
+        ...
+
 
 class HabitListBuilder:
     def __init__(self, habit_list: HabitList):

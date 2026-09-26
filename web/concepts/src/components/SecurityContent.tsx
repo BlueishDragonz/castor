@@ -33,26 +33,17 @@ export function SecurityContent() {
 
   async function fetchData() {
     try {
-      const token = (window as any).__SECURITY_TOKEN__;
-      if (!token) return;
-
-      const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
-      // Slice 22x: was `${origin}/auth/webauthn/credentials` directly,
-      // which the browser blocked as cross-origin (the backend serves
-      // no Access-Control-Allow-Origin and the dev origin is on a
-      // different port). Same fix for recovery-email — use relative
-      // URLs that hit Vite's /auth/webauthn/* dev proxy
-      // (astro.config.mjs proxies both prefixes to the backend), so the
-      // browser sees same-origin while the request still reaches the
-      // backend with the Authorization header. In production the
-      // middleware proxy does the same job.
+      // F7: these go through the same-origin BFF, which attaches the bearer
+      // from the httpOnly cookie server-side. The session JWT is therefore
+      // never readable by client JavaScript — previously this component read
+      // it from `window.__SECURITY_TOKEN__`, which made the httpOnly cookie
+      // design decorative and turned any XSS into a 30-day token theft.
+      //
+      // Relative URLs also keep the browser same-origin in both dev and
+      // production, so no CORS grant is needed from the backend.
       const [passkeysRes, recoveryRes] = await Promise.all([
-        fetch('/auth/webauthn/credentials', {
-          headers: { 'Authorization': `Bearer ${token}` },
-        }),
-        fetch('/auth/webauthn/recovery-email', {
-          headers: { 'Authorization': `Bearer ${token}` },
-        }),
+        fetch('/api/v1/webauthn/credentials', { credentials: 'same-origin' }),
+        fetch('/api/v1/webauthn/recovery-email', { credentials: 'same-origin' }),
       ]);
 
       if (passkeysRes.ok) {
@@ -69,7 +60,6 @@ export function SecurityContent() {
   }
 
   async function handleChangePassword() {
-    const token = (window as any).__SECURITY_TOKEN__;
     const currentPassword = prompt('Current password:');
     if (!currentPassword) return;
     
@@ -86,12 +76,10 @@ export function SecurityContent() {
     }
 
     try {
-      const res = await fetch('/auth/webauthn/change-password', {
+      const res = await fetch('/api/v1/webauthn/change-password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
       });
 
@@ -107,7 +95,6 @@ export function SecurityContent() {
   }
 
   async function handleAddRecoveryEmail() {
-    const token = (window as any).__SECURITY_TOKEN__;
     const email = prompt('Enter recovery email:');
     if (!email || !email.includes('@')) {
       alert('Please enter a valid email');
@@ -115,12 +102,10 @@ export function SecurityContent() {
     }
 
     try {
-      const res = await fetch('/auth/webauthn/recovery-email', {
+      const res = await fetch('/api/v1/webauthn/recovery-email', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
 
@@ -137,17 +122,14 @@ export function SecurityContent() {
   }
 
   async function handleVerifyEmail() {
-    const token = (window as any).__SECURITY_TOKEN__;
     const code = prompt('Enter verification code:');
     if (!code) return;
 
     try {
-      const res = await fetch('/auth/webauthn/recovery-email/verify', {
+      const res = await fetch('/api/v1/webauthn/recovery-email/verify', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
       });
 
@@ -164,14 +146,13 @@ export function SecurityContent() {
   }
 
   async function handleRemovePasskey(passkeyId: string) {
-    const token = (window as any).__SECURITY_TOKEN__;
     if (!confirm('Remove this passkey? You will not be able to use it to sign in.')) return;
 
     try {
-      const res = await fetch(`/auth/webauthn/credentials/${passkeyId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
+      const res = await fetch(
+        `/api/v1/webauthn/credentials/${encodeURIComponent(passkeyId)}`,
+        { method: 'DELETE', credentials: 'same-origin' },
+      );
 
       if (res.ok) {
         alert('Passkey removed');

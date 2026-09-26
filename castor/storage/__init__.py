@@ -1,4 +1,5 @@
 from castor.configs import StorageType, settings
+from castor.storage.dict import DictHabitList
 from castor.storage.images import DatabaseImageStorage
 from castor.storage.session_memory import SessionDictStorage
 from castor.storage.storage import SessionStorage, UserStorage
@@ -18,7 +19,7 @@ def get_sessions_storage() -> SessionStorage:
     return session_storage
 
 
-def get_user_dict_storage() -> UserStorage:
+def get_user_dict_storage() -> UserStorage[DictHabitList]:
     if settings.HABITS_STORAGE == StorageType.USER_DISK:
         return user_disk_storage
 

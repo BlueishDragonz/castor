@@ -12,27 +12,23 @@ import { DesktopMenu } from '../components/DesktopMenu.tsx';
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
 }
-
-const token = Astro.locals.session.token;
 ---
 
 <Layout title="Security">
   {/*
-    Slice 22x: was `<script is:inline>window.__SECURITY_TOKEN__ = '{token}'</script>`
-    but `is:inline` emits the script body verbatim — the `{token}` literal
-    was sent down the wire unchanged and SecurityContent.tsx's early
-    `if (!token) return;` skipped fetchData entirely, leaving the page
-    stuck on "Loading...". `define:vars` runs Astro interpolation before
-    the script is serialised, so the actual JWT lands on the page.
+    F7: this page used to do
+      <script define:vars={{ token }}>window.__SECURITY_TOKEN__ = token</script>
+    to hand the session JWT to SecurityContent.tsx, which read it at six call
+    sites and attached it as an `Authorization` header from client JavaScript.
+    That made the httpOnly cookie design decorative: any XSS anywhere in the
+    app would yield a 30-day bearer token.
 
-    TODO: long term, move the React island's auth off window globals
-    entirely — the BFF already exposes cookie-authenticated webauthn
-    endpoints, so the fetch can just call `/api/v1/webauthn/*` same-origin.
+    SecurityContent now calls the same-origin `/api/v1/webauthn/*` BFF
+    instead, and that BFF attaches the bearer server-side from the httpOnly
+    cookie. The token is no longer rendered into the page at all, so the
+    original `is:inline` interpolation problem cannot recur — there is nothing
+    left to interpolate.
   */}
-  <script define:vars={{ token }}>
-    /* eslint-disable */
-    window.__SECURITY_TOKEN__ = token;
-  </script>
   <main class="mx-auto max-w-2xl px-6 py-12 space-y-6 pb-24">
     <PageHeader title="Security" back="/habits">
       <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />

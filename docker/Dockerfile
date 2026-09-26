@@ -48,7 +48,13 @@ done
 # Node 22.12.0 is the minimum required by @astrojs/node@^11 + astro@^7
 # per web/concepts/package.json engines.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22.12-bookworm-slim AS astro-builder
+# F20: was node:22.12-bookworm-slim, a December 2024 build. That binary is
+# copied verbatim into production and runs as PID 1 on the public port, so a
+# ~21-month-stale runtime meant missing every Node 22.x security release
+# accumulated since. Pinned to the current 22.x LTS line (Jod); staying on 22
+# rather than jumping to 24 keeps this a patch-level runtime change instead of
+# a major-version migration in the same deploy.
+FROM node:22.23-bookworm-slim AS astro-builder
 WORKDIR /build
 # Install pnpm directly via npm instead of corepack. node:22.12's
 # bundled corepack has a stale npm signing-key keyring and hard-fails
@@ -67,7 +73,14 @@ RUN npm install -g pnpm@12.5.1
 # Verified in a clean-dir repro before patching (2026-09-25).
 COPY web/concepts/package.json web/concepts/pnpm-lock.yaml web/concepts/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
+# F19: .dockerignore now excludes node_modules, but never rely on a single
+# ignore file for supply-chain integrity — a developer editing it, or a build
+# invoked with a different context, would silently ship an unverified
+# dependency tree. Delete any node_modules that arrived with the context before
+# building, so the only dependency tree in the image is the one pnpm just
+# installed from the committed lockfile.
 COPY web/concepts ./
+RUN rm -rf node_modules && pnpm install --frozen-lockfile
 # BACKEND_URL as a BUILD env (declared after the cached dependency
 # layers so changing it doesn't re-run pnpm install): Vite inlines
 # import.meta.env.* at build time (unlike process.env, read at
@@ -91,12 +104,14 @@ FROM python-base AS production
 # apt: libstdc++6 explicitly because slim images don't include it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libstdc++6 \
+        tini \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY --from=astro-builder /usr/local/bin/node /usr/local/bin/node
 EXPOSE 8080
 COPY --from=builder-base $PYSETUP_PATH $PYSETUP_PATH
 WORKDIR /app
 COPY start.sh .
+COPY docker/entrypoint.sh ./docker/entrypoint.sh
 COPY castor ./castor
 COPY healthcheck.py .
 
@@ -114,17 +129,24 @@ ENV BACKEND_URL=http://127.0.0.1:8081 \
     PORT=8080
 
 RUN chmod -R g+w /app && \
+    chmod +x /app/docker/entrypoint.sh && \
     chown -R nobody /app
 USER nobody
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
     CMD python healthcheck.py
 
-# Supervisor pattern: gunicorn (backend, internal :8081) in the
-# background, Astro (frontend, public :8080) on PID 1. trap forwards
-# SIGTERM to gunicorn so `docker stop` cleanly terminates both.
+# Supervisor: gunicorn (backend, internal :8081) and Astro (frontend, public
+# :8080) in one container.
 #
-# `exec` on the Astro node process gives it PID 1 so it receives
-# signals directly; the gunicorn background process is tracked via
-# $BACKEND_PID for the trap.
-CMD ["sh", "-c", "gunicorn castor.main:app --bind 127.0.0.1:8081 -w 1 -k uvicorn_worker.UvicornWorker --max-requests 10000 --log-level info & BACKEND_PID=$!; trap 'kill $BACKEND_PID 2>/dev/null' EXIT INT TERM; exec node web/concepts/dist/server/entry.mjs"]
+# F2: this used to be an inline `sh -c "... & BACKEND_PID=$!; trap ...; exec
+# node ..."`. The `exec` replaced the shell, discarding the trap, so
+# `docker stop` never signalled gunicorn — it was SIGKILLed by the kernel and
+# the pending habit-list writes it held in memory were lost, after the API had
+# already acknowledged them. See docker/entrypoint.sh for the full rationale.
+#
+# tini is PID 1 (`-g` passes signals to the entrypoint's process group). A
+# shell as PID 1 cannot reap orphaned children, so a dead worker would
+# otherwise linger as a zombie and creep the container's process count up.
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["/app/docker/entrypoint.sh"]

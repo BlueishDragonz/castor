@@ -34,11 +34,56 @@ services:
     volumes:
       - castor_data:/app/.user/
     restart: unless-stopped
+
+    # ─── F3: resource limits ─────────────────────────────────────────────
+    # Measured on apollo 2026-09-26 from
+    # /sys/fs/cgroup/<castor-scope>/memory.{current,peak}:
+    #   current 95 MiB, peak 332 MiB, limit max (unbounded), host 954 MB
+    # with pihole + wg-easy also resident.
+    #
+    # 640m sits ~2x above observed peak, so normal operation and the F5 fix's
+    # bounded cache both fit with headroom, but a genuine leak or runaway
+    # request is contained before it can starve the host. The important part
+    # is not the number but that there IS a ceiling: the kernel's OOM killer
+    # otherwise picks the largest RSS process on the box, which may well be
+    # pihole or wg-easy rather than castor. With a cgroup limit, castor is the
+    # only thing that dies.
+    #
+    # An OOM kill is now survivable rather than silent: writes are durable
+    # before they are acknowledged (F2) and there is an off-host backup (F1).
+    # pids_limit bounds fork bombs; the service needs ~10 processes.
+    mem_limit: 640m
+    pids_limit: 100
+    # Drop every capability, then re-add only what is genuinely needed.
+    # The container runs as `nobody` and listens on 8080 (>1024), so it needs
+    # no NET_BIND_SERVICE, and nothing here requires CHOWN/DAC_OVERRIDE
+    # because the volume is chowned to nobody at image build time.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # F13: no log rotation was configured anywhere, so the json-file driver
+    # grew without bound. 10m x 3 files caps the container log at ~30 MB while
+    # still keeping enough history to see an OOM kill and the restart that
+    # followed it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
     healthcheck:
+      # F8: this now checks real readiness, not a hardcoded "OK". It must fail
+      # when the database is unreachable, otherwise Docker keeps reporting the
+      # container healthy through exactly the failure it exists to detect.
       test: ["CMD-SHELL", "python healthcheck.py"]
       interval: 30s
       timeout: 10s
       retries: 3
+      # F3/F8: give a slow-starting database time to come up before the first
+      # probe, so a restart loop is not triggered by a cold start.
+      start_period: 20s
 
 volumes:
   castor_data:

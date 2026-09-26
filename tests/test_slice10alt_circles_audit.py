@@ -612,9 +612,11 @@ class Slice10AltAuditEventTests(unittest.IsolatedAsyncioTestCase):
         """Parity row 5.7: delete account. Verify it writes an event
         BEFORE wiping (so the event survives)."""
         token = await self._login()
-        r = await self.client.delete(
+        r = await self.client.request(
+            'DELETE',
             '/api/v1/account',
             headers={'Authorization': f'Bearer {token}'},
+            json={'password': PASSWORD},
         )
         self.assertEqual(r.status_code, 204, r.text)
         events = await self._audit_events()

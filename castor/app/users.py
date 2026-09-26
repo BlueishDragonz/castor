@@ -2,11 +2,12 @@ import uuid
 from typing import Optional
 import base64
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin, exceptions
 from fastapi_users.jwt import decode_jwt, generate_jwt
 import jwt
 from sqlalchemy import select
+from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -19,6 +20,7 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from castor.configs import settings
 from castor.logger import logger
 
+from . import crud
 from .db import User, WebAuthnCredential, get_user_db
 from .audit import record
 
@@ -55,6 +57,56 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         await record("register", user_id=user.id)
+
+    async def create(
+        self,
+        user_create,
+        safe: bool = False,
+        request: Optional[Request] = None,
+    ) -> User:
+        """F17: enforce MAX_USER_COUNT.
+
+        This setting was declared in `configs.py` and never read anywhere, so
+        an operator who set it to cap registrations would see no effect at all
+        — a configuration knob that silently does nothing is worse than no
+        knob, because it is trusted.
+
+        The check is in `create` (not `on_after_register`) so the cap is
+        enforced BEFORE a row is written; enforcing it afterwards would leave
+        an over-cap account that must then be deleted by hand.
+
+        -1 is the documented "unlimited" default and skips the query entirely,
+        so the default deployment pays nothing for this.
+
+        The count is advisory rather than a hard transaction-level guarantee:
+        two simultaneous registrations could both observe count == MAX-1 and
+        both succeed, yielding MAX+1. Closing that would need a serializable
+        transaction or a unique index on a sentinel row, which is not worth the
+        complexity for a soft capacity limit. The window is milliseconds wide
+        and the consequence is one extra account, not corruption.
+        """
+        if settings.MAX_USER_COUNT >= 0:
+            current = await crud.get_user_count()
+            if current >= settings.MAX_USER_COUNT:
+                logger.error(
+                    f"Registration refused: user limit reached "
+                    f"({current}/{settings.MAX_USER_COUNT})"
+                )
+                # Deliberately NOT `exceptions.UserAlreadyExists`: that maps
+                # to a 400 "email already registered", which would tell a
+                # prospective user their address is taken. The truth is that
+                # the instance is full. A 429 with Retry-After is the accurate
+                # signal, and it stops a signup bot from hammering a closed
+                # door.
+                raise HTTPException(
+                    status_code=HTTP_429_TOO_MANY_REQUESTS,
+                    detail=(
+                        "This instance is at capacity and is not accepting "
+                        "new registrations."
+                    ),
+                    headers={"Retry-After": "3600"},
+                )
+        return await super().create(user_create, safe=safe, request=request)
 
     async def on_after_forgot_password(
         self, user: User, token: str, request: Optional[Request] = None

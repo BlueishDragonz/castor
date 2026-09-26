@@ -104,11 +104,106 @@ jobs:
           test "$CODE" = "302" -o "$CODE" = "303" || (echo "expected 302/303, got $CODE"; exit 1)
           # /terms and /privacy are public — should 200.
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/terms)" = "200"
+          # /privacy and /admin are public-rendering pages.
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/privacy)" = "200"
           # /admin requires ADMIN_EMAIL — without a session we expect
           # the page to 200 (the page itself handles 401 by rendering
           # 'Access denied').
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/admin)" = "200"
+
+      # Regression tests for the 2026-09-26 production-security audit.
+      #
+      # These assert the *absence* of the vulnerable behaviour, so they pass
+      # trivially if the feature is simply missing. That is the correct
+      # failure direction for a security gate: a re-introduced vulnerability
+      # fails the build, and removing the fix also fails it.
+      - name: Security regression — no session token exposed to client JS (F7)
+        run: |
+          # Comment-aware, so prose that documents the fix does not trip it.
+          # Verified to fail when the window global is re-introduced.
+          node scripts/check-no-client-token.mjs src
+
+          # SecurityContent must not build an Authorization header at all.
+          if grep -n "Bearer\|Authorization" src/components/SecurityContent.tsx; then
+            echo "::error::F7 regression: SecurityContent builds auth headers in client JS"
+            exit 1
+          fi
+
+      - name: Security regression — open redirect is closed (F22)
+        run: |
+          # An off-site Location must be impossible from the token BFF.
+          #
+          # The Origin header is REQUIRED here. Astro's dev server has its own
+          # CSRF check that rejects a state-changing request with no Origin
+          # before the route handler ever runs, which would return 403 and make
+          # this gate pass vacuously — the exact "green but not testing
+          # anything" failure mode a security gate must not have.
+          #
+          # Each case asserts the Location is a same-site absolute path, which
+          # is a positive assertion: it fails both if the redirect is off-site
+          # AND if the route stops redirecting at all.
+          check_redirect() {
+            local path="$1" label="$2" redirect_value="$3"
+            local loc
+            loc=$(curl -s -o /dev/null -D - -X POST \
+              -H "Origin: http://127.0.0.1:4321" \
+              "http://127.0.0.1:4321${path}?redirect=${redirect_value}" \
+              | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
+
+            if [ -z "$loc" ]; then
+              echo "::error::F22 gate is not exercising the route (${path}, ${label}): no Location header"
+              exit 1
+            fi
+            case "$loc" in
+              /*)  echo "  ok  ${label}: ${loc}" ;;
+              *)   echo "::error::F22 regression: ${path} (${label}) redirected off-site to ${loc}"
+                   exit 1 ;;
+            esac
+          }
+
+          # Payload in the query string is the injectable path the audit found.
+          check_redirect "/api/v1/tokens"       "absolute-url"      'https://evil.tld'
+          check_redirect "/api/v1/tokens/rotate" "absolute-url"      'https://evil.tld'
+          # Protocol-relative: starts with /, so it passes a naive prefix check.
+          check_redirect "/api/v1/tokens"       "protocol-relative" '//evil.tld'
+          # Backslash: the WHATWG URL parser treats / and \ as equivalent when
+          # resolving an authority, so /\evil.tld leaves the origin.
+          check_redirect "/api/v1/tokens"       "backslash-authority" '/%5Cevil.tld'
+          # A non-path scheme must not survive either.
+          check_redirect "/api/v1/tokens"       "javascript-scheme" 'javascript:alert(1)'
+
+          # Control: a legitimate same-site redirect must still work, proving
+          # the fix did not simply break the feature.
+          check_redirect "/api/v1/tokens"       "legitimate-same-site" '/tokens'
+
+      - name: Security regression — unauthenticated BFF calls are rejected (F7)
+        run: |
+          # The new webauthn BFF routes must not serve data to an anonymous
+          # caller. They proxy to a backend that is not running in CI, so the
+          # only acceptable outcome for an authenticated-only route is a 401
+          # from the route's own session check, before any proxying happens.
+          #
+          # Method matters: change-password exports only POST, so a GET would
+          # 404 and this gate would pass for the wrong reason.
+          expect_401() {
+            local method="$1" path="$2"
+            local code
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X "$method" \
+              -H "Origin: http://127.0.0.1:4321" \
+              "http://127.0.0.1:4321${path}")
+            if [ "$code" != "401" ]; then
+              echo "::error::F7 regression: ${method} ${path} returned ${code} unauthenticated, expected 401"
+              exit 1
+            fi
+            echo "  ok  ${method} ${path} -> 401"
+          }
+
+          expect_401 GET  "/api/v1/webauthn/credentials"
+          expect_401 GET  "/api/v1/webauthn/recovery-email"
+          expect_401 POST "/api/v1/webauthn/recovery-email"
+          expect_401 POST "/api/v1/webauthn/recovery-email/verify"
+          expect_401 POST "/api/v1/webauthn/change-password"
+          expect_401 DELETE "/api/v1/webauthn/credentials/some-credential-id"
       - name: Stop server
         if: always()
         run: pkill -f "astro dev" || true

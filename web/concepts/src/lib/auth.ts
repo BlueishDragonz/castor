@@ -37,15 +37,109 @@ const BACKEND_WEBAUTHN_COOKIE = 'beaver_webauthn';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 /**
+ * The public origin the browser uses to reach this app (scheme://host[:port]).
+ *
+ * Single source of truth for both `isProd()` and the F21 `Origin` header, so
+ * the cookie's `Secure` decision and the CSRF origin assertion can never
+ * disagree about which origin is public.
+ *
+ * BACKEND_URL is only consulted as a last-resort fallback: in dev the browser
+ * genuinely does call that address, but in production it is a loopback address
+ * that says nothing about the browser's origin.
+ */
+function publicOrigin(): string {
+  const raw =
+    process.env.FRONTEND_URL ??
+    process.env.PUBLIC_BACKEND_URL ??
+    process.env.BACKEND_URL ??
+    '';
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    return url.origin;
+  } catch {
+    // A malformed URL must not become an `Origin: undefined` header.
+    return '';
+  }
+}
+
+/**
  * Detect production from env. Two flags accepted so both Astro-native
  * (PUBLIC_BACKEND_URL) and Docker-compose-style (TLS_TERMINATED) deploys
  * work without coordination.
+ *
+ * F6: this must reflect the PUBLIC origin the browser actually uses, not the
+ * internal backend address. Production runs the backend on
+ * BACKEND_URL=http://127.0.0.1:8081 (plain HTTP, loopback-only) while the
+ * browser reaches the app over VPN at FRONTEND_URL=http://10.8.0.1:8080.
+ * Deriving `Secure` from BACKEND_URL therefore made isProd() false in
+ * production and shipped a 30-day session cookie without the Secure flag —
+ * the code's stated intent ("Strict + Secure in production") was not what ran.
+ * FRONTEND_URL is the operator-declared public origin, so it is the correct
+ * input; BACKEND_URL is only a fallback for dev, where the browser genuinely
+ * does talk to that address.
  */
 function isProd(): boolean {
-  const backendUrl = process.env.PUBLIC_BACKEND_URL ?? process.env.BACKEND_URL ?? '';
-  if (backendUrl.startsWith('https://')) return true;
+  const origin = publicOrigin();
+  if (origin.startsWith('https://')) return true;
   if (process.env.TLS_TERMINATED === 'true') return true;
   return false;
+}
+
+/**
+ * Constrain a caller-supplied redirect target to a same-site path (F22).
+ *
+ * Returns `fallback` unless the value is a path that stays on this origin.
+ * Rejected:
+ *   - absolute URLs (`https://evil.tld`, `//evil.tld` protocol-relative)
+ *   - backslash variants the browser normalises to authority
+ *     (`/\evil.tld`, `\\evil.tld`) — these are the bypasses that make a naive
+ *     "must start with /" check fail
+ *   - control characters, which enable header splitting
+ *
+ * This is the same check `login.astro` already used correctly; it is now
+ * shared so the token BFF and login cannot drift apart.
+ */
+export function safeRedirectTarget(
+  value: string | null | undefined,
+  fallback = '/',
+): string {
+  if (typeof value !== 'string' || value === '') return fallback;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(value)) return fallback;
+  // Must be an absolute path, but not protocol-relative (`//host`).
+  if (!value.startsWith('/')) return fallback;
+  if (value.startsWith('//')) return fallback;
+  // `\` and `/` are equivalent to the WHATWG URL parser for authority
+  // detection, so normalise before the check above's sibling test.
+  if (value.startsWith('/\\') || value.startsWith('\\\\')) return fallback;
+  return value;
+}
+
+/**
+ * Reject an unauthenticated BFF request with a 401.
+ *
+ * Returns the session when the request is authenticated, or `null` when it is
+ * not. Kept as a helper so every BFF route fails the same way instead of each
+ * inventing its own check.
+ */
+export function requireSession(cookies: AstroCookies): Session | null {
+  if (!readToken(cookies)) return null;
+  return readSession(cookies);
+}
+
+/**
+ * Relay a backend JSON response verbatim (status + body + content type).
+ *
+ * The Authorization header is deliberately NOT copied back: it would leak the
+ * backend's auth material into a response the browser can read, which is the
+ * exact class of problem F7 is about.
+ */
+export function jsonProxy(res: Response): Response {
+  return new Response(res.body, {
+    status: res.status,
+    headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' },
+  });
 }
 
 /** Read the bearer token from the request cookie, or null if absent. */
@@ -79,7 +173,14 @@ export function writeSession(
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
   cookies.set(USERNAME_COOKIE, email, {
-    httpOnly: false, // visible to client for UI greeting
+    // F18: httpOnly. This cookie is a display/greeting convenience only — it is
+    // never an authorization input. It was previously readable and writable by
+    // page JavaScript, which is what let an attacker with a stolen session
+    // token redirect the account-deletion step-up check onto an account they
+    // controlled. Nothing in the client bundle reads it (grep-verified: the
+    // only document.cookie readers touch habit_* display prefs), and the UI
+    // greeting is served from Astro.locals.session, so this costs no function.
+    httpOnly: true,
     sameSite: 'lax',
     secure,
     path: '/',
@@ -156,6 +257,29 @@ export function mirrorWebAuthnBrowserCookie(
  * a bearer cookie, attach it as `Authorization: Bearer *** Otherwise
  * the call is anonymous.
  *
+ * F21 — this function re-activates the backend's CSRF gate, which was
+ * silently inert for all BFF traffic.
+ *
+ * `BrowserOriginMiddleware` (castor/app/http_security.py) decides on
+ * `Origin`/`Referer`, and this helper previously built its headers from
+ * scratch and forwarded neither. The middleware therefore saw no Origin AND
+ * no Cookie, fell through to the "no evidence" branch, and allowed every
+ * request unconditionally — the CSRF layer did nothing on exactly the path it
+ * was written to protect, leaving only `SameSite=Lax`.
+ *
+ * The value forwarded is the *public frontend origin* the BFF is acting on
+ * behalf of, taken from FRONTEND_URL. That is the same origin the browser
+ * sends, and the one `ALLOWED_ORIGINS` is configured with. Deriving it here
+ * — at the single choke point every BFF route already goes through — means a
+ * new endpoint added later cannot reintroduce F21 by forgetting to pass
+ * anything. It is deliberately not derived from BACKEND_URL: the backend
+ * talks to itself over loopback, so that address says nothing about where the
+ * browser is, and asserting it would compare the wrong tuple against the
+ * allowlist.
+ *
+ * An explicit `origin` (the real inbound header) takes precedence, for the
+ * cases where the caller genuinely has the request in hand.
+ *
  * Side effect: if the response carries a `beaver_webauthn` Set-Cookie
  * header, mirror it onto `castor_webauthn_browser` so subsequent
  * requests see it.
@@ -164,17 +288,28 @@ export async function backendFetch(
   cookies: AstroCookies,
   path: string,
   init: RequestInit = {},
+  origin?: string | null,
 ): Promise<Response> {
   const token = readToken(cookies);
   const headers = new Headers(init.headers);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
+  const effectiveOrigin = origin ?? publicOrigin();
+  if (effectiveOrigin) {
+    // F21: the backend's origin allowlist can only be evaluated against a
+    // real same-origin value. Also send Referer as a fallback for the
+    // middleware's `origin if origin is not None else referer` lookup.
+    headers.set('Origin', effectiveOrigin);
+    if (!headers.has('Referer')) {
+      headers.set('Referer', effectiveOrigin);
+    }
+  }
   // The /auth/* and /api/v1/* prefixes are proxied by Astro/Vite to the
   // backend in dev. In production, the same prefixes are forwarded by
   // the reverse proxy in front of both services.
-  const origin = process.env.BACKEND_URL || 'http://localhost:8085';
-  const res = await fetch(new URL(path, origin), { ...init, headers });
+  const backendOrigin = process.env.BACKEND_URL || 'http://localhost:8085';
+  const res = await fetch(new URL(path, backendOrigin), { ...init, headers });
   mirrorWebAuthnBrowserCookie(res, cookies);
   return res;
 }

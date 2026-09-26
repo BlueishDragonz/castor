@@ -14,7 +14,7 @@
  * one from /auth/login. So this route does not call writeSession().
  */
 import type { APIRoute } from 'astro';
-import { readToken, mirrorWebAuthnBrowserCookie } from '../../../../../lib/auth';
+import { readToken, mirrorWebAuthnBrowserCookie, writeSession } from '../../../../../lib/auth';
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   const token = readToken(cookies);
@@ -56,24 +56,15 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     access_token?: string;
   };
   if (data.access_token) {
-    const username = cookies.get('castor_user')?.value ?? '';
-    cookies.set('castor_token', data.access_token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.TLS_TERMINATED === 'true'
-        || (process.env.PUBLIC_BACKEND_URL ?? process.env.BACKEND_URL ?? '').startsWith('https://'),
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    });
-    if (username) {
-      cookies.set('castor_user', username, {
-        httpOnly: false,
-        sameSite: 'lax',
-        secure: false,
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7,
-      });
-    }
+    // F26: this used to hand-roll a second, weaker copy of the session-cookie
+    // logic — httpOnly:false on castor_user, secure:false hardcoded, a
+    // different 7-day maxAge than writeSession's 30 days, and its own
+    // isProd() reimplementation. Two divergent implementations of one
+    // security-relevant cookie is exactly the shape of bug that let F6/F18
+    // hide: whichever ran last won. Refresh the token through the single
+    // shared helper instead, and keep the existing verified email.
+    const email = cookies.get('castor_user')?.value ?? '';
+    writeSession(cookies, data.access_token, email);
   }
 
   return new Response(JSON.stringify({ ok: true }), {

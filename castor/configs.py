@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # SaaS
     APP_URL: str = ""
     SENTRY_DSN: str = ""
+    # F25/F11: whether Sentry may forward request bodies, headers and IPs to a
+    # third party. Default False — enabling error reporting must not silently
+    # start exporting personal data. Note the `sentry-sdk` package is optional;
+    # setting SENTRY_DSN without installing it logs an error and continues
+    # without telemetry rather than crashing at boot.
+    SENTRY_SEND_PII: bool = False
     HIGHLIGHT_KEY: str = ""
     ADMIN_EMAIL: str = ""
     UMAMI_ANALYTICS_ID: str = ""
