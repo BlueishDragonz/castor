@@ -10,6 +10,7 @@ SQLite file, in isolation from production.
 """
 import asyncio
 import os
+import sqlite3
 
 import pytest
 from sqlalchemy import text
@@ -86,6 +87,37 @@ async def test_bootstrap_skips_ddl_when_schema_is_current():
             await session.execute(text("SELECT MAX(version) FROM schema_migration"))
         ).scalar()
     assert version == db.SCHEMA_VERSION
+
+
+async def test_unmounted_volume_fails_fast_with_a_useful_message():
+    """A non-transient failure must not be retried behind "contended" warnings.
+
+    Found in the apollo container smoke test: a run without the data volume
+    mounted logged six "Schema migration attempt N contended" lines over 30
+    seconds and then blamed a missing lock, when the actual error was
+    `unable to open database file`. The cause is a missing mount, which no
+    amount of retrying will fix.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    unopenable = OperationalError(
+        "SELECT 1", {}, sqlite3.OperationalError("unable to open database file")
+    )
+    assert db._is_lock_contention(unopenable) is False
+
+
+async def test_transient_race_errors_are_still_retried():
+    """Concurrent bootstrap races must remain retryable, not become fatal."""
+    from sqlalchemy.exc import OperationalError
+
+    transient = [
+        sqlite3.OperationalError("database is locked"),
+        sqlite3.OperationalError("database table is locked: user"),
+        sqlite3.OperationalError("table user already exists"),
+    ]
+    for message in transient:
+        exc = OperationalError("CREATE TABLE", {}, Exception(message))
+        assert db._is_lock_contention(exc) is True, message
 
 
 async def test_concurrent_bootstrap_both_succeed():

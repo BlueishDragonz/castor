@@ -323,9 +323,13 @@ version is queryable. Recommended as its own piece of work.
 
 ## Additional findings — not in the audit
 
-These were found while remediating and are not in the original report. All four
+These were found while remediating and are not in the original report. All five
 were real defects, and three are the kind that silently break the very mechanism
 meant to fix a finding.
+
+Number 5 is the strongest argument in this document for testing what is actually
+deployed: it survived the whole suite, `astro check`, Pyright and a 444-test run,
+and was found only by starting the container.
 
 ### 1. The test suite was writing to the live development database — FIXED
 
@@ -386,13 +390,37 @@ type check as part of the verification and not only the tests. Log lines should
 now identify a record by its `customer_id`, which is a stable identifier and
 carries no personal data.
 
+### 5. Misleading migration diagnostics — FIXED
+
+Found only by running the container, not by any test. A start with the data
+volume missing logged six `Schema migration attempt N contended` lines over 30
+seconds and then reported a failure to acquire a migration lock. Both messages
+were wrong: the real error was `unable to open database file`, which is a
+missing mount, not contention. It cannot succeed on retry, and the log sent an
+operator hunting for a second instance that did not exist.
+
+`create_db_and_tables` now retries only genuine transient errors — lock/busy,
+and `already exists` from a concurrent-creation race — and fails immediately,
+with a message naming the likely cause, on anything else.
+
+Widening that filter to re-admit `already exists` was itself a mistake on the
+first attempt: the existing concurrency test caught it immediately, which is
+the argument for keeping that test.
+
 ---
 
 ## Verification performed
 
 | Check | Result |
 | --- | --- |
-| Full backend suite | **444 passed, 12 skipped** (excluding `test_batch4_live.py`) |
+| Image build (apollo) | **`castor:audit-test-20260926` built, 1.5 GB** — clean `git archive` context, no `node_modules`, no `.git` |
+| Node in the shipped image | `v22.23.3` (F20) |
+| PID 1 in the shipped image | `/usr/bin/tini -g --` + `/app/docker/entrypoint.sh` (F2) |
+| Container boot | `Application startup complete`; WAL files created (F9) |
+| `/health` in the container | `GET /health 200` (F8) |
+| **F2 graceful shutdown** | **`docker stop` → trap fired → `Handling signal: term` → `Flushed pending habit-list writes on shutdown` → `Application shutdown complete` → exit 143 in 4s (not 137/SIGKILL)** |
+| DRIFT-1 | `docker inspect ... image.revision` → `87bfe740e0cb` |
+| Full backend suite | **446 passed, 12 skipped** (excluding `test_batch4_live.py`) |
 | `astro check` | 0 errors, 0 warnings |
 | `pnpm build` | succeeds |
 | F7 gate vs. vulnerable code | exits 1 (vulnerable) / 0 (fixed) |
@@ -411,25 +439,22 @@ carries no personal data.
 
 ## Not verified — stated plainly
 
-* **No image build.** No local Docker daemon (podman only). The Dockerfile,
-  entrypoint and tini changes are unbuilt and untested. This is the largest
-  remaining risk in the change set.
-* **No deploy to apollo.** `mem_limit` needs a container recreate; Node bump and
-  the F1 timer need installation.
+- **No deploy.** The image is built and smoke-tested, but production still runs
+  the old `castor:custom-2026-09-26`. Applying the new compose (`mem_limit`)
+  needs a container recreate, and the F1 backup timer needs installing on the
+  host. Both are deliberate, separate steps.
 * **The audit's exploits were reasoned, not run**, and were never run against
   Apollo. Negative controls here were run against *local* code only.
 * **F10's tokens are still unconfirmed** and the files are still present.
 
 ## Deployment order (if proceeding)
 
-1. Fix the F22 CI gate's `change-password` case if the `Origin`/method handling
-   is changed further — it is currently verified passing, do not regress it.
-2. Build the image **off apollo first**; F2's entrypoint/tini change is the one
-   that could fail at boot.
-3. Install the F1 backup timer and **run it once manually**, then confirm a
+1. Install the F1 backup timer and **run it once manually**, then confirm a
    snapshot exists and restore-drill it into a scratch path.
-4. `docker compose up -d` (recreate, so `mem_limit` applies).
-5. Verify: `/health` 200, `/live` 200, backup timer `systemctl list-timers`
+2. `docker compose up -d` (recreate, so `mem_limit` applies).
+3. Verify: `/health` 200, `/live` 200, backup timer `systemctl list-timers`
    shows a next run, container restart count unchanged.
-6. Only then handle F10 (confirm invalidation → delete) and F13 (image prune +
+4. Confirm DRIFT-1 is closed: `docker inspect --format '{{index .Config.Labels
+   "org.opencontainers.image.revision"}}' castor` returns the expected SHA.
+5. Only then handle F10 (confirm invalidation → delete) and F13 (image prune +
    alerting).

@@ -136,8 +136,22 @@ USER nobody
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
     CMD python healthcheck.py
 
+# DRIFT-1 (audit 2026-09-26): the running image was built from a directory
+# that was not a git repository, so there was no reliable way to say which
+# commit was deployed — the correspondence was established by hand, by the
+# auditor, not by any build-time mechanism. Anything running this image can now
+# answer that question directly:
+#
+#   docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' castor
+#
+# Defaults to "unknown" so a build that forgets to pass the SHA is visibly
+# unlabelled rather than silently mislabelled.
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.source="castor"
+
 # Supervisor: gunicorn (backend, internal :8081) and Astro (frontend, public
-# :8080) in one container.
+# 8080) in one container.
 #
 # F2: this used to be an inline `sh -c "... & BACKEND_PID=$!; trap ...; exec
 # node ..."`. The `exec` replaced the shell, discarding the trap, so

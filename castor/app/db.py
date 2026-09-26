@@ -458,8 +458,19 @@ async def create_db_and_tables():
                 await _apply_migrations(conn)
             return
         except OperationalError as exc:
-            # Another instance holds the migration lock, or SQLite is briefly
-            # busy. Wait and retry rather than dying during startup.
+            # Only a LOCK/BUSY error is worth retrying. Everything else —
+            # notably "unable to open database file", which is what a missing
+            # or unwritable data volume produces — will never succeed no matter
+            # how long we wait, and retrying it just delays a clear failure by
+            # 30 seconds behind a log full of "contended" warnings that send
+            # the operator hunting for a second instance that does not exist.
+            if not _is_lock_contention(exc):
+                raise RuntimeError(
+                    f"Schema migration failed and will not succeed on retry: {exc}. "
+                    "If this is 'unable to open database file', check that the data "
+                    "volume is mounted and writable by the container user; a missing "
+                    "mount is the usual cause and is not transient."
+                ) from exc
             last_error = exc
             logger.warning(
                 f"Schema migration attempt {attempt + 1} contended ({exc.__class__.__name__}); "
@@ -470,6 +481,29 @@ async def create_db_and_tables():
     raise RuntimeError(
         f"Could not acquire the schema migration lock after repeated attempts: {last_error}"
     )
+
+
+_TRANSIENT_SQLITE_ERRORS = (
+    # Lock/busy contention.
+    "database is locked",
+    "database table is locked",
+    "is busy",
+    # Two instances racing to create the same schema: both see the table as
+    # absent, both issue CREATE TABLE, and the loser gets this. Retrying is
+    # correct and necessary — the winner has already created what we wanted.
+    "already exists",
+)
+
+
+def _is_lock_contention(exc: OperationalError) -> bool:
+    """True if this OperationalError is transient and worth retrying.
+
+    Deliberately narrow: anything not listed (a missing or unwritable volume,
+    a corrupt file, a genuine SQL bug) will never succeed on retry, and
+    retrying only delays a clear failure behind misleading warnings.
+    """
+    message = str(exc).lower()
+    return any(marker in message for marker in _TRANSIENT_SQLITE_ERRORS)
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
