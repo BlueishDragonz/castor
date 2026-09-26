@@ -1,7 +1,8 @@
 # Castor migration — progress + next-session handoff
 
 > One-stop doc for resuming the Astro+shadcn migration of the
-> NiceGUI/Quasar habit tracker. Updated 2026-09-26 — CUTOVER DONE.
+> NiceGUI/Quasar habit tracker. Updated 2026-09-26 — CUTOVER DONE,
+> repo alignment (slice 30) DONE.
 
 ## Status: CUTOVER COMPLETE — Astro app live in production
 
@@ -22,7 +23,28 @@
   (`habits.db.pre-cutover-20260926T023424Z`). Keep ≥1 week.
 - `astro check`: 0 errors / 0 warnings / 58 hints (108 files).
 - `pytest tests/ --ignore=tests/test_batch4_live.py`: **392 passed**
-  + 12 skipped** (run at cutover T-1h).
+  + 12 skipped** (run at cutover T-1h, re-confirmed at slice 30).
+
+### Post-cutover repo alignment (slice 30) — COMPLETE
+
+All five audit decisions executed; see
+`slice-reports/slice-30-repo-alignment.md`. Commits `f7848ac` (D2),
+`5bcd6fe` (D5), `4af7f3c` (D1), `577aaf4` (D3). D4 was apollo-side
+hygiene, no commit.
+
+- D1: `ENABLE_PLAN` cluster (Paddle, `routes/astro.py`, `statics/astro`
+  submodule, sitemaps) removed. `robots.txt` moved to
+  `web/concepts/public/` and now serves 200 — it 404'd before.
+  **Ships on the next image build, not yet in production.**
+- D2: migration record now at `docs/migration/` (was `Desktop/migration/`).
+- D3: CI triggers on `push` to main, not just pull requests.
+- D4: 14 dead images deleted from apollo; rollback set retained.
+- D5: both audit files filed under `docs/migration/`, `.hermes/` ignored.
+
+**The migration is complete.** What remains is security/ops remediation
+from the production audit, not migration work: F18 (Critical, auth
+bypass on account deletion), an off-host backup, and a real-device
+login to clear the passkey rpId question.
 
 ### Cutover-day deployment-reality corrections (IMPORTANT for future ops)
 
