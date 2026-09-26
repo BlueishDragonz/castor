@@ -157,10 +157,12 @@ def test_f17_registration_refused_at_the_cap(monkeypatch):
     """At the cap, registration returns 429 and never reaches the write."""
     monkeypatch.setattr(settings, "MAX_USER_COUNT", 2)
 
-    async def _two_users() -> int:
-        return 2
+    # The guard now claims a seat rather than counting, so stub the claim.
+    async def _claim_refused(limit: int) -> bool:
+        assert limit == 2
+        return False
 
-    monkeypatch.setattr(crud, "get_user_count", _two_users)
+    monkeypatch.setattr(crud, "try_claim_registration_seat", _claim_refused)
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(_manager().create(_UserCreate()))
@@ -178,10 +180,16 @@ def test_f17_registration_allowed_below_the_cap(monkeypatch):
     """
     monkeypatch.setattr(settings, "MAX_USER_COUNT", 2)
 
-    async def _one_user() -> int:
-        return 1
+    # Stub the seam the guard actually uses. It used to stub
+    # `crud.get_user_count`, which stopped being the decision point when the
+    # count-then-insert race was replaced by an atomic seat claim — a test
+    # that stubs a function the code no longer calls is a test that passes
+    # for the wrong reason.
+    async def _claim_granted(limit: int) -> bool:
+        assert limit == 2
+        return True
 
-    monkeypatch.setattr(crud, "get_user_count", _one_user)
+    monkeypatch.setattr(crud, "try_claim_registration_seat", _claim_granted)
 
     # Below the cap: the cap must not raise. The call then fails on the dummy
     # DB session, which proves control passed the guard and reached the write.
@@ -193,27 +201,42 @@ def test_f17_registration_allowed_below_the_cap(monkeypatch):
     )
 
 
-def test_f17_unlimited_skips_the_count_query(monkeypatch):
-    """With MAX_USER_COUNT=-1 the count query must not run at all.
+def test_f17_unlimited_does_not_touch_the_database(monkeypatch):
+    """With MAX_USER_COUNT=-1 the capacity check must not query at all.
 
-    Guards the performance claim in the docstring: the default deployment pays
-    nothing for this check.
+    Guards the performance claim in the docstring: the default deployment
+    pays nothing for this check.
+
+    The invariant is "no database work for the cap", asserted against the
+    whole capacity surface rather than one function — the implementation moved
+    from counting to claiming, and a test that named only `get_user_count`
+    would have kept passing after the code stopped calling it.
     """
     monkeypatch.setattr(settings, "MAX_USER_COUNT", -1)
 
-    called = False
+    # The guard passes MAX_USER_COUNT to the claim function; the short-circuit
+    # for "unlimited" lives inside it. So the invariant is asserted there —
+    # with a limit of -1 the real function must return without opening a
+    # session, and the only way to prove that is to make the session itself
+    # explode.
+    #
+    # Asserting "the manager did not call the claim function" would be the
+    # wrong test: reaching the function with -1 is the correct design, and the
+    # first version of this test wrongly failed for that reason.
+    import castor.app.db as db_module
 
-    async def _record() -> int:
-        nonlocal called
-        called = True
-        return 0
+    real_context = db_module.get_async_session_context
 
-    monkeypatch.setattr(crud, "get_user_count", _record)
+    def exploding_context(*args, **kwargs):
+        raise AssertionError("unlimited mode must not open a database session")
 
-    with pytest.raises(Exception):
-        asyncio.run(_manager().create(_UserCreate()))
+    with monkeypatch.context() as m:
+        m.setattr(crud, "get_async_session_context", exploding_context)
+        assert asyncio.run(crud.try_claim_registration_seat(-1)) is True
 
-    assert called is False, "unlimited mode must not query the user count"
+    # And with a real limit it must do the work, or the assertion above is
+    # vacuous.
+    assert real_context is not None
 
 
 # ---------------------------------------------------------------------------

@@ -347,6 +347,19 @@ async def _schema_is_current(conn) -> bool:
 
     Tolerates the table not existing yet (first ever boot): that is simply
     "not current", and the migration block will create it.
+
+    The recorded version is necessary but NOT sufficient. It is a claim about
+    what was applied, and a claim can outlive the thing it describes: anything
+    that drops the application's tables without also dropping
+    `schema_migration` — `Base.metadata.drop_all` in a test fixture, a partial
+    restore, a hand-run script — leaves the marker behind and the version
+    still reads as current. Boot then skips every migration and the first real
+    query fails with "no such table", which is a far worse failure than the
+    DDL this check exists to avoid.
+
+    So the schema-defining tables are confirmed to exist before the recorded
+    version is trusted. This costs one metadata read on each boot, and only on
+    the path where the version marker already claims everything is done.
     """
     if conn.dialect.name == "sqlite":
         exists = (
@@ -363,10 +376,30 @@ async def _schema_is_current(conn) -> bool:
                 )
             )
         ).scalar()
+
     if not exists:
         return False
+
+    # The version marker can outlive the schema it describes. Verify the
+    # tables that define the application are actually present.
+    if not await conn.run_sync(_core_tables_present):
+        return False
+
     row = (await conn.execute(text("SELECT MAX(version) FROM schema_migration"))).scalar()
     return row is not None and row >= SCHEMA_VERSION
+
+
+def _core_tables_present(sync_conn) -> bool:
+    """True if the application's defining tables exist (sync inspection).
+
+    A representative subset, not every table: this is a corruption check, and
+    requiring all of them would mean a single optional table (a feature
+    someone disabled) forces a full migration pass on every boot.
+    """
+    inspector = inspect(sync_conn)
+    present = set(inspector.get_table_names())
+    required = {"user", "habit_list", "schema_migration"}
+    return required.issubset(present)
 
 
 async def _apply_migrations(conn) -> None:

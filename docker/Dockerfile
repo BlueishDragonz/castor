@@ -92,7 +92,21 @@ RUN rm -rf node_modules && pnpm install --frozen-lockfile
 # production-stage ENV and docker-compose BACKEND_URL.
 # Trade-off: changing the backend port now requires an image rebuild.
 ENV BACKEND_URL=http://127.0.0.1:8081
-RUN pnpm exec astro build
+
+# F13: Sentry source-map upload token.
+#
+# Build-time only and never persisted. Declared as an ARG immediately before
+# the build so that `--build-arg SENTRY_AUTH_TOKEN` is actually honoured —
+# without the ARG, the build arg is accepted on the command line and silently
+# discarded, the build succeeds, and the operator believes source maps were
+# uploaded when they were not. That failure is invisible: no error, no
+# warning, just minified stack traces.
+#
+# The value is passed to the build as an inline environment variable rather
+# than left in the image's ENV, so it does not survive into the runtime layer
+# and can be read from the image with `docker inspect`.
+ARG SENTRY_AUTH_TOKEN
+RUN SENTRY_AUTH_TOKEN="${SENTRY_AUTH_TOKEN}" pnpm exec astro build
 
 
 FROM python-base AS production

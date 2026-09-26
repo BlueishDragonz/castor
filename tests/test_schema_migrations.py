@@ -89,6 +89,54 @@ async def test_bootstrap_skips_ddl_when_schema_is_current():
     assert version == db.SCHEMA_VERSION
 
 
+async def test_stale_version_marker_does_not_hide_a_missing_schema():
+    """A version marker can outlive the schema it describes.
+
+    `Base.metadata.drop_all` in a test fixture, a partial restore, or a
+    hand-run script can drop the application's tables while leaving
+    `schema_migration` behind. Trusting the marker then skips every migration,
+    and the first real query fails with "no such table" — a much worse
+    failure than the DDL the version gate exists to avoid.
+
+    Found because several test modules call drop_all, which made F17's tests
+    fail depending on run order.
+    """
+    await db.create_db_and_tables()
+
+    # Wipe the application tables but keep the migration marker, which is what
+    # drop_all leaves behind.
+    async with db.engine.begin() as conn:
+        await conn.run_sync(
+            lambda sync: db.Base.metadata.drop_all(
+                sync,
+                tables=[
+                    t
+                    for t in db.Base.metadata.sorted_tables
+                    if t.name != "schema_migration"
+                ],
+            )
+        )
+
+    # The marker still claims the schema is current...
+    async with db.async_session_maker() as session:
+        version = (
+            await session.execute(text("SELECT MAX(version) FROM schema_migration"))
+        ).scalar()
+    assert version == db.SCHEMA_VERSION, "precondition: marker survives"
+
+    # ...so the check must not be fooled by it.
+    async with db.engine.connect() as conn:
+        assert await db._schema_is_current(conn) is False
+
+    # And boot must repair the schema rather than skip it.
+    await db.create_db_and_tables()
+    async with db.async_session_maker() as session:
+        version = (
+            await session.execute(text("SELECT MAX(version) FROM schema_migration"))
+        ).scalar()
+    assert version == db.SCHEMA_VERSION
+
+
 async def test_unmounted_volume_fails_fast_with_a_useful_message():
     """A non-transient failure must not be retried behind "contended" warnings.
 

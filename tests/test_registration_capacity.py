@@ -38,6 +38,10 @@ async def _clean_capacity():
     create_db_and_tables. Creating the schema here is idempotent and makes the
     module independent of test ordering — the alternative was a test that
     passes in a full-suite run and errors when run alone, or vice versa.
+
+    Only the capacity row is cleared, never `user`: the counter self-heals
+    upward from the real user count (so other modules' accounts are counted
+    correctly), and deleting other modules' fixtures here would corrupt them.
     """
     await db_module.create_db_and_tables()
     async with async_session_maker() as session:
@@ -46,16 +50,36 @@ async def _clean_capacity():
     yield
 
 
-async def test_seat_is_granted_below_the_limit():
-    assert await crud.try_claim_registration_seat(limit=3) is True
-    assert await crud.try_claim_registration_seat(limit=3) is True
-    assert await crud.try_claim_registration_seat(limit=3) is True
+@pytest.fixture
+async def no_users():
+    """A database with no accounts, for tests that need a known baseline.
+
+    Scoped to the tests that opt in, because most of this module must not
+    disturb accounts created by other test modules sharing the session.
+    """
+    from castor.app.db import User
+
+    async with async_session_maker() as session:
+        await session.execute(delete(User))
+        await session.commit()
+    yield
+    async with async_session_maker() as session:
+        await session.execute(delete(User))
+        await session.commit()
 
 
-async def test_seat_is_refused_at_the_limit():
+async def test_seat_is_granted_below_the_limit(no_users):
+    base = await crud.get_user_count()
+    limit = base + 3
+    for _ in range(3):
+        assert await crud.try_claim_registration_seat(limit=limit) is True
+
+
+async def test_seat_is_refused_at_the_limit(no_users):
+    limit = await crud.get_user_count() + 2
     for _ in range(2):
-        assert await crud.try_claim_registration_seat(limit=2) is True
-    assert await crud.try_claim_registration_seat(limit=2) is False
+        assert await crud.try_claim_registration_seat(limit=limit) is True
+    assert await crud.try_claim_registration_seat(limit=limit) is False
 
 
 async def test_unlimited_never_consults_the_database():
@@ -64,14 +88,15 @@ async def test_unlimited_never_consults_the_database():
         assert await crud.try_claim_registration_seat(limit=-1) is True
 
 
-async def test_concurrent_claims_cannot_exceed_the_limit():
+async def test_concurrent_claims_cannot_exceed_the_limit(no_users):
     """The regression: N simultaneous claimants against a limit of N.
 
     With a count-then-insert implementation, several of these observe the same
     pre-count and all succeed. With a conditional UPDATE, the SQLite write lock
     serialises them and only `limit` of them can match.
     """
-    limit = 5
+    base = await crud.get_user_count()
+    limit = base + 5
     contenders = 20
 
     results = await asyncio.gather(
@@ -91,14 +116,15 @@ async def test_concurrent_claims_cannot_exceed_the_limit():
     assert seats == limit, "the counter must match the number of grants"
 
 
-async def test_released_seat_can_be_claimed_again():
+async def test_released_seat_can_be_claimed_again(no_users):
     """A failed registration must not permanently consume capacity."""
-    assert await crud.try_claim_registration_seat(limit=1) is True
-    assert await crud.try_claim_registration_seat(limit=1) is False
+    limit = await crud.get_user_count() + 1
+    assert await crud.try_claim_registration_seat(limit=limit) is True
+    assert await crud.try_claim_registration_seat(limit=limit) is False
 
     await crud.release_registration_seat()
 
-    assert await crud.try_claim_registration_seat(limit=1) is True, (
+    assert await crud.try_claim_registration_seat(limit=limit) is True, (
         "a released seat must be reusable, or repeated failures "
         "permanently close the instance"
     )
