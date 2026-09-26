@@ -1,5 +1,8 @@
-name: Pull Request Test Workflow
-on: [pull_request]
+name: CI — test on pull request and push to main
+on:
+  pull_request:
+  push:
+    branches: [main]
 
 jobs:
   test:
