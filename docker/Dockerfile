@@ -155,7 +155,16 @@ RUN chmod -R g+w /app && \
     chown -R nobody /app
 USER nobody
 
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+# timeout=3s was too tight on the 954 MB apollo host: the probe costs ~2s
+# (interpreter startup + one HTTP round trip), so a busy host reported the
+# container unhealthy while it was serving perfectly — a phantom outage that
+# sends an operator hunting a fault that does not exist.
+#
+# 10s is still well inside the 30s interval, so a genuinely dead container is
+# detected within one interval either way, but a busy host no longer produces
+# a false negative. The probe itself has a 2s socket timeout, so a hung
+# service fails fast regardless.
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=45s \
     CMD python healthcheck.py
 
 # DRIFT-1 (audit 2026-09-26): the running image was built from a directory
