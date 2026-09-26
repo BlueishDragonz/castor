@@ -129,6 +129,16 @@ jobs:
             exit 1
           fi
 
+      # F13 monitoring, and the F11 privacy posture it must not undo.
+      #
+      # Monitoring that quietly exports personal data is worse than no
+      # monitoring: it looks like a working control. These assert both that
+      # the SDK is actually wired into the build (not just installed) and that
+      # the redaction options are present.
+      - name: Security regression — Sentry wired, and leaks nothing (F13/F11)
+        run: |
+          node scripts/check-sentry-config.mjs
+
       - name: Security regression — open redirect is closed (F22)
         run: |
           # An off-site Location must be impossible from the token BFF.

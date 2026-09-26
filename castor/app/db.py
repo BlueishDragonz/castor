@@ -197,6 +197,43 @@ class SchemaMigration(Base):
     applied_at: Mapped[int] = mapped_column(nullable=False, default=0)
 
 
+class RegistrationCapacity(Base):
+    """Single-row admission counter, so the registration cap is exact (F17).
+
+    The obvious implementation — ``SELECT COUNT(*)`` then ``INSERT`` — has a
+    check-then-act race: two simultaneous registrations both observe
+    ``count == MAX-1`` and both insert, yielding ``MAX+1``. A soft capacity
+    limit is not worth corrupting data over, but neither is it worth shipping a
+    knob that can be exceeded by the very first burst of traffic it exists to
+    regulate.
+
+    Instead the capacity is a single row, and a registration claims a seat with
+    a conditional UPDATE::
+
+        UPDATE registration_capacity
+           SET seats_taken = seats_taken + 1
+         WHERE id = 1 AND seats_taken < :limit
+
+    Under SQLite a write takes the database write lock, so the two concurrent
+    claims serialise; the second re-evaluates the WHERE clause against the
+    committed value and matches zero rows. ``rowcount == 0`` is then a
+    definitive "full", not a guess. No schema-wide lock, no serializable
+    transaction, no retry loop.
+
+    ``LIMIT`` is deliberately absent: it would be a config snapshot, and
+    ``MAX_USER_COUNT`` is read live so an operator can change it without a
+    migration. ``seats_taken`` is seeded from the real user count on first use,
+    so this stays correct for an existing deployment.
+    """
+
+    __tablename__ = "registration_capacity"
+
+    # Always 1. A table rather than a settings row because it needs a write
+    # path that serialises, which a config value cannot provide.
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    seats_taken: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+
+
 class PasswordResetCode(TimestampMixin, Base):
     """12-digit reset code with SHA-256 hash, 10-minute TTL, single-use."""
 
@@ -277,7 +314,13 @@ async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 #      instead of dying.
 #   3. `SCHEMA_VERSION` gates the whole thing: once the database records the
 #      version it is already at, boot does no DDL at all.
-SCHEMA_VERSION = 5
+#
+# Version 6 adds `registration_capacity` (F17's race-free admission counter).
+# Bump this whenever a new TABLE is added: `create_all` creates missing tables,
+# but the version gate means a database already recorded at the previous
+# version would skip the migration entirely and then fail at runtime with
+# "no such table".
+SCHEMA_VERSION = 6
 
 
 async def _acquire_migration_lock(conn) -> None:

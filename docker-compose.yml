@@ -28,6 +28,20 @@ services:
       - BACKEND_URL=http://127.0.0.1:8081
       # ─── Frontend origin (invite-link URLs, redirects) ───────────
       - FRONTEND_URL=http://10.8.0.1:8080
+      # ─── Monitoring (F13) ────────────────────────────────────────
+      # The DSN is a public ingest key, not a secret, so it is safe here.
+      # It is passed to the Astro build/runtime and to the Python backend,
+      # which is what makes an OOM kill or a post-deploy crash visible to an
+      # operator instead of to a user.
+      #
+      # F11 posture: `send_default_pii` stays False everywhere. Sentry's
+      # defaults would attach request bodies, headers and client IPs to every
+      # event, and this app handles passwords, recovery codes and habit data.
+      # Enabling telemetry must be a deliberate act, not a side effect of
+      # setting a DSN.
+      - SENTRY_DSN=https://194746b78af1d5c8a76844097430dad8@o4512052468514816.ingest.de.sentry.io/4512154770407504
+      - PUBLIC_SENTRY_DSN=https://194746b78af1d5c8a76844097430dad8@o4512052468514816.ingest.de.sentry.io/4512154770407504
+      - SENTRY_SEND_PII=false
       # Secrets (JWT_SECRET, RESET_PASSWORD_TOKEN_SECRET,
       # NICEGUI_STORAGE_SECRET, SMTP_EMAIL_USERNAME/PASSWORD) come from
       # .user/.secrets.env inside the volume — set them there.

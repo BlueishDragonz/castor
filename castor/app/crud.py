@@ -5,12 +5,13 @@ import uuid
 from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 
 from castor.logger import logger
 
 from .db import (
     HabitListModel,
+    RegistrationCapacity,
     User,
     UserApiTokenModel,
     UserConfigsModel,
@@ -119,11 +120,82 @@ async def get_user_habit_list(user: User) -> HabitListModel | None:
 
 async def get_user_count() -> int:
     async with get_async_session_context() as session:
-        stmt = select(User)
-        result = await session.execute(stmt)
-        user_count = len(result.all())
+        # COUNT, not a full SELECT: this is a number, not rows. The old form
+        # materialised every user to call len() on the result, which is O(users)
+        # memory for a single integer.
+        result = await session.execute(select(func.count()).select_from(User))
+        user_count = int(result.scalar_one())
         logger.info(f"[CRUD] User count query: {user_count}")
         return user_count
+
+
+async def try_claim_registration_seat(limit: int) -> bool:
+    """Atomically claim one registration seat. True if granted (F17).
+
+    The check and the increment are a single conditional UPDATE, so two
+    concurrent registrations cannot both observe the same pre-count and both
+    proceed. Under SQLite the write lock serialises them and the loser's WHERE
+    clause is re-evaluated against the committed value.
+
+    Returns False when the instance is full. The caller must then release the
+    seat if the subsequent user creation fails, or the instance leaks capacity
+    and eventually refuses everyone.
+    """
+    if limit < 0:
+        return True  # documented "unlimited"
+
+    async with get_async_session_context() as session:
+        # Seed from the true count on first use, so an existing deployment
+        # starts at the right number rather than zero. Doing this inside the
+        # same transaction as the claim means the seed cannot itself race.
+        real_count = int(
+            (await session.execute(select(func.count()).select_from(User))).scalar_one()
+        )
+        existing = (
+            await session.execute(
+                select(RegistrationCapacity).where(RegistrationCapacity.id == 1)
+            )
+        ).scalar_one_or_none()
+
+        if existing is None:
+            session.add(RegistrationCapacity(id=1, seats_taken=real_count))
+            await session.flush()
+            await session.commit()
+            # Fall through to the same claim so seeding alone cannot bypass
+            # the limit when the instance is already at capacity.
+        elif existing.seats_taken < real_count:
+            # Somebody registered without the cap in force (limit was -1, or a
+            # row was added by an admin). Trust the larger of the two.
+            existing.seats_taken = real_count
+            await session.commit()
+
+        result = await session.execute(
+            update(RegistrationCapacity)
+            .where(RegistrationCapacity.id == 1, RegistrationCapacity.seats_taken < limit)
+            .values(seats_taken=RegistrationCapacity.seats_taken + 1)
+        )
+        claimed = result.rowcount == 1
+        await session.commit()
+        if claimed:
+            logger.info(f"[CRUD] Registration seat claimed (limit {limit})")
+        else:
+            logger.error(f"Registration seat refused: at capacity (limit {limit})")
+        return claimed
+
+
+async def release_registration_seat() -> None:
+    """Return a seat claimed by ``try_claim_registration_seat``.
+
+    Called when user creation fails after the seat was granted, so a transient
+    database error cannot permanently consume capacity.
+    """
+    async with get_async_session_context() as session:
+        await session.execute(
+            update(RegistrationCapacity)
+            .where(RegistrationCapacity.id == 1, RegistrationCapacity.seats_taken > 0)
+            .values(seats_taken=RegistrationCapacity.seats_taken - 1)
+        )
+        await session.commit()
 
 
 async def get_user_list() -> Sequence[User]:

@@ -64,7 +64,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         safe: bool = False,
         request: Optional[Request] = None,
     ) -> User:
-        """F17: enforce MAX_USER_COUNT.
+        """F17: enforce MAX_USER_COUNT, without a check-then-act race.
 
         This setting was declared in `configs.py` and never read anywhere, so
         an operator who set it to cap registrations would see no effect at all
@@ -75,38 +75,41 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         enforced BEFORE a row is written; enforcing it afterwards would leave
         an over-cap account that must then be deleted by hand.
 
-        -1 is the documented "unlimited" default and skips the query entirely,
-        so the default deployment pays nothing for this.
+        -1 is the documented "unlimited" default and skips the database work
+        entirely, so the default deployment pays nothing for this.
 
-        The count is advisory rather than a hard transaction-level guarantee:
-        two simultaneous registrations could both observe count == MAX-1 and
-        both succeed, yielding MAX+1. Closing that would need a serializable
-        transaction or a unique index on a sentinel row, which is not worth the
-        complexity for a soft capacity limit. The window is milliseconds wide
-        and the consequence is one extra account, not corruption.
+        The claim is a single conditional UPDATE (see
+        `crud.try_claim_registration_seat`) rather than a count followed by an
+        insert. The earlier version did `SELECT COUNT(*)` and then inserted,
+        which two simultaneous registrations could both pass — exactly the
+        first burst of traffic a cap exists to regulate. The conditional
+        UPDATE cannot be passed by two callers at once.
+
+        A claimed seat is released if the user creation then fails, so a
+        transient error cannot permanently consume capacity.
         """
-        if settings.MAX_USER_COUNT >= 0:
-            current = await crud.get_user_count()
-            if current >= settings.MAX_USER_COUNT:
-                logger.error(
-                    f"Registration refused: user limit reached "
-                    f"({current}/{settings.MAX_USER_COUNT})"
-                )
-                # Deliberately NOT `exceptions.UserAlreadyExists`: that maps
-                # to a 400 "email already registered", which would tell a
-                # prospective user their address is taken. The truth is that
-                # the instance is full. A 429 with Retry-After is the accurate
-                # signal, and it stops a signup bot from hammering a closed
-                # door.
-                raise HTTPException(
-                    status_code=HTTP_429_TOO_MANY_REQUESTS,
-                    detail=(
-                        "This instance is at capacity and is not accepting "
-                        "new registrations."
-                    ),
-                    headers={"Retry-After": "3600"},
-                )
-        return await super().create(user_create, safe=safe, request=request)
+        claimed = await crud.try_claim_registration_seat(settings.MAX_USER_COUNT)
+        if not claimed:
+            # Deliberately NOT `exceptions.UserAlreadyExists`: that maps to a
+            # 400 "email already registered", which would tell a prospective
+            # user their address is taken. The truth is that the instance is
+            # full. A 429 with Retry-After is the accurate signal, and it stops
+            # a signup bot from hammering a closed door.
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "This instance is at capacity and is not accepting "
+                    "new registrations."
+                ),
+                headers={"Retry-After": "3600"},
+            )
+        try:
+            return await super().create(user_create, safe=safe, request=request)
+        except Exception:
+            # The seat was granted but the user was not created. Give it back,
+            # or a run of failed signups permanently shrinks the instance.
+            await crud.release_registration_seat()
+            raise
 
     async def on_after_forgot_password(
         self, user: User, token: str, request: Optional[Request] = None
