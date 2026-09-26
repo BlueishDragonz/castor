@@ -157,6 +157,14 @@ celerybeat.pid
 
 # Environments
 .env
+# F13: the Sentry source-map upload token reaches the build through a BuildKit
+# secret mount (`--secret id=sentry_token,src=...`), not through the build
+# context. So excluding it here is safe and correct: even if a copy lands in
+# the working tree, it cannot be COPYied into an image layer, which is the
+# failure mode that matters — a secret in a layer is not recoverable by
+# deleting the file afterwards.
+.sentry-token
+**/.sentry-token
 .venv*
 env/
 venv/

@@ -95,18 +95,26 @@ ENV BACKEND_URL=http://127.0.0.1:8081
 
 # F13: Sentry source-map upload token.
 #
-# Build-time only and never persisted. Declared as an ARG immediately before
-# the build so that `--build-arg SENTRY_AUTH_TOKEN` is actually honoured —
-# without the ARG, the build arg is accepted on the command line and silently
-# discarded, the build succeeds, and the operator believes source maps were
-# uploaded when they were not. That failure is invisible: no error, no
-# warning, just minified stack traces.
+# Passed via a BuildKit SECRET MOUNT, not ARG and not ENV.
 #
-# The value is passed to the build as an inline environment variable rather
-# than left in the image's ENV, so it does not survive into the runtime layer
-# and can be read from the image with `docker inspect`.
-ARG SENTRY_AUTH_TOKEN
-RUN SENTRY_AUTH_TOKEN="${SENTRY_AUTH_TOKEN}" pnpm exec astro build
+# Two earlier approaches were wrong, and the reasons are worth recording:
+#
+#  - ARG alone: `docker build --build-arg` is accepted even when the Dockerfile
+#    declares no matching ARG, so the token is silently discarded. The build
+#    succeeds with no warning and no source maps are uploaded.
+#
+#  - Inline env var on the RUN: buildkit expands and echoes the RUN command
+#    line into the build log, so the token lands in plaintext in
+#    /tmp/deploy-build.log. It did exactly that on the first real build.
+#
+# A secret mount writes the token to a tmpfs at /run/secrets for the duration
+# of the RUN only. It is not in the layer, not in the image, not in the
+# build log, and not in `docker history`. Nothing to forget to clean up.
+#
+# The RUN references the value, never the secret itself.
+RUN --mount=type=secret,id=sentry_token \
+    SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_token)" \
+    pnpm exec astro build
 
 
 FROM python-base AS production
