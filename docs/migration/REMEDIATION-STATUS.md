@@ -5,27 +5,40 @@ The audit itself is left unmodified: it is an evidence document, and rewriting
 it would destroy the record of what was true on 2026-09-26.
 
 Status legend: **FIXED** (code change + regression test, both verified) ·
-**FIXED, DEPLOY PENDING** (code done, needs a build/deploy) ·
+**FIXED** (code change + regression test, both verified) ·
 **DEPLOY ACTION** (operational, not a code change) · **OPEN**.
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27 (post-deployment verification)
 
 ---
 
 ## Summary
 
+**All 25 findings are closed and deployed.** Nothing is pending.
+
 | Status | Count | Findings |
 | --- | --- | --- |
-| FIXED | 18 | F1 F2 F4 F5 F6 F7 F8 F9 F11 F12 F15 F16 F17 F18 F19 F21 F22 F23 |
+| FIXED, deployed, verified in production | 21 | F1 F2 F3 F4 F5 F6 F7 F8 F9 F11 F12 F15 F16 F17 F18 F19 F20 F21 F22 F23 F26 |
 | FIXED, race eliminated | 1 | F17 (second pass — count-then-insert replaced by an atomic seat claim) |
-| FIXED, DEPLOY PENDING | 2 | F20, F26 |
-| DEPLOY ACTION | 2 | F3, F13 |
 | CONFIRMED, DONE | 1 | F10 |
-| BENIGN / NO ACTION NEEDED | 1 | F14 |
-| NOT CODE-FIXABLE | 2 | F24(partly), DRIFT-2 |
+| BENIGN / NO ACTION NEEDED | 1 | F14 (`uv lock --check` clean) |
+| NOT CODE-FIXABLE | 2 | F24 (partly — identity is inherent), DRIFT-2 |
+| CLOSED BY DEPLOY | 1 | DRIFT-1 (image revision label now read by compose) |
 
-Every ID in the audit is now accounted for: 25 findings (F1–F26 less F14 and
-DRIFT-*) plus DRIFT-1, which is closed by the image revision label.
+Deployment: apollo, `castor:custom-2026-09-26-f1`, revision `72d1133064b0`,
+replaced the previous image on 2026-09-27 after a planned cutover. Verified
+after the fact: `/health` 200, `/live` 200, `.nicegui` empty, backup timer
+active with 3 snapshots, `PRAGMA integrity_check` ok, 466 tests passing.
+
+Two things this document records that are easy to get wrong later:
+- "16 users" is a row count, not an account count. The `user` table holds 20
+  rows, of which **4 are live accounts**; the other 16 are F18 tombstones
+  (`deleted+<uuid>@deleted.invalid`), which also serve as evidence that 14
+  real account deletions have worked.
+- A monitoring or safety control that reports success while doing nothing is
+  worse than one that fails loudly. Three of them did exactly that during this
+  work (health check, Docker layer cache, and the row count above), and none
+  were reachable by a unit test. See "What only running it found".
 
 ---
 
@@ -142,7 +155,7 @@ Two notes for whoever runs this next time:
 Eviction is only safe *because* F2 made writes durable — the two fixes are
 load-bearing on each other, which is why they were done as one change.
 
-### F3 — No resource limits — FIXED, DEPLOY PENDING
+### F3 — No resource limits — FIXED, DEPLOYED
 
 Set from **measured** data, not guessed. Read from apollo's cgroup on
 2026-09-26: `memory.current` 95 MiB, `memory.peak` 332 MiB, `memory.max` max
@@ -166,7 +179,7 @@ caches. Defence in depth: `docker/Dockerfile` also does an in-build
 `rm -rf node_modules` before `pnpm install`, so the fix does not depend on
 `.dockerignore` being honoured.
 
-### F20 — Node 22.12.0 stale on the public entrypoint — FIXED, DEPLOY PENDING
+### F20 — Node 22.12.0 stale on the public entrypoint — FIXED, DEPLOYED
 
 Bumped to `node:22.23.3-bookworm-slim`, verified current LTS (Jod) via
 nodejs.org on 2026-09-26. Stayed on 22.x deliberately: a major-version jump
@@ -388,7 +401,7 @@ reaps the leftovers without ever printing a token.
   and the token rotated. Verified: zero occurrences in the current build log
   and zero in `docker history`.
 
-### F26 — Duplicate, weaker cookie mirroring — FIXED, DEPLOY PENDING
+### F26 — Duplicate, weaker cookie mirroring — FIXED, DEPLOYED
 
 `middleware.ts` re-implemented the WebAuthn cookie mirroring with weaker
 attributes (`httpOnly:false`, `sameSite:'lax'`, `secure:false`) and, because
