@@ -26,6 +26,17 @@ jobs:
         # these defaults; overriding them produces 23 spurious failures.
         # test_batch4_live.py probes a running production container and
         # is deliberately excluded from CI.
+        #
+        # JWT_SECRET / RESET_PASSWORD_TOKEN_SECRET / NICEGUI_STORAGE_SECRET:
+        # the app refuses to boot when any is missing or a known default
+        # (F11: a default secret makes every issued token forgeable). Those
+        # guards are correct and stay. CI supplies throwaway values that sign
+        # nothing real and pair with a throwaway database. tests/conftest.py
+        # sets the same values for local runs.
+        env:
+          JWT_SECRET: ci-throwaway-jwt-secret-0000000000000000
+          RESET_PASSWORD_TOKEN_SECRET: ci-throwaway-reset-secret-0000000000
+          NICEGUI_STORAGE_SECRET: ci-throwaway-storage-secret-000000000
         run: uv run pytest tests/ --ignore=tests/test_batch4_live.py
 
   astro-check:
@@ -41,7 +52,7 @@ jobs:
           version: 9
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.23.3
           cache: pnpm
           cache-dependency-path: web/concepts/pnpm-lock.yaml
       - name: Install dependencies
@@ -75,7 +86,7 @@ jobs:
           version: 9
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.23.3
           cache: pnpm
           cache-dependency-path: web/concepts/pnpm-lock.yaml
       - name: Install dependencies
