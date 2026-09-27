@@ -29,8 +29,32 @@ TRUSTED_EMAIL_HEADER=
 AUTH_RATE_USER_PER_MINUTE=10000
 AUTH_RATE_IP_PER_MINUTE=10000
 TIME_ZONE=Europe/London
+# The public origin the browser uses. The backend's BrowserOriginMiddleware
+# rejects state-changing requests whose Origin/Referer is not in its
+# allowlist, and with this unset both the BFF (web/concepts/src/lib/auth.ts)
+# and the backend fell back to defaults that did not match, so signing in
+# returned 403 "Browser origin not allowed" with nothing visible in the UI.
+FRONTEND_URL=http://localhost:4321
 EOF
   echo "Wrote .env (DEBUG=true, demo seed will run on startup)"
+fi
+
+# FRONTEND_URL is load-bearing for local sign-in, so make sure an existing
+# .env has it too rather than silently failing to authenticate.
+if ! grep -q '^FRONTEND_URL=' .env 2>/dev/null; then
+  echo "FRONTEND_URL=http://localhost:4321" >> .env
+  echo "Added FRONTEND_URL to .env (required for local sign-in)"
+fi
+
+# The Astro app loads env from web/concepts, NOT the repo root, so the
+# value above has to be mirrored there or process.env.FRONTEND_URL is
+# undefined inside web/concepts/src/lib/auth.ts. With it undefined the BFF
+# sends no Origin, and the backend's BrowserOriginMiddleware rejects every
+# state-changing request with 403 "Browser origin not allowed" — sign-in
+# fails with no visible cause in the browser.
+if ! grep -q '^FRONTEND_URL=' web/concepts/.env 2>/dev/null; then
+  echo "FRONTEND_URL=http://localhost:4321" > web/concepts/.env
+  echo "Wrote web/concepts/.env with FRONTEND_URL (required for local sign-in)"
 fi
 
 mkdir -p .user

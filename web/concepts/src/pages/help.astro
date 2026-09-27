@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 ---
 
 <Layout title="Help — Castor" description="Help and resources for Castor.">
-  <main class="mx-auto max-w-3xl px-6 py-12 flex flex-col gap-8">
+  <main id="main" class="castor-page">
 
     <PageHeader
       title="Help"
@@ -41,7 +41,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
     {/* ── Quick links ── */}
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>Quick links</CardTitle>
+        <CardTitle as="h2">Quick links</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-2 sm:grid-cols-2">
         <a
@@ -86,7 +86,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
     {/* ── FAQ (collapsible) ── */}
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>Frequently asked questions</CardTitle>
+        <CardTitle as="h2">Frequently asked questions</CardTitle>
       </CardHeader>
       <CardContent className="divide-y divide-border">
         <details class="group py-3 first:pt-0 last:pb-0">
@@ -162,7 +162,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
     {/* ── Need more help ── */}
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>Need more help?</CardTitle>
+        <CardTitle as="h2">Need more help?</CardTitle>
       </CardHeader>
       <CardContent>
         <p class="text-sm text-muted-foreground leading-relaxed">

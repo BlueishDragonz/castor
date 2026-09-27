@@ -2,23 +2,32 @@
 /**
  * PageHeader — the canonical page header pattern.
  *
- * Locked by the 2026-09-25 dogfood walkthrough. Every page in the app
- * renders its title block through this component so the layout stays
- * consistent:
+ * Every signed-in page renders its title block through this component
+ * so the layout stays consistent:
  *
- *   [<back arrow>] <title>                 <right slot>
+ *   [<back arrow>] <title>            <actions slot>
  *                 <subtitle?>
  *
- * - `back` is an href (or null); when set, an icon-only ghost
- *   Button is rendered to the left of the title.
+ * - `back` is an href; when set, an icon-only ghost button is rendered
+ *   to the left of the title.
  * - `actions` is a slot — pass right-aligned controls (a "New circle"
  *   button, a sort menu, an "Edit" button, etc.).
- * - `subtitle` is the small muted line under the title (e.g.
- *   "5 active habits.").
+ * - `subtitle` is the small muted line under the title.
  *
- * Replaces the inconsistent "back link right of title" pattern that
- * existed on most pages before this slice.
+ * Changes in the 2026-09-27 UI pass
+ * -------------------------------
+ * 1. The actions slot used to live in its own row *below* the title
+ *    (`mt-4`), which is why the DesktopMenu hamburger appeared under
+ *    the page title instead of beside it, and why pages with no
+ *    actions still reserved a phantom empty row. Title and actions now
+ *    share one flex row, baseline-aligned.
+ * 2. The subtitle carried a hard-coded `ml-11` (44px) indent meant to
+ *    clear a back arrow. On pages *without* a back arrow — /habits and
+ *    /circles — that indented the subtitle 44px to the right of its
+ *    own title (measured: h1 at x=272, subtitle at x=316). The indent
+ *    is now conditional on the back arrow actually being present.
  */
+import { buttonVariants } from './ui/button';
 
 interface Props {
   title: string;
@@ -38,33 +47,130 @@ const BACK_LABELS: Record<string, string> = {
 };
 const backAriaLabel = back ? (BACK_LABELS[back] ?? 'previous page') : '';
 
-const IconMap: Record<string, string> = {
-  crown: '👑',
-  users: '👥',
-  shield: '🛡',
-  settings: '⚙',
-  home: '🏠',
-};
+// The back arrow is a real 32px hit target with an accessible name,
+// rather than a bare "←" glyph that screen readers announced as
+// "leftwards arrow" with no destination.
+const backClasses = buttonVariants({ variant: 'ghost', size: 'icon' });
 ---
 
-<header class="mb-6">
-  <div class="flex items-center gap-3 min-w-0">
-    {back && (
-      <a
-        href={back}
-        aria-label={`Back to ${backAriaLabel}`}
-        class="inline-flex items-center justify-center shrink-0 h-8 w-8 rounded-md text-lg leading-none transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-      >←</a>
-    )}
-    <h1 class="text-2xl font-bold tracking-tight flex items-center gap-2 truncate min-w-0">
-      {icon && <span aria-hidden="true">{IconMap[icon]}</span>}
-      <span class="truncate"><slot name="title">{title}</slot></span>
-    </h1>
-  </div>
-  {subtitle && (
-    <p class="text-sm text-muted-foreground mt-1 ml-11">{subtitle}</p>
-  )}
-  <div class="flex items-center gap-2 shrink-0 mt-4">
-    <slot name="actions" />
+<header class="page-header">
+  <div class="page-header__top">
+    <div class="page-header__id">
+      {back && (
+        <a
+          href={back}
+          aria-label={`Back to ${backAriaLabel}`}
+          class:list={['page-header__back', backClasses]}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            class="h-4 w-4"
+          >
+            <path d="M19 12H5"></path>
+            <path d="M12 19l-7-7 7-7"></path>
+          </svg>
+        </a>
+      )}
+      <div class="page-header__text">
+        <h1 class="page-header__title">
+          {icon && <span aria-hidden="true">{icon}</span>}
+          <span class="truncate"><slot name="title">{title}</slot></span>
+        </h1>
+        {subtitle && <p class="page-header__subtitle">{subtitle}</p>}
+      </div>
+    </div>
+
+    <div class="page-header__actions">
+      <slot name="actions" />
+    </div>
   </div>
 </header>
+
+<style>
+  .page-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .page-header__top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .page-header__id {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  /*
+   * The back button is nudged left so its 32px box optically aligns with
+   * the title's cap-height rather than sitting 10px inside it.
+   */
+  .page-header__back {
+    margin-left: -0.5rem;
+    margin-top: 0.125rem;
+    color: var(--muted-foreground);
+  }
+
+  .page-header__back:hover {
+    color: var(--foreground);
+  }
+
+  .page-header__text {
+    min-width: 0;
+  }
+
+  .page-header__title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  /*
+   * `margin-left` is set on the title block by the parent when a back
+   * arrow is present (the arrow + its gap), so the subtitle always
+   * aligns to the title's left edge and never to the page edge.
+   */
+  .page-header__id:has(.page-header__back) .page-header__text {
+    margin-left: 0;
+  }
+
+  .page-header__subtitle {
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+  }
+
+  .page-header__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  /*
+   * On phones the title and actions each want the full row. The title
+   * keeps priority; the actions wrap beneath it, right-aligned.
+   */
+  @media (max-width: 480px) {
+    .page-header__top {
+      flex-wrap: wrap;
+    }
+  }
+</style>

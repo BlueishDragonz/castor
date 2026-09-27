@@ -128,12 +128,33 @@ class Settings(BaseSettings):
         So: the configured list wins, and FRONTEND_URL is always included,
         because that is the origin the frontend genuinely serves from. Both
         are deduplicated and order-preserved.
+
+        Loopback aliases: `localhost` and `127.0.0.1` (and `[::1]`) are
+        the same machine but different origins to a browser, so a
+        developer who opens http://127.0.0.1:4321 while FRONTEND_URL
+        says http://localhost:4321 gets a 403 "Browser origin not
+        allowed" on every write — sign-in included. Each loopback
+        spelling of a configured loopback origin is added too.
         """
         origins = list(self.CSRF_ALLOWED_ORIGINS)
         frontend = (self.FRONTEND_URL or "").strip()
         if frontend and frontend not in origins:
             origins.append(frontend)
-        return origins
+
+        # Expand http://localhost:PORT / https://localhost:PORT to the
+        # equivalent 127.0.0.1 and [::1] origins.
+        expanded: list[str] = list(origins)
+        for origin in origins:
+            for host, loopback in (
+                ("localhost", "127.0.0.1"),
+                ("127.0.0.1", "localhost"),
+                ("localhost", "[::1]"),
+            ):
+                if f"://{host}:" in origin:
+                    alias = origin.replace(f"://{host}:", f"://{loopback}:", 1)
+                    if alias not in expanded:
+                        expanded.append(alias)
+        return expanded
 
     # TLS termination (reverse proxy with HTTPS) - set True when behind nginx/Caddy with HTTPS
     # When False (direct HTTP), CSP allows ws: for WebSocket; when True, only wss: allowed

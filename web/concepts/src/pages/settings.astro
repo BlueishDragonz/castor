@@ -47,7 +47,6 @@ import HelpDialog from '../components/HelpDialog.tsx';
 import SettingsClient from '../components/SettingsClient.tsx';
 import DisplayCard from '../components/DisplayCard.tsx';
 import PageHeader from '../components/PageHeader.astro';
-import { DesktopMenu } from '../components/DesktopMenu.tsx';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -80,14 +79,13 @@ if (Astro.request.method === 'POST') {
 ---
 
 <Layout title="Settings — Castor">
-  <main class="mx-auto max-w-2xl px-6 py-12 space-y-8 pb-24">
+  <main id="main" class="castor-page">
     <PageHeader title="Settings" back="/habits">
-      <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />
     </PageHeader>
 
     <Card>
       <CardHeader>
-        <CardTitle>Appearance</CardTitle>
+        <CardTitle as="h2">Appearance</CardTitle>
         <CardDescription>Choose how Castor looks. Saved per device.</CardDescription>
       </CardHeader>
       <CardContent>
@@ -126,7 +124,7 @@ if (Astro.request.method === 'POST') {
 
     <Card>
       <CardHeader>
-        <CardTitle>Custom CSS</CardTitle>
+        <CardTitle as="h2">Custom CSS</CardTitle>
         <CardDescription>
           Advanced: write custom CSS to customize Castor's appearance.
           Saved on Save; sanitized server-side before applying.
@@ -161,7 +159,7 @@ if (Astro.request.method === 'POST') {
 
     <Card>
       <CardHeader>
-        <CardTitle>Help</CardTitle>
+        <CardTitle as="h2">Help</CardTitle>
         <CardDescription>
           Resources and places to ask questions or report bugs.
         </CardDescription>
@@ -173,7 +171,7 @@ if (Astro.request.method === 'POST') {
 
     <Card>
       <CardHeader>
-        <CardTitle>Account</CardTitle>
+        <CardTitle as="h2">Account</CardTitle>
         <CardDescription>Manage your session and account.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

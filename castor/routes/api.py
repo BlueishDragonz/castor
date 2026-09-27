@@ -146,8 +146,26 @@ async def get_habits(
     return [{"id": x.id, "name": x.name} for x in habits]
 
 
+class HabitPeriodPayload(BaseModel):
+    """The period block shared by the create and update payloads."""
+
+    period_type: Literal["D", "W", "M", "Y"]
+    period_count: int
+    target_count: int
+
+
 class CreateHabit(BaseModel):
     name: str
+    # The web create form has always sent a period, tags and chips
+    # alongside the name, but this model accepted only `name`, so
+    # FastAPI silently dropped the rest and every newly created habit
+    # came back with period=null and no tags — the "How often" and
+    # "Tags" fields on the create form had no effect on the stored
+    # habit. All three are optional so existing native clients that
+    # only send a name keep working.
+    period: HabitPeriodPayload | None = None
+    tags: list[str] = Field(default_factory=list)
+    chips: list[str] = Field(default_factory=list)
 
 
 @api_router.post("/habits", tags=["habits"])
@@ -171,6 +189,23 @@ async def post_habits(
 
     id = await habit_list.add(habit.name)
     logger.info(f"Created new habit {id} for user {user.email}")
+
+    # Apply the period / tags / chips the client sent. Without this the
+    # create form's "How often" and "Tags" fields were accepted, echoed
+    # back in a redirect, and never stored. Mutating the stored object
+    # in place mirrors what put_habit does — no explicit save step.
+    created = await habit_list.get_habit_by(id)
+    if created is not None:
+        if habit.period is not None:
+            created.period = HabitFrequency(
+                period_type=habit.period.period_type,
+                period_count=habit.period.period_count,
+                target_count=habit.period.target_count,
+            )
+        if habit.tags:
+            created.tags = habit.tags
+        if habit.chips:
+            created.data["chips"] = habit.chips
 
     return {"id": id, "name": habit.name}
 
@@ -276,15 +311,10 @@ async def get_habit_detail(
 
 
 class UpdateHabit(BaseModel):
-    class UpdateHabitPeriod(BaseModel):
-        period_type: Literal["D", "W", "M", "Y"]
-        period_count: int
-        target_count: int
-
     name: str | None = None
     star: bool | None = None
     status: HabitStatus | None = None
-    period: UpdateHabitPeriod | None = None
+    period: HabitPeriodPayload | None = None
     tags: list[str] | None = None
 
 

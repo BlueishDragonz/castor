@@ -102,7 +102,7 @@ if (Astro.request.method === 'POST') {
 ---
 
 <Layout title="Import — Castor">
-  <main class="mx-auto max-w-2xl px-6 py-12 space-y-6 pb-24">
+  <main id="main" class="castor-page">
     <header class="flex items-center justify-between gap-4">
       <div>
         <h1 class="text-2xl font-semibold tracking-tight">Import</h1>
@@ -134,7 +134,7 @@ if (Astro.request.method === 'POST') {
 
     <Card>
       <CardHeader>
-        <CardTitle>Paste JSON</CardTitle>
+        <CardTitle as="h2">Paste JSON</CardTitle>
         <CardDescription>
           The output of /export, or any JSON file in the same shape.
         </CardDescription>
@@ -177,7 +177,7 @@ if (Astro.request.method === 'POST') {
 
     <Card className="border-destructive/50">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-destructive">
+        <CardTitle as="h2" className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" aria-hidden="true" />
           Danger zone
         </CardTitle>

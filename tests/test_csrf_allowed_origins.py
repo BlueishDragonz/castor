@@ -132,8 +132,31 @@ def test_blank_frontend_url_does_not_produce_an_empty_entry():
 
 
 def test_dev_default_still_allows_localhost():
-    """A fresh checkout keeps working without extra configuration."""
+    """A fresh checkout keeps working without extra configuration.
+
+    The allowlist is a superset of the configured origin: loopback
+    spellings of it are added too, because `localhost` and `127.0.0.1`
+    are the same machine but different origins to a browser. Opening
+    http://127.0.0.1:4321 while FRONTEND_URL says http://localhost:4321
+    used to 403 every write with "Browser origin not allowed".
+
+    What this test must keep protecting is that a fresh checkout works,
+    so it asserts membership and end-to-end acceptance rather than an
+    exact list.
+    """
     s = make(FRONTEND_URL="http://localhost:4321")
-    assert s.csrf_allowed_origins() == ["http://localhost:4321"]
-    m = BrowserOriginMiddleware(app=None, allowed_origins=s.csrf_allowed_origins())
+    allowed = s.csrf_allowed_origins()
+    assert "http://localhost:4321" in allowed
+    assert "http://127.0.0.1:4321" in allowed
+
+    m = BrowserOriginMiddleware(app=None, allowed_origins=allowed)
     assert call(m, host="127.0.0.1:8085", origin="http://localhost:4321") == 200
+    # The loopback alias has to be accepted too, or the aliasing is
+    # pointless.
+    assert call(m, host="127.0.0.1:8085", origin="http://127.0.0.1:4321") == 200
+
+
+def test_non_loopback_origin_gains_no_loopback_aliases():
+    """Aliasing must not widen the allowlist for a real deployment."""
+    s = make(FRONTEND_URL="https://castor.example.com")
+    assert s.csrf_allowed_origins() == ["https://castor.example.com"]

@@ -157,7 +157,7 @@ export function DisplayCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Display</CardTitle>
+        <CardTitle as="h2">Display</CardTitle>
         <CardDescription>
           Per-device habit grid options. Saved to your account immediately,
           applies on next visit.

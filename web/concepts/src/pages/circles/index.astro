@@ -7,7 +7,7 @@
  */
 import Layout from '../../layouts/Layout.astro';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
+import { buttonVariants } from '../../components/ui/button';
 import { Crown } from 'lucide-react';
 import PageHeader from '../../components/PageHeader.astro';
 import EmptyState from '../../components/EmptyState.astro';
@@ -34,11 +34,21 @@ try {
 ---
 
 <Layout title="Private Circles">
-  <main class="mx-auto max-w-2xl px-4 py-12 space-y-4 pb-24">
-    <PageHeader title="Private Circles" subtitle="Small, trusted groups that see each other's habit ticks. Membership requires an invite.">
-      <Button slot="actions" asChild>
-        <a href="/circles/new" aria-label="Create new circle">New circle</a>
-      </Button>
+  <main id="main" class="castor-page">
+    <PageHeader title="Circles" subtitle="Small, trusted groups that see each other's habit ticks. Membership requires an invite.">
+      <Fragment slot="actions">
+        {/*
+          A plain <a> with the Button's class string rather than
+          `<Button asChild><a/></Button>`: inside a .astro file the
+          Radix Slot does not merge the cva classes onto the child, so
+          the link rendered with no button styling at all — it looked
+          like body text. buttonVariants() gives the same classes
+          without the Slot round-trip.
+        */}
+        <a href="/circles/new" class={buttonVariants()}>
+          New circle
+        </a>
+      </Fragment>
     </PageHeader>
 
     {error && (
@@ -49,12 +59,15 @@ try {
       </Card>
     )}
 
+    {/*
+      No CTA in the empty state: the "New circle" button in the header
+      is the one action this screen offers, and the empty state
+      previously repeated it as a second primary link directly beneath.
+    */}
     {!error && circles.length === 0 && (
       <EmptyState
-        title="You don't belong to any circles yet."
-        description="Create one to share habit ticks with a small, trusted group."
-        ctaHref="/circles/new"
-        ctaLabel="Create your first circle"
+        title="You don't belong to any circles yet"
+        description="A circle is an invite-only group. You create one, invite the people you trust, and choose which habits they can see. Nobody else can find it."
       />
     )}
 
@@ -63,7 +76,7 @@ try {
         {circles.map(c => (
           <Card className="w-full">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base font-medium flex items-center gap-2">
+              <CardTitle as="h2" className="text-base font-medium flex items-center gap-2">
                 {c.is_owner && <Crown className="h-4 w-4 text-amber-500" aria-hidden="true" />}
                 <a href={`/circles/${c.id}`} class="hover:underline">
                   {c.name}

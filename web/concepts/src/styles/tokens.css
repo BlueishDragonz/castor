@@ -62,7 +62,37 @@
   --color-warning: var(--warning);
   --color-info: var(--info);
   --radius-radius: var(--radius);
+
+  /*
+   * Type scale. The pre-refactor UI picked font sizes ad hoc per page
+   * (text-xs for one heatmap header, text-[10px] for another, text-2xl
+   * on some page titles and text-5xl on the landing hero), which is why
+   * headings did not line up across screens. These named steps are the
+   * only sizes a page should reach for.
+   *
+   * `xs` is deliberately 12px (not 10px) — 10px body-adjacent text fails
+   * WCAG legibility in practice and was the root of the faint heatmap
+   * and grid headers. Tabular figures are on for every step so date
+   * columns and stat numbers align vertically.
+   */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.55;
+  --text-base: 1rem;
+  --text-base--line-height: 1.6;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.45;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.3;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 1.2;
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 1.15;
+  --text-4xl: 3rem;
+  --text-4xl--line-height: 1.05;
 }
+
 
 /*
  * Tailwind v4 auto-discovers content from the cwd and any paths listed
@@ -125,6 +155,18 @@
   --destructive: oklch(0.55 0.22 27);          /* castor negative */
   --destructive-foreground: oklch(0.99 0.005 95);
   --border: oklch(0.92 0.005 95);
+  /*
+   * Interactive control boundaries. `--border` at oklch(0.92) resolves
+   * to rgb(229,228,225) on a white card — 1.27:1, which is correct for
+   * a hairline divider between rows but fails the 3:1 minimum that WCAG
+   * requires for the boundary of an interactive control. Using it on
+   * the habit grid's empty checkboxes made "not done" almost invisible
+   * (measured 1.27:1 on the rendered page).
+   *
+   * This token is for control outlines only, not for layout dividers.
+   * oklch(0.64) = rgb(136,141,145) = 3.35:1 on the card.
+   */
+  --control-border: oklch(0.64 0.008 240);
   --input: oklch(0.92 0.005 95);
   --ring: oklch(0.55 0.16 162);                /* matches primary */
   --positive: oklch(0.55 0.14 142);            /* castor success */
@@ -152,25 +194,58 @@
   --castor-transition-easing: ease-out;
 
   /*
-   * Default desktop content column width — matches /stats' max-w-2xl
-   * (42rem = 672px) so every page settles on the same column for
-   * visual consistency. Auth cards (login, register, forgot, verify)
-   * and narrow forms (new/edit habits, account/delete) opt out at a
-   * smaller `max-w-*` for their specific shape; everything else uses
-   * `max-w-2xl` directly.
+   * Default desktop content column width — ONE width for the whole
+   * product. Before the 2026-09-27 UI pass this varied per page
+   * (max-w-2xl on /stats, max-w-5xl on /habits, max-w-md on
+   * /habits/new, max-w-3xl on /help) so every page sat in a different
+   * column and switching tabs produced a visible jump.
+   *
+   * 54rem (864px) is wide enough for the habit grid (name + 7 day
+   * columns) without the day cells getting squeezed, and still leaves
+   * a comfortable measure for prose. Narrow opt-ins (single-column
+   * forms) use `.castor-page--narrow`.
    */
-  --castor-content-width: 42rem;
+  --castor-content-width: 54rem;
 
   /*
-   * Default top padding for content pages — matches /stats' py-12
-   * (3rem = 48px) so the h1 sits at the same offset from the viewport
-   * top on every page. Auth pages and forms opt out by using their
-   * own `py-*` value (e.g. `py-16` for breathing room above form
-   * inputs). Pages that still carry a legacy `py-6` / `py-8` / `py-10`
-   * should migrate to `py-12` so the title always lands at 48px.
+   * Default top padding for content pages so the h1 lands at the same
+   * offset from the viewport top on every page. The app shell's sticky
+   * header already consumes ~57px, so pages use a smaller top pad than
+   * the pre-shell py-12 to keep the title near the top of the fold.
    */
-  --page-top-pad: 3rem;
+  --page-top-pad: 2rem;
+
+  /*
+   * Spacing rhythm. Everything vertical in the UI should snap to this
+   * scale; the pre-refactor pages mixed py-6 / py-8 / py-10 / py-12 /
+   * py-16 and gap-2 / gap-3 / gap-4 / gap-6 freely, which is why cards
+   * in a vertical stack were visibly unevenly spaced.
+   */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /*
+   * Surface elevation. Two levels only — a flat page and a raised
+   * card. The pre-refactor UI used box-shadow-sm, shadow, and shadow-lg
+   * on the same page (the sticky heatmap header used shadow-lg, the
+   * cards around it used shadow-sm) which made adjacent surfaces feel
+   * unrelated.
+   */
+  --elevation-card: 0 1px 2px 0 rgb(0 0 0 / 0.04),
+                    0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --elevation-raised: 0 4px 12px -2px rgb(0 0 0 / 0.10),
+                      0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --elevation-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.18),
+                       0 4px 8px -4px rgb(0 0 0 / 0.10);
 }
+
 
 [data-theme="dark"] {
   --background: oklch(0.16 0.01 240);
@@ -191,6 +266,10 @@
   --destructive: oklch(0.55 0.22 27);
   --destructive-foreground: oklch(0.94 0.005 95);
   --border: oklch(0.28 0.01 240);
+  /* See the light-theme note: on the dark card (oklch(0.20)) a control
+     outline needs to be lighter than the surface, not darker.
+     oklch(0.55) against oklch(0.20) ≈ 3.6:1. */
+  --control-border: oklch(0.58 0.01 240);
   --input: oklch(0.28 0.01 240);
   --ring: oklch(0.62 0.14 162);
 }
@@ -217,9 +296,188 @@ body {
   color: var(--foreground);
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+
+/*
+ * ─── Layout primitives ────────────────────────────────────────────
+ *
+ * One page container for the whole app. Before this pass every page
+ * hand-wrote its own `mx-auto max-w-* px-* py-*` and they disagreed, so
+ * the content column visibly jumped when moving between screens. Pages
+ * use `<main class="castor-page">` and, when they need a narrower
+ * measure (single-column forms), `castor-page--narrow`.
+ *
+ * The bottom padding clears the mobile bottom nav, which is fixed and
+ * would otherwise sit on top of the last row of content.
+ */
+.castor-page {
+  width: 100%;
+  max-width: var(--castor-content-width);
+  margin-inline: auto;
+  padding-inline: 1rem;
+  padding-top: var(--page-top-pad);
+  padding-bottom: 6rem;
+}
+
+@media (min-width: 640px) {
+  .castor-page {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 641px) {
+  .castor-page {
+    padding-bottom: 4rem;
+  }
+}
+
+.castor-page--narrow {
+  max-width: 30rem;
+}
+
+/*
+ * The "Times per Every N Interval" row on the habit create/edit forms.
+ *
+ * Three labelled inputs joined by a small word, laid out as a sentence
+ * the user can read: "3 times per 1 week". A 3-column grid gave each
+ * control a third of the row, which left the number inputs too narrow
+ * and pushed the labels out of alignment with their boxes.
+ */
+.period-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.625rem;
+}
+
+.period-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 5.5rem;
+}
+
+.period-field--narrow {
+  min-width: 4rem;
+  max-width: 6rem;
+}
+
+/*
+ * Sits on the input baseline, not the label baseline, so "per" reads as
+ * part of the sentence rather than floating above the fields.
+ */
+.period-joiner {
+  padding-bottom: 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.period-select {
+  height: 2.5rem;
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--input);
+  background-color: var(--background);
+  padding: 0 2.25rem 0 0.75rem;
+  font-size: 0.875rem;
+  color: var(--foreground);
+  /* The native select draws its own arrow; the inset shadow trick is
+     not reliable cross-browser, so the arrow is kept and the padding
+     just reserves room for it. */
+  appearance: auto;
+}
+
+.period-select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (max-width: 420px) {
+  .period-field {
+    min-width: 4.5rem;
+  }
+}
+
+/*
+ * Vertical rhythm between the major blocks of a page. Pages used
+ * space-y-4 / space-y-6 / space-y-8 interchangeably; one token now.
+ */
+.castor-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Prose measure — caps line length for long-form help/terms copy. */
+.castor-prose {
+  max-width: 68ch;
+}
+
+/*
+ * ─── Focus visibility ─────────────────────────────────────────────
+ *
+ * A single focus treatment app-wide. The pre-refactor UI mixed
+ * focus:ring, focus-visible:ring and plain outline:none, and several
+ * controls (heatmap cells, menu rows) dropped the ring entirely, so
+ * keyboard users could not see where they were.
+ *
+ * `:focus-visible` rather than `:focus` so a mouse click on a button
+ * does not leave a ring behind, but Tab always shows one.
+ */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/*
+ * Respect the OS reduced-motion setting. The sheet/dialog keyframes
+ * below are decorative; a user who has asked for reduced motion should
+ * get state changes without the slide.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Screen-reader-only text that becomes visible when focused. Used by
+ * the skip link and by icon-only controls that carry their label in a
+ * hidden span.
+ */
+.castor-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.castor-sr-only:focus,
+.castor-sr-only:focus-within {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
 
 /*
  * Drawer / sheet motion. shadcn ships class tokens like

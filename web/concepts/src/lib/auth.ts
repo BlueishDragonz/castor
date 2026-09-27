@@ -37,28 +37,99 @@ const BACKEND_WEBAUTHN_COOKIE = 'beaver_webauthn';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 /**
+ * Read a server-side configuration value.
+ *
+ * Astro/Vite expose `.env` values through `import.meta.env`, NOT through
+ * `process.env`. Reading process.env.FRONTEND_URL therefore returned
+ * undefined even with the variable present in web/concepts/.env, which
+ * made publicOrigin() return '' and left backendFetch sending no Origin
+ * at all — the backend then rejected every state-changing BFF request
+ * with 403 "Browser origin not allowed" and sign-in was impossible.
+ * Verified directly:
+ *   import.meta.env.FRONTEND_URL = http://localhost:4321
+ *   process.env.FRONTEND_URL     = undefined
+ *
+ * `import.meta.env` is statically replaced by Vite, so it is read
+ * literally here rather than through a variable lookup. process.env is
+ * still consulted first because that is what a container/CLI env
+ * provides.
+ */
+function serverEnv(key: 'FRONTEND_URL' | 'PUBLIC_BACKEND_URL'): string {
+  const fromProcess = process.env[key];
+  if (fromProcess) return fromProcess;
+  if (key === 'FRONTEND_URL') {
+    // Vite statically replaces this member expression.
+    return import.meta.env.FRONTEND_URL ?? '';
+  }
+  return import.meta.env.PUBLIC_BACKEND_URL ?? '';
+}
+
+/**
  * The public origin the browser uses to reach this app (scheme://host[:port]).
  *
  * Single source of truth for both `isProd()` and the F21 `Origin` header, so
  * the cookie's `Secure` decision and the CSRF origin assertion can never
  * disagree about which origin is public.
  *
- * BACKEND_URL is only consulted as a last-resort fallback: in dev the browser
- * genuinely does call that address, but in production it is a loopback address
- * that says nothing about the browser's origin.
+ * BACKEND_URL is deliberately NOT consulted here. In dev the Vite proxy
+ * rewrites Host/Origin to the backend, so BACKEND_URL resolved to
+ * http://127.0.0.1:8085 and this function returned the *backend's own
+ * address* as the browser's origin. The backend's BrowserOriginMiddleware
+ * then compared http://127.0.0.1:8085 against an allowlist of frontend
+ * origins, found no match, and rejected every state-changing BFF request
+ * with 403 "Browser origin not allowed" — so sign-in was impossible in a
+ * default checkout. Observed directly via instrumenting the middleware:
+ *   [origin-probe] path=/auth/login origin='http://127.0.0.1:8085' rejected=True
+ *
+ * Returning '' is safe: backendFetch then falls back to inboundOrigin(),
+ * which reads the origin off the request actually being served.
  */
 function publicOrigin(): string {
-  const raw =
-    process.env.FRONTEND_URL ??
-    process.env.PUBLIC_BACKEND_URL ??
-    process.env.BACKEND_URL ??
-    '';
+  const raw = serverEnv('FRONTEND_URL') || serverEnv('PUBLIC_BACKEND_URL');
   if (!raw) return '';
   try {
     const url = new URL(raw);
     return url.origin;
   } catch {
     // A malformed URL must not become an `Origin: undefined` header.
+    return '';
+  }
+}
+
+/**
+ * The origin the *inbound browser request* came from, as seen by this
+ * server-side BFF.
+ *
+ * Used when FRONTEND_URL is not configured. Reading it off the request
+ * being served is authoritative — the origin of the request is by
+ * definition the origin being acted for — whereas deriving it from
+ * BACKEND_URL is wrong: in dev the Vite proxy rewrites Host/Origin to
+ * the backend, so the BFF was asserting http://127.0.0.1:8085 as the
+ * browser's origin. The backend's BrowserOriginMiddleware then compared
+ * that against a list of frontend origins, found no match, and rejected
+ * every state-changing request with 403 "Browser origin not allowed",
+ * so sign-in was impossible in a default checkout. Confirmed by
+ * instrumenting the middleware:
+ *   [origin-probe] path=/auth/login origin='http://127.0.0.1:8085' rejected=True
+ *
+ * The backend still decides whether the origin is allowed; this only
+ * makes the assertion possible.
+ */
+function inboundOrigin(): string {
+  const astro = (globalThis as {
+    Astro?: { request?: Request; url?: URL };
+  }).Astro;
+  // Astro.url is derived from the inbound request's Host header, so it
+  // reflects the origin the browser actually used.
+  const url = astro?.url;
+  if (url) return url.origin;
+  const header =
+    astro?.request?.headers.get('origin') ??
+    astro?.request?.headers.get('referer');
+  if (!header) return '';
+  try {
+    return new URL(header).origin;
+  } catch {
     return '';
   }
 }
@@ -76,8 +147,11 @@ function publicOrigin(): string {
  * production and shipped a 30-day session cookie without the Secure flag —
  * the code's stated intent ("Strict + Secure in production") was not what ran.
  * FRONTEND_URL is the operator-declared public origin, so it is the correct
- * input; BACKEND_URL is only a fallback for dev, where the browser genuinely
- * does talk to that address.
+ * input. BACKEND_URL is no longer consulted at all: it is an internal address
+ * that says nothing about where the browser is, and using it here previously
+ * both shipped a non-Secure production cookie (F6) and made the CSRF
+ * Origin assertion name the backend instead of the frontend. A dev deploy
+ * with neither var set is correctly treated as non-production.
  */
 function isProd(): boolean {
   const origin = publicOrigin();
@@ -295,7 +369,7 @@ export async function backendFetch(
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const effectiveOrigin = origin ?? publicOrigin();
+  const effectiveOrigin = origin ?? publicOrigin() ?? inboundOrigin();
   if (effectiveOrigin) {
     // F21: the backend's origin allowlist can only be evaluated against a
     // real same-origin value. Also send Referer as a fallback for the

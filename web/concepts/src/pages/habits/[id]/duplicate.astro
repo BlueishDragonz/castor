@@ -11,6 +11,7 @@
  * On success: redirect to the new habit's detail page.
  */
 import { backendFetch } from '../../../lib/auth';
+import type { HabitPeriod } from '../../../lib/period';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -31,7 +32,7 @@ if (!getRes.ok) {
 const source = (await getRes.json()) as {
   name: string;
   tags?: string[];
-  period?: { frequency: number; interval: string } | null;
+  period?: HabitPeriod | null;
 };
 
 // 2. Create the copy. The backend's CreateHabit only accepts {name};
@@ -57,16 +58,19 @@ if ((source.tags && source.tags.length > 0) || source.period) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tags: source.tags ?? [],
+      /*
+       * Copy the period through unchanged. This page previously
+       * re-derived the code from `source.period.interval` and read
+       * `source.period.frequency` — neither field exists in the API
+       * payload, so every branch fell through to 'Y' with a target of
+       * 1 and duplicating a daily habit silently produced a yearly one.
+       */
       ...(source.period
         ? {
             period: {
-              period_type:
-                source.period.interval === 'day' ? 'D'
-                : source.period.interval === 'week' ? 'W'
-                : source.period.interval === 'month' ? 'M'
-                : 'Y',
-              period_count: 1,
-              target_count: source.period.frequency ?? 1,
+              period_type: source.period.period_type,
+              period_count: source.period.period_count,
+              target_count: source.period.target_count,
             },
           }
         : {}),

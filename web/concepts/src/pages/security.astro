@@ -7,7 +7,6 @@
 import Layout from '../layouts/Layout.astro';
 import { SecurityContent } from '../components/SecurityContent.tsx';
 import PageHeader from '../components/PageHeader.astro';
-import { DesktopMenu } from '../components/DesktopMenu.tsx';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -29,9 +28,8 @@ if (!Astro.locals.session) {
     original `is:inline` interpolation problem cannot recur — there is nothing
     left to interpolate.
   */}
-  <main class="mx-auto max-w-2xl px-6 py-12 space-y-6 pb-24">
+  <main id="main" class="castor-page">
     <PageHeader title="Security" back="/habits">
-      <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />
     </PageHeader>
     <SecurityContent client:load />
   </main>
