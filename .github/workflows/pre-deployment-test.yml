@@ -139,6 +139,16 @@ jobs:
         run: |
           node scripts/check-sentry-config.mjs
 
+      - name: Regression — weekday headers derive from their date
+        run: |
+          # Dogfooding 2026-09-27: /habits rendered "Mon 27 ... Sun 21" when
+          # 27 September was a Sunday, because the label came from a static
+          # Mon..Sun array indexed by column position while the columns are a
+          # rolling 7-day window ending today. Users recorded habits against
+          # the wrong day, and the aria-label on the same cell was already
+          # correct, so assistive tech and the visible UI disagreed.
+          node scripts/check-weekday-headers.mjs
+
       - name: Security regression — open redirect is closed (F22)
         run: |
           # An off-site Location must be impossible from the token BFF.
