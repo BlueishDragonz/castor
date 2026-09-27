@@ -161,7 +161,10 @@ app.include_router(admin_router)
 from castor.app.http_security import BrowserOriginMiddleware
 from castor.app.rate_limits import IPRateLimitMiddleware
 app.add_middleware(IPRateLimitMiddleware)
-app.add_middleware(BrowserOriginMiddleware, allowed_origins=settings.CSRF_ALLOWED_ORIGINS)
+app.add_middleware(
+    BrowserOriginMiddleware,
+    allowed_origins=settings.csrf_allowed_origins(),
+)
 
 
 if settings.SENTRY_DSN:

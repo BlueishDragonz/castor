@@ -114,6 +114,27 @@ class Settings(BaseSettings):
     # can fall back to if FRONTEND_URL is unset.
     FRONTEND_URL: str = "http://localhost:4321"
 
+    def csrf_allowed_origins(self) -> list[str]:
+        """Origins permitted to make state-changing requests.
+
+        The Astro BFF forwards the *public* Origin header to the backend
+        (F21: the backend's own BrowserOriginMiddleware decides CSRF). The
+        backend, however, is reached on 127.0.0.1:8081, so its Host-derived
+        fallback origin is the loopback address and can never match the
+        public origin the BFF sent. With CSRF_ALLOWED_ORIGINS left at its
+        empty default that mismatch rejected *every* browser write with a
+        403, which is why an empty list must never be left to chance here.
+
+        So: the configured list wins, and FRONTEND_URL is always included,
+        because that is the origin the frontend genuinely serves from. Both
+        are deduplicated and order-preserved.
+        """
+        origins = list(self.CSRF_ALLOWED_ORIGINS)
+        frontend = (self.FRONTEND_URL or "").strip()
+        if frontend and frontend not in origins:
+            origins.append(frontend)
+        return origins
+
     # TLS termination (reverse proxy with HTTPS) - set True when behind nginx/Caddy with HTTPS
     # When False (direct HTTP), CSP allows ws: for WebSocket; when True, only wss: allowed
     TLS_TERMINATED: bool = False
