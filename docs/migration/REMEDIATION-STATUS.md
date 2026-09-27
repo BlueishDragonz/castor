@@ -100,13 +100,41 @@ Two independent root causes, both fixed:
    The WebSocket path bypasses HTTP middleware, so `sync_ws` flushes explicitly
    before sending `tick_ack`.
 
-### F4 — Lost-update race on the JSON blob — FIXED
+### F4 — Lost-update race on the JSON blob — FIXED, VALIDATED ON DEPLOY
 
 `habit_list` gained a `version` column (migration `SCHEMA_VERSION = 5`).
 `crud.update_user_habit_list(user, data, expected_version=...)` is now a
 compare-and-swap: a zero rowcount raises `HabitListConflict`, and the storage
 layer re-reads the winner's state, **merges** per-day records, and retries
 (bounded, with an explicit `OptimisticLockError` rather than silent loss).
+
+**Validated against the running production container, not just in tests.**
+Unit tests cannot show this, because they never pass through gunicorn, the
+lifespan shutdown hook, or a real SIGTERM. The probe
+(`scripts/f4_deploy_probe.py`) registers a throwaway user, creates a habit,
+records a completion, then reads the SQLite file *directly* — bypassing the
+API and the storage layer, since a read through the app could be served from
+the F5 in-memory cache and would prove nothing.
+
+  write phase     habit 7878be, completion on disk: [('2026-09-27', True)]
+  docker stop     "Flushed pending habit-list writes on shutdown"
+                  SIGTERM handled cleanly, exit 143
+  restart         healthy after 70s
+  verify phase    on disk: [('2026-09-27', True)] — identical
+                  RESULT: PASS
+
+The probe was then checked against itself: planting an expectation the disk
+does not contain makes it fail, so the PASS is meaningful and not an artefact
+of a comparison that cannot fail.
+
+The habit list is a single JSON blob on one row, which is exactly why this
+matters: a lost update silently drops a user's day, with no error anywhere.
+
+Two notes for whoever runs this next time:
+- `/auth/login` is `x-www-form-urlencoded` with a `username` field, not JSON
+  with `email`. Posting JSON returns a 422 that names *both* fields as
+  missing, which reads like a typo rather than a content-type problem.
+- `Tick.date` is parsed with `date_fmt` (`%d-%m-%Y`). An ISO date is a 400.
 
 ### F5 — Unbounded in-memory cache — FIXED
 
@@ -556,6 +584,16 @@ deleted.
 | F7 gate vs. vulnerable code | exits 1 (vulnerable) / 0 (fixed) |
 | F13 Sentry config gate | 19 checks, all pass; fails if the integration is re-gated on the token |
 | F13 Sentry build output | DSN present in `dist/`, zero `.map` files shipped |
+| F4 on the deployed service | write survives SIGTERM + restart, read straight from SQLite |
+| F4 probe vs. a planted mismatch | fails as it should (exit 1) |
+
+**A note on the user count.** `SELECT COUNT(*) FROM user` returns 20, but
+only **4 accounts are live**. The other 16 rows are `deleted+<uuid>@deleted.invalid`
+tombstones, left by F18 so that a deleted user's foreign keys stay resolvable.
+Quoting the raw row count as "16 users" earlier in this document was wrong by
+12; live accounts are `jrodux@gmail.com`, `newuser2@example.com`,
+`test2@example.com`, `test@example.com`. The tombstones are also independent
+evidence that F18 works — 14 real deletions have gone through it.
 | F22 CI gate vs. vulnerable code | exits 1, reporting the live off-site redirect |
 | F22 gate live, 6 cases | pass (absolute, protocol-relative, backslash, javascript:, same-site control) |
 | F7 BFF 401 gate live, 6 cases | pass (GET/POST/DELETE on the new routes) |
@@ -612,7 +650,7 @@ Run against a copy, with production untouched and the 11 files still in place.
 ### Order of operations
 
 The F1 backup was taken and verified first (off-volume, root-owned 0600,
-`PRAGMA integrity_check` = ok, 16 users, 2 habit lists), so the deletion had a
+`PRAGMA integrity_check` = ok, 20 user rows, 2 habit lists), so the deletion had a
 real undo before it happened. The reaper was then re-run report-only against
 the live volume — still 11 dead, 0 live, 0 unknown — and only then run with
 `--delete`. It removed all 11 and left a copy at
