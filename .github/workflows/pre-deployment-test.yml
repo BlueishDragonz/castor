@@ -98,6 +98,23 @@ jobs:
           cache-dependency-path: web/concepts/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Start stub backend on :8085
+        # /api/v1/tokens calls backendFetch() *before* building its redirect.
+        # With nothing on 8085 that fetch throws, Astro returns 500, and there
+        # is no Location header — so the F22 open-redirect gate below could not
+        # run at all. It was failing with "no Location header" for that reason,
+        # not because the redirect check was broken.
+        #
+        # A 401 stub is enough: the route only needs the fetch to resolve. It
+        # then emits its 303 + Location, which is exactly what the gate
+        # asserts. No real backend and no real data.
+        run: |
+          python3 ../../scripts/ci_stub_backend.py 8085 &
+          for i in $(seq 1 20); do
+            curl -s -o /dev/null http://127.0.0.1:8085/ping && break
+            sleep 0.5
+          done
+          echo "stub backend listening on 8085"
       - name: Start dev server
         # Bind to 127.0.0.1 so the smoke test can reach it; Astro's dev
         # server doesn't need TLS in CI.
