@@ -143,12 +143,6 @@ function isTagSelected(tag: string): boolean {
   return selectedTags.includes(tag);
 }
 
-// Weekday abbreviations based on firstDayOfWeek
-const baseWeekDayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const weekDayAbbr = baseWeekDayAbbr.map((_, i) => 
-  baseWeekDayAbbr[(i + firstDayOfWeek) % 7]
-);
-
 ---
 <!-- Pull-down Tag Filter (hidden by default, shown on scroll up) -->
 {enableTagFilter && allTags.length > 0 && (
@@ -231,7 +225,7 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
     {sortedDays.map((day, i) => (
       <div class="flex flex-col items-center justify-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider leading-tight"
            style={{ gridColumn: `${i + 2}` }}>
-        <span>{weekDayAbbr[i]}</span>
+        <span>{day.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
         <span class="text-[11px] font-semibold normal-case text-foreground/70">{day.getDate()}</span>
       </div>
     ))}

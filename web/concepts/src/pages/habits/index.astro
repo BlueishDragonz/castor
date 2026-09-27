@@ -213,7 +213,19 @@ try {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>Castor helps you keep small daily habits without the noise of social tracking.</p>
-          <p>Click <strong>+ Add habit</strong> to start. Each habit is private to your account and lives only on this server.</p>
+          <p>Each habit is private to your account and lives only on this server.</p>
+          {/* Dogfooding 2026-09-27: the empty state used to say "Click + Add
+              habit to start" while no such control existed anywhere on the
+              page, and the "+ Add habit" link is only rendered when the habit
+              grid has rows. A brand-new user therefore had no way to create
+              their first habit from the UI at all. The button is the primary
+              action of this state, so it is rendered here explicitly. */}
+          <a
+            href="/habits/new"
+            class="mt-2 inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+          >
+            + Add your first habit
+          </a>
         </CardContent>
       </Card>
     )}

@@ -38,10 +38,14 @@ const y = date.getFullYear();
 const m = String(date.getMonth() + 1).padStart(2, '0');
 const d = String(date.getDate()).padStart(2, '0');
 const isoDate = `${y}-${m}-${d}`; // local YYYY-MM-DD
+const daysAgo = Math.floor(
+  (new Date().getTime() - date.getTime()) / (1000 * 60 * 60 * 24),
+);
+const daysAgoLabel = daysAgo === 1 ? '1 day ago' : `${daysAgo} days ago`;
 const ariaLabel = isToday
   ? `Today, ${habitName}`
   : isPast
-    ? `${Math.floor((new Date().getTime() - date.getTime()) / (1000 * 60 * 60 * 24))} days ago, ${habitName}`
+    ? `${daysAgoLabel}, ${habitName}`
     : `Future, ${habitName}`;
 ---
 
