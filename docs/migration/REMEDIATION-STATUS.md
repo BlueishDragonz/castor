@@ -326,26 +326,39 @@ reaps the leftovers without ever printing a token.
   upload, verified as zero `.map` files. Leaving them would publish the
   application's full source.
 
-  ### One thing is not working
+  Verified end to end, not assumed:
+  - 2 artifact bundles present in the `castor-astro` project (client and
+    server), which only exist if source maps were actually accepted.
+  - A deliberate `RuntimeError` raised in the running container appeared in
+    the project within seconds.
+  - Zero `.map` files in the deployed image, zero occurrences of the token in
+    `docker history` and in the build log.
 
-  **The supplied `SENTRY_AUTH_TOKEN` is rejected by Sentry** — `401
-  Unauthorized` from `sentry.io`, confirmed directly against the API, not
-  inferred from the build output. So source maps are **not** being uploaded
-  and stack traces in Sentry will be minified.
+  ### Two failures worth recording, because both looked like success
 
-  Runtime error reporting is unaffected: that needs only the public DSN, which
-  works. The build is green, and the failure is a warning rather than a build
-  error, which is precisely why it needed saying out loud — a revoked token
-  and a successful upload look identical from the build output.
+  **The first token was invalid** (`401 Unauthorized` from sentry.io,
+  confirmed against the API rather than inferred from the build output). Error
+  reporting still worked — it needs only the DSN — but stack traces would have
+  been minified, and the build was green throughout, because a failed
+  source-map upload is a warning from the plugin, not a build error.
 
-  A valid org auth token for `jr-w2` is needed. Until then: the project will
-  receive error events, and the traces in them will not be symbolicated.
+  **The second build silently did nothing.** With a valid token the build
+  returned exit 0, logged no error, and uploaded no source maps. The cause was
+  Docker layer caching: the `astro build` stage was reported `CACHED`, so the
+  step never executed and the token was never read. The log looked exactly like
+  a success.
+
+  That is the failure mode this whole document keeps running into, and the
+  build now busts the frontend stage whenever a token is supplied
+  (`--no-cache-filter astro-builder`). Verified: the stage re-ran, the plugin
+  logged "Successfully uploaded source maps to Sentry" twice, and the bundles
+  appeared in the project.
 
   The token is passed by BuildKit secret mount, never as a build-arg or an
-  inline ENV. An earlier version wrote it in plaintext to the build log, which
-  is recorded in the commit history along with the reason; the log was
-  scrubbed. Verified: zero occurrences in the current build log and zero in
-  `docker history`.
+  inline ENV. An earlier version wrote it in plaintext to the build log,
+  recorded in the commit history along with the reason; that log was scrubbed
+  and the token rotated. Verified: zero occurrences in the current build log
+  and zero in `docker history`.
 
 ### F26 — Duplicate, weaker cookie mirroring — FIXED, DEPLOY PENDING
 
