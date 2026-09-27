@@ -65,6 +65,13 @@ jobs:
         # Catches build-time errors that check misses (e.g. missing
         # static imports, invalid frontmatter at compile time).
         run: pnpm exec astro build
+      - name: Security regression — Sentry wired, and ships nothing (F13/F11)
+        # Run here, after the build, so the two dist-only assertions are real:
+        # no .map files shipped, and the DSN is actually present in the
+        # bundle. In the smoke job (astro dev, no dist/) the same script
+        # reports those two as skipped rather than passing vacuously.
+        run: |
+          node scripts/check-sentry-config.mjs
       - name: Security audit
         # Fails on any vulnerability with a known fix. The --prod flag
         # skips dev-only dependencies that aren't shipped.
@@ -147,6 +154,11 @@ jobs:
       # the SDK is actually wired into the build (not just installed) and that
       # the redaction options are present.
       - name: Security regression — Sentry wired, and leaks nothing (F13/F11)
+        # This is the job that builds, so the two dist-only assertions (no
+        # shipped .map, DSN actually present in the bundle) are genuinely
+        # exercised here rather than skipped. In the smoke job — which runs
+        # `astro dev` and never builds — the same script reports those two as
+        # skipped instead of passing vacuously.
         run: |
           node scripts/check-sentry-config.mjs
 
