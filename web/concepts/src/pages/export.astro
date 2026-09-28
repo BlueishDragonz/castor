@@ -113,9 +113,9 @@ if (Astro.request.method === 'POST') {
       </CardHeader>
       <CardContent>
         <form method="post">
-          <Button type="submit" className="gap-2">
-            <Download className="h-4 w-4" aria-hidden="true" />
-            Download castor-export-{today}.json
+          <Button type="submit" size="wrap" className="gap-2 w-full sm:w-auto sm:justify-center">
+            <Download className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span class="min-w-0">Download castor-export-{today}.json</span>
           </Button>
         </form>
       </CardContent>

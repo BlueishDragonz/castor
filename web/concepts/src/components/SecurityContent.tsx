@@ -185,7 +185,7 @@ export function SecurityContent() {
       {/* Passkeys Section */}
       <Card className="w-full">
         <CardHeader className="pb-2 flex items-center justify-between">
-          <CardTitle className="text-base font-medium flex items-center gap-2">
+          <CardTitle as="h2" className="text-base font-medium flex items-center gap-2">
             <Shield className="h-5 w-5" />
             Passkeys
           </CardTitle>
@@ -234,7 +234,7 @@ export function SecurityContent() {
       {/* Password Section */}
       <Card className="w-full">
         <CardHeader className="pb-2 flex items-center justify-between">
-          <CardTitle className="text-base font-medium flex items-center gap-2">
+          <CardTitle as="h2" className="text-base font-medium flex items-center gap-2">
             <Lock className="h-5 w-5" />
             Password
           </CardTitle>
@@ -252,7 +252,7 @@ export function SecurityContent() {
       {/* Recovery Email Section */}
       <Card className="w-full">
         <CardHeader className="pb-2 flex items-center justify-between">
-          <CardTitle className="text-base font-medium flex items-center gap-2">
+          <CardTitle as="h2" className="text-base font-medium flex items-center gap-2">
             <Mail className="h-5 w-5" />
             Recovery Email
           </CardTitle>
@@ -293,7 +293,7 @@ export function SecurityContent() {
       {/* 2FA Status */}
       <Card className="w-full">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base font-medium flex items-center gap-2">
+          <CardTitle as="h2" className="text-base font-medium flex items-center gap-2">
             <Shield className="h-5 w-5" />
             Two-Factor Authentication
           </CardTitle>

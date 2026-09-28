@@ -144,7 +144,10 @@ if (Astro.request.method === 'POST') {
             can fix and retry. Server-stored CSS survives browser /
             device changes.
           </p>
-          <Button id="custom-css-save" type="button" size="sm">
+          {/* Outline, not primary: "Save theme" is the one action a
+              user comes to Settings for, and two identical solid
+              buttons on one page read as competing CTAs. */}
+          <Button id="custom-css-save" type="button" size="sm" variant="outline">
             Save CSS
           </Button>
         </div>

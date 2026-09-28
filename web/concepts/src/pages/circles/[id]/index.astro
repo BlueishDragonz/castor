@@ -392,6 +392,27 @@ const inviteUrl = newInviteUrl
                 </>
               );
             })()}
+
+            {/*
+              "Share" is the primary action here, but with nothing chosen
+              in the habit select it could only fail. The browser's
+              required-attribute tooltip is easy to miss, so the button
+              is disabled until a habit is picked and enabled again on
+              change. Progressive enhancement: without JS the select
+              still carries `required` and the form still validates.
+            */}
+            <script is:inline>
+              (function () {
+                const sel = document.getElementById('habit-id');
+                const form = document.getElementById('share-habit-form');
+                if (!sel || !form) return;
+                const submit = form.querySelector('button[type="submit"]');
+                if (!submit) return;
+                const sync = () => { submit.disabled = sel.value === ''; };
+                sel.addEventListener('change', sync);
+                sync();
+              })();
+            </script>
           </CardContent>
         </Card>
 
