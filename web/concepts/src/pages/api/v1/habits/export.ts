@@ -1,76 +1,64 @@
-// Export habits endpoint
-// GET /api/v1/habits/export
+// Export habits — GET /api/v1/habits/export
+//
+// This previously assembled the export itself from three calls:
+//
+//   GET /api/v1/habits                    -> returned only [{id, name}]
+//   GET /api/v1/habits/{id}/records       -> does not exist; 404
+//
+// Both were wrong, and the failure was silent: the 404 was swallowed
+// into `records = []`, so the download succeeded with HTTP 200 and
+// contained five habits stripped to `{id, name, records: []}` — no
+// period, no tags, no status, and zero tick history. A user who
+// exported and later restored would have silently lost all of it.
+//
+// The backend already owns a correct, ordered, status-preserving
+// export at GET /api/v1/habits/export (`_habit_list_export_data` in
+// castor/routes/api.py). Its docstring explicitly notes that it exists
+// so "a round-trip (export -> import on another device) preserves
+// status". This route now just proxies it, so there is one definition
+// of the export format rather than two that have already drifted.
 import type { APIRoute } from 'astro';
+import { backendFetch } from '../../../../lib/auth';
 
 export const GET: APIRoute = async ({ cookies }) => {
   const token = cookies.get('castor_token')?.value;
   if (!token) {
-    return new Response(JSON.stringify({ detail: 'Not authenticated' }), { 
+    return new Response(JSON.stringify({ detail: 'Not authenticated' }), {
       status: 401,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  try {
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
-    
-    // Fetch all habits with records
-    const habitsRes = await fetch(new URL('/api/v1/habits', origin), {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
+  const res = await backendFetch(cookies, '/api/v1/habits/export', {
+    method: 'GET',
+  });
 
-    if (!habitsRes.ok) {
-      return new Response(JSON.stringify({ detail: 'Failed to fetch habits' }), { 
-        status: habitsRes.status,
-        headers: { 'Content-Type': 'application/json' }
-      });
+  if (!res.ok) {
+    let detail = `Export failed (HTTP ${res.status}).`;
+    try {
+      const body = (await res.json()) as { detail?: string } | null;
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // body was not JSON
     }
-
-    const habits = await habitsRes.json();
-    
-    // Fetch records for each habit
-    const habitsWithRecords = await Promise.all(
-      habits.map(async (habit: any) => {
-        const recordsRes = await fetch(new URL(`/api/v1/habits/${habit.id}/records`, origin), {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        
-        let records: any[] = [];
-        if (recordsRes.ok) {
-          records = await recordsRes.json();
-        }
-        
-        return {
-          id: habit.id,
-          name: habit.name,
-          star: habit.star,
-          status: habit.status,
-          period: habit.period,
-          tags: habit.tags,
-          records: records.map((r: any) => ({
-            day: r.day,
-            done: r.done,
-            text: r.text,
-            timestamp: r.timestamp,
-          })),
-        };
-      })
-    );
-
-    // Return as JSON file
-    const json = JSON.stringify(habitsWithRecords, null, 2);
-    
-    return new Response(json, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Disposition': `attachment; filename="beaver-habits-export-${new Date().toISOString().split('T')[0]}.json"`,
-      },
-    });
-  } catch (e: any) {
-    return new Response(JSON.stringify({ detail: e.message }), { 
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
+    return new Response(JSON.stringify({ detail }), {
+      status: res.status,
+      headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  // The backend returns `{habits: [...], order: [...]}`. That is the
+  // canonical shape and the one the import validator accepts, so it is
+  // passed through unchanged rather than reshaped here.
+  const json = await res.text();
+  return new Response(json, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="castor-export-${new Date()
+        .toISOString()
+        .slice(0, 10)}.json"`,
+      'Cache-Control': 'no-store',
+    },
+  });
 };

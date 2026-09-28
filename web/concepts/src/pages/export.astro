@@ -33,6 +33,7 @@ import {
 } from '../components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
+import PageHeader from '../components/PageHeader.astro';
 import { Download } from 'lucide-react';
 import { backendFetch } from '../lib/auth';
 
@@ -40,8 +41,10 @@ if (!Astro.locals.session) {
   return Astro.redirect('/login');
 }
 
-const today = new Date().toISOString().split('T')[0];
-const filename = `castor-export-${today}.json`;
+// Local-date filename. toISOString() is UTC, which names the file after
+// yesterday for anyone east of Greenwich in the evening.
+const now = new Date();
+const filename = `castor-export-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}.json`;
 
 let errorDetail: string | null = null;
 
@@ -80,20 +83,11 @@ if (Astro.request.method === 'POST') {
 
 <Layout title="Export — Castor">
   <main id="main" class="castor-page">
-    <header class="flex items-center justify-between gap-4">
-      <div>
-        <h1 class="text-2xl font-semibold tracking-tight">Export</h1>
-        <p class="text-sm text-muted-foreground">
-          Download all your habits and records as a JSON file.
-        </p>
-      </div>
-      <a
-        href="/habits"
-        class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        &larr; Back to habits
-      </a>
-    </header>
+    <PageHeader
+      title="Export"
+      subtitle="Download every habit with its full tick history as a JSON file."
+      back="/habits"
+    />
 
     {errorDetail && (
       <Alert variant="destructive">
@@ -102,23 +96,71 @@ if (Astro.request.method === 'POST') {
       </Alert>
     )}
 
-    <Card>
-      <CardHeader>
-        <CardTitle as="h2">JSON export</CardTitle>
-        <CardDescription>
-          A single JSON file with every habit (name, period, records,
-          notes) and the order they appear on your home page. Use the
-          matching Import page to restore later.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form method="post">
-          <Button type="submit" size="wrap" className="gap-2 w-full sm:w-auto sm:justify-center">
-            <Download className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span class="min-w-0">Download castor-export-{today}.json</span>
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+    <div class="castor-stack">
+      <Card>
+        <CardHeader>
+          <CardTitle as="h2">Download your data</CardTitle>
+          <CardDescription>
+            One JSON file containing every habit with its tags, frequency,
+            status and tick history, plus the order they appear in on your home
+            page. Feed it straight back to <a href="/import" class="underline underline-offset-2">Import</a>
+            to restore.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form method="post">
+            <Button
+              type="submit"
+              size="wrap"
+              className="w-full gap-2 sm:w-auto sm:justify-center"
+            >
+              <Download className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span class="min-w-0">Download {filename}</span>
+            </Button>
+          </form>
+          <p class="text-xs text-muted-foreground">
+            The file is generated on demand and never stored. It contains your
+            habit names and history in plain text, so keep it somewhere
+            private.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle as="h2">What the file contains</CardTitle>
+          <CardDescription>
+            A single JSON object, so an export stays readable even as the
+            format grows.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt class="font-medium">Habits</dt>
+              <dd class="text-muted-foreground">Name, tags, frequency, status</dd>
+            </div>
+            <div>
+              <dt class="font-medium">Records</dt>
+              <dd class="text-muted-foreground">
+                Every ticked day, with its note and timestamp
+              </dd>
+            </div>
+            <div>
+              <dt class="font-medium">Order</dt>
+              <dd class="text-muted-foreground">
+                Your home page order, so a restore looks unchanged
+              </dd>
+            </div>
+            <div>
+              <dt class="font-medium">Format</dt>
+              <dd class="text-muted-foreground">
+                <code>application/json</code>, UTF-8
+              </dd>
+            </div>
+          </dl>
+        </CardContent>
+      </Card>
+    </div>
   </main>
 </Layout>

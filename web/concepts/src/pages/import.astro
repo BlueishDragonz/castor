@@ -1,27 +1,30 @@
 ---
 /**
- * /import — restore habits from a previously-exported JSON snapshot.
+ * /import — restore habits from a JSON export produced by /export.
  *
- * Two paths:
- *   - Paste JSON in the textarea.
- *   - Upload a .json file via the file input (read client-side, posted
- *     as the same `json` field).
+ * Two input paths, both of which actually work:
+ *   - Upload a .json file (the file is READ server-side from the
+ *     multipart body).
+ *   - Paste JSON into the textarea.
  *
- * The backend has no POST /api/v1/habits/import endpoint yet (see
- * docs/plan/migration-plan.md P2 "polish"). The Astro side is wired
- * and will round-trip the moment the endpoint ships. Until then, the
- * page surfaces an honest "endpoint not available" message instead of
- * a silent 404 from a client-side fetch — this matches the pattern
- * used by SettingsClient for the missing /api/v1/user-configs.
+ * Bugs this page had, all of which made the feature non-functional
+ * while still looking correct:
  *
- * Security:
- *   - The Authorization header is attached server-side via backendFetch
- *     reading the castor_token cookie. The bearer never reaches JS,
- *     so XSS can't steal it.
- *   - Server-side JSON validation rejects malformed payloads with a
- *     400 before forwarding. Schema validation lives on the backend.
- *   - Import REPLACES all existing habits (matches upstream semantics
- *     and is documented on the danger-zone alert).
+ *  1. The file input was `name="file"` and the handler read only
+ *     `form.get('json')`. An uploaded file was therefore never read:
+ *     the textarea was empty, `pasted` was '', and the user got "Paste
+ *     JSON in the textarea (or upload a file before submitting)" —
+ *     even though they *had* uploaded a file. The helper text claimed
+ *     "if you upload a file, the textarea is ignored", which was the
+ *     opposite of what happened.
+ *  2. It POSTed only `{habits}` and dropped `order`, so a restored
+ *     account lost its habit ordering even on the paths that worked.
+ *  3. The success message was a fixed "Imported N habits" computed
+ *     from the *input* length, not the backend's per-habit results, so
+ *     a partially failed import reported full success.
+ *
+ * All three are fixed below. The import itself (delete-then-recreate)
+ * lives in src/pages/api/v1/habits/import.ts.
  */
 import Layout from '../layouts/Layout.astro';
 import {
@@ -34,158 +37,280 @@ import {
 import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
-import { Upload, AlertCircle } from 'lucide-react';
-import { backendFetch } from '../lib/auth';
+import PageHeader from '../components/PageHeader.astro';
+import { Upload, AlertCircle, FileJson } from 'lucide-react';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
 }
 
+type HabitResult = {
+  name: string;
+  success: boolean;
+  id?: string;
+  records?: number;
+  error?: string;
+};
+
 let errorDetail: string | null = null;
 let successDetail: string | null = null;
+let results: HabitResult[] = [];
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const pasted = (form.get('json') ?? '').toString().trim();
 
+  /*
+   * Read the uploaded file if there is one, and fall back to the
+   * textarea. This is the bug that made the upload control decorative:
+   * the file was in the multipart body the whole time, under the key
+   * "file", and nothing ever read it.
+   */
+  const upload = form.get('file');
+  let pasted = '';
+
+  if (upload instanceof File && upload.size > 0) {
+    const name = upload.name.toLowerCase();
+    if (!name.endsWith('.json')) {
+      errorDetail =
+        `"${upload.name}" is not a .json file. Castor exports and imports ` +
+        `JSON only — re-export from /export and try again.`;
+    } else {
+      pasted = (await upload.text()).trim();
+    }
+  }
+
+  // No file (or a rejected one) — use whatever is in the textarea.
   if (!pasted) {
-    errorDetail = 'Paste JSON in the textarea (or upload a file before submitting).';
+    pasted = (form.get('json') ?? '').toString().trim();
+  }
+
+  if (errorDetail) {
+    // A non-JSON upload was the problem; don't also complain about the
+    // textarea being empty.
+  } else if (!pasted) {
+    errorDetail =
+      'Choose a .json file or paste the JSON into the box, then choose ' +
+      'Replace habits.';
   } else {
-    // Lightweight shape validation: must be an array, or an object with
-    // a "habits" array. Backend will do the schema-level validation.
     let parsed: unknown;
     try {
       parsed = JSON.parse(pasted);
     } catch (err) {
-      errorDetail = `JSON parse failed: ${(err as Error).message}`;
+      errorDetail = `That is not valid JSON: ${(err as Error).message}`;
     }
 
-    if (parsed !== undefined) {
+    if (parsed !== undefined && errorDetail === null) {
+      // Accept the export shape ({habits, order}), a bare array of
+      // habits, and a single habit object — all three are things a
+      // user might reasonably paste.
+      const obj =
+        typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+          ? (parsed as { habits?: unknown; order?: unknown })
+          : null;
       const habits = Array.isArray(parsed)
         ? parsed
-        : (typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { habits?: unknown[] }).habits))
-          ? (parsed as { habits: unknown[] }).habits
+        : Array.isArray(obj?.habits)
+          ? obj!.habits
           : null;
+      const order = Array.isArray(obj?.order) ? obj!.order : undefined;
 
       if (habits === null) {
-        errorDetail = 'Expected a JSON array of habits, or an object with a "habits" array.';
+        errorDetail =
+          'Expected the output of /export — an object with a "habits" ' +
+          'array — or a bare array of habits.';
       } else {
-        const res = await backendFetch(Astro.cookies, '/api/v1/habits/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ habits }),
-        });
+        /*
+         * Call the backend directly, NOT via fetch('/api/v1/habits/import').
+         * A relative fetch from an Astro server component has no base
+         * URL to resolve against and throws "Failed to parse URL" —
+         * which is what this page did before, so importing never worked
+         * and the user saw a blank response with no error. The import
+         * logic itself lives in a module both this page and the BFF
+         * route can use.
+         */
+        const { importHabits } = await import('../lib/import-habits');
+        const outcome = await importHabits(Astro.cookies, { habits, order });
 
-        if (res.ok) {
-          successDetail = `Imported ${habits.length} habit${habits.length === 1 ? '' : 's'}. Reload /habits to see them.`;
-        } else if (res.status === 404) {
-          // Honest about the gap until the backend ships the endpoint.
-          errorDetail =
-            'Import endpoint not available yet. The backend is ' +
-            'waiting for POST /api/v1/habits/import — see ' +
-            'docs/plan/migration-plan.md Phase 3 P2 polish.';
-        } else if (res.status === 401 || res.status === 403) {
-          errorDetail = 'Your session has expired. Sign in again and retry.';
-        } else {
-          try {
-            const data = (await res.json()) as { detail?: string } | null;
-            errorDetail = data?.detail ?? null;
-          } catch {
-            // body wasn't JSON
+        results = outcome.results;
+        if (outcome.ok) {
+          const n = outcome.imported;
+          const parts = [
+            `Imported ${n} habit${n === 1 ? '' : 's'}`,
+            `${outcome.records} tick${outcome.records === 1 ? '' : 's'}`,
+          ];
+          if (outcome.removed) {
+            parts.push(`replaced ${outcome.removed} existing`);
           }
-          if (!errorDetail) errorDetail = `Import failed (HTTP ${res.status}).`;
+          if (outcome.orderRestored) parts.push('order restored');
+          successDetail = parts.join(' · ') + '.';
+        } else {
+          errorDetail = outcome.detail ?? 'Import failed.';
         }
       }
     }
   }
 }
+
+const failed = results.filter((r) => !r.success);
 ---
 
 <Layout title="Import — Castor">
   <main id="main" class="castor-page">
-    <header class="flex items-center justify-between gap-4">
-      <div>
-        <h1 class="text-2xl font-semibold tracking-tight">Import</h1>
-        <p class="text-sm text-muted-foreground">
-          Restore habits from a JSON export. <strong>Replaces</strong> all
-          existing habits — there is no undo.
-        </p>
-      </div>
-      <a
-        href="/habits"
-        class="hidden sm:inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        &larr; Back to habits
-      </a>
-    </header>
+    <PageHeader
+      title="Import"
+      subtitle="Restore habits from a JSON file exported by Castor."
+      back="/habits"
+    />
 
     {errorDetail && (
       <Alert variant="destructive">
-        <AlertTitle>Import failed</AlertTitle>
-        <AlertDescription>{errorDetail}</AlertDescription>
+        <AlertCircle className="h-4 w-4" aria-hidden="true" />
+        <div>
+          <AlertTitle>Import failed</AlertTitle>
+          <AlertDescription>{errorDetail}</AlertDescription>
+        </div>
       </Alert>
     )}
 
     {successDetail && (
       <Alert>
-        <AlertDescription>{successDetail}</AlertDescription>
+        <div>
+          <AlertTitle>Import complete</AlertTitle>
+          <AlertDescription>{successDetail}</AlertDescription>
+        </div>
       </Alert>
     )}
 
-    <Card>
-      <CardHeader>
-        <CardTitle as="h2">Paste JSON</CardTitle>
-        <CardDescription>
-          The output of /export, or any JSON file in the same shape.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form method="post" enctype="multipart/form-data" class="space-y-4">
-          <div class="space-y-2">
-            <Label htmlFor="import-file">Or upload a .json file</Label>
-            <input
-              type="file"
-              id="import-file"
-              name="file"
-              accept=".json,application/json"
-              class="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
-            />
-          </div>
+    {/*
+      Per-habit results. A partial import must be visible: previously
+      the page printed one success line computed from the input length,
+      so a habit that silently failed to create looked identical to one
+      that restored with a full year of history.
+    */}
+    {failed.length > 0 && (
+      <Alert variant="destructive">
+        <div>
+          <AlertTitle>
+            {failed.length} habit{failed.length === 1 ? '' : 's'} did not import
+          </AlertTitle>
+          <AlertDescription>
+            <ul class="mt-1 list-disc space-y-0.5 pl-4">
+              {failed.map((r) => (
+                <li>
+                  <span class="font-medium">{r.name}</span>
+                  {r.error ? ` — ${r.error}` : ''}
+                </li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </div>
+      </Alert>
+    )}
 
-          <div class="space-y-2">
-            <Label htmlFor="import-json">JSON payload</Label>
-            <textarea
-              id="import-json"
-              name="json"
-              class="min-h-[240px] font-mono text-xs w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder='[{ "name": "Exercise", "records": [{ "day": "2024-01-15", "done": true }] }]'
-              spellcheck="false"
-            ></textarea>
-            <p class="text-xs text-muted-foreground">
-              If you upload a file, the textarea is ignored. Leave the
-              textarea empty and attach a file to import from disk.
-            </p>
-          </div>
+    <div class="castor-stack">
+      <Card>
+        <CardHeader>
+          <CardTitle as="h2">Choose what to import</CardTitle>
+          <CardDescription>
+            A <code>.json</code> file exported from Castor, containing every
+            habit with its tags, frequency, status and tick history. Uploading
+            a file fills the box below for you.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form method="post" enctype="multipart/form-data" class="space-y-5">
+            <div class="space-y-2">
+              <Label htmlFor="import-file">Export file</Label>
+              <input
+                type="file"
+                id="import-file"
+                name="file"
+                accept=".json,application/json"
+                aria-describedby="import-file-help"
+                class="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+              />
+              <p id="import-file-help" class="text-xs text-muted-foreground">
+                Or paste the JSON below. If you choose a file, its contents
+                are read automatically and the box is not needed.
+              </p>
+            </div>
 
-          <Button type="submit" variant="destructive" className="gap-2">
-            <Upload className="h-4 w-4" aria-hidden="true" />
-            Replace habits with this payload
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+            <div class="space-y-2">
+              <Label htmlFor="import-json" className="flex items-center gap-1.5">
+                <FileJson className="h-4 w-4" aria-hidden="true" />
+                JSON payload
+              </Label>
+              <textarea
+                id="import-json"
+                name="json"
+                rows="10"
+                spellcheck="false"
+                aria-describedby="import-json-help"
+                placeholder={'{\n  "habits": [\n    { "name": "Exercise", "tags": ["health"],\n      "period": {"period_type":"W","period_count":1,"target_count":3},\n      "status": "active", "records": [] }\n  ]\n}'}
+                class="min-h-[240px] w-full rounded-md border border-[var(--control-border)] bg-background px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              ></textarea>
+              <p id="import-json-help" class="text-xs text-muted-foreground">
+                The output of /export. Accepts the full export object or a bare
+                array of habits.
+              </p>
+            </div>
 
-    <Card className="border-destructive/50">
-      <CardHeader>
-        <CardTitle as="h2" className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-5 w-5" aria-hidden="true" />
-          Danger zone
-        </CardTitle>
-        <CardDescription>
-          Import <strong>replaces</strong> all your existing habits.
-          Export first if you want a backup.
-        </CardDescription>
-      </CardHeader>
-    </Card>
+            <div class="flex flex-col gap-2">
+              <Button
+                type="submit"
+                variant="destructive"
+                size="wrap"
+                className="w-full gap-2 sm:w-auto sm:justify-center"
+              >
+                <Upload className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span class="min-w-0">Replace habits with this file</span>
+              </Button>
+              <p class="text-xs text-muted-foreground">
+                This deletes your current habits before importing. Export first
+                if you want a way back.
+              </p>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle as="h2">What gets restored</CardTitle>
+          <CardDescription>
+            Everything the export contains, so a restore is lossless rather
+            than a partial copy.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt class="font-medium">Habit names</dt>
+              <dd class="text-muted-foreground">Yes</dd>
+            </div>
+            <div>
+              <dt class="font-medium">Tick history</dt>
+              <dd class="text-muted-foreground">Yes, every recorded day</dd>
+            </div>
+            <div>
+              <dt class="font-medium">Tags</dt>
+              <dd class="text-muted-foreground">Yes</dd>
+            </div>
+            <div>
+              <dt class="font-medium">Frequency</dt>
+              <dd class="text-muted-foreground">Yes</dd>
+            </div>
+            <div>
+              <dt class="font-medium">Status</dt>
+              <dd class="text-muted-foreground">Yes, including archived habits</dd>
+            </div>
+            <div>
+              <dt class="font-medium">Home page order</dt>
+              <dd class="text-muted-foreground">Yes</dd>
+            </div>
+          </dl>
+        </CardContent>
+      </Card>
+    </div>
   </main>
 </Layout>
