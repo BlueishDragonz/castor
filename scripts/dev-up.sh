@@ -61,7 +61,24 @@ mkdir -p .user
 
 # Start backend
 echo "→ Starting castor backend on 127.0.0.1:8085 (log: .user/dev-backend.log)"
-.venv/bin/python -m uvicorn castor.main:app --host 127.0.0.1 --port 8085 --log-level info \
+#
+# PUBLIC_URL is exported so the backend derives its WebAuthn relying-party
+# ID and expected origin from the same host the browser is served on,
+# instead of falling back to a hardcoded default that can drift away
+# from reality.
+#
+# The host MUST be "localhost", not 127.0.0.1, and this is not
+# cosmetic. A WebAuthn relying-party ID must be a registrable domain
+# suffix; browsers reject a bare IP address. Verified directly in Firefox
+# on this host:
+#   navigator.credentials.create({ ... rp: { id: '127.0.0.1' } })
+#     -> SecurityError: The operation is insecure.
+# So a dev setup served on 127.0.0.1 can never complete a passkey
+# ceremony. Astro still binds 127.0.0.1; localhost resolves to it, so
+# nothing about the binding changes — only the name the browser uses.
+PUBLIC_URL=http://localhost:4321 \
+FRONTEND_URL=http://localhost:4321 \
+  .venv/bin/python -m uvicorn castor.main:app --host 127.0.0.1 --port 8085 --log-level info \
   > .user/dev-backend.log 2>&1 &
 BACKEND_PID=$!
 echo $BACKEND_PID > .user/dev-backend.pid
@@ -98,8 +115,16 @@ fi
 # Start Astro
 echo "→ Starting Astro dev on 127.0.0.1:4321 (log: .user/dev-frontend.log)"
 cd web/concepts
+# FRONTEND_URL must be exported to the Astro process, not merely written
+# to .env files. lib/auth.ts's serverEnv() reads process.env only, by
+# design: an `import.meta.env` fallback makes Vite inline the whole
+# build-time env object into the emitted SSR bundle. Without this
+# export, publicOrigin() resolves to '' in dev and the backend rejects
+# every state-changing request with 403 "Browser origin not allowed".
 BACKEND_URL=http://127.0.0.1:8085 \
   PUBLIC_BACKEND_URL=http://127.0.0.1:8085 \
+  FRONTEND_URL=http://localhost:4321 \
+  PUBLIC_URL=http://localhost:4321 \
   pnpm exec astro dev --port 4321 --host 127.0.0.1 \
   > ../../.user/dev-frontend.log 2>&1 &
 FRONTEND_PID=$!
@@ -109,7 +134,7 @@ cd ../..
 
 echo "→ Waiting for Astro to come up"
 for i in $(seq 1 30); do
-  if curl -sf --max-time 2 http://127.0.0.1:4321/ -o /dev/null 2>&1; then
+  if curl -sf --max-time 2 http://localhost:4321/ -o /dev/null 2>&1; then
     echo "  ✓ Astro serving /"
     break
   fi
@@ -122,13 +147,13 @@ cat <<EOF
 ✓ Local dev up
 
   Backend   http://127.0.0.1:8085   (log: .user/dev-backend.log)
-  Frontend  http://127.0.0.1:4321   (log: .user/dev-frontend.log)
+  Frontend  http://localhost:4321   (log: .user/dev-frontend.log)
 
 Demo account:
   email     demo@castor.example.com
   password  DemoPass1234!
 
-To inspect from this machine:  open http://127.0.0.1:4321/
+To inspect from this machine:  open http://localhost:4321/
 To inspect from the LAN:        set up a tunnel (see scripts/tunnel-dev.sh) or
                                use ssh -L 4321:127.0.0.1:4321 joel@laptop
 

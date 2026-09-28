@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import time
 from contextlib import asynccontextmanager
 
@@ -20,6 +21,26 @@ from castor.scheduler import daily_backup_task
 logger.info("Starting Castor...")
 
 
+def _looks_like_ip_literal(host: str) -> bool:
+    """True when `host` is a bare IPv4/IPv6 literal rather than a name.
+
+    A WebAuthn relying-party ID must be a registrable domain suffix.
+    Browsers reject a literal IP outright, and the failure surfaces only
+    as an opaque "The operation is insecure" at the point of use, so it is
+    worth warning about at start-up instead. Verified directly: Firefox
+    refused `navigator.credentials.create` with rp.id="127.0.0.1" while
+    accepting rp.id="localhost" on the same page.
+    """
+    candidate = (host or "").strip().strip("[]")
+    if not candidate:
+        return False
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return False
+    return True
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Validate configuration
@@ -35,6 +56,78 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("RESET_PASSWORD_TOKEN_SECRET must be set")
     if settings.NICEGUI_STORAGE_SECRET == "dev" or not settings.NICEGUI_STORAGE_SECRET:
         raise RuntimeError("NICEGUI_STORAGE_SECRET must be set to a strong random value (not 'dev')")
+
+    # ─── Derive the WebAuthn relying-party configuration ──────────────
+    #
+    # Must run BEFORE the consistency checks below, which read
+    # WEBAUTHN_ORIGIN / WEBAUTHN_RP_ID, and before any request is served.
+    # Fills a blank RP ID and origin from the declared public origin, so
+    # the relying party cannot drift away from the host the browser is
+    # actually on. An explicit setting is never overwritten.
+    settings.resolve_webauthn_settings()
+    # loguru uses {} placeholders, not %-style, and an unformatted
+    # logger.info would emit the raw template instead of the values.
+    logger.info(
+        "WebAuthn relying party: rpId={} origin={} (public origin={})",
+        settings.WEBAUTHN_RP_ID,
+        settings.WEBAUTHN_ORIGIN,
+        settings.public_origin() or "<undeclared>",
+    )
+
+    # ─── Deployment-boundary consistency checks ───────────────────────
+    #
+    # These are WARNINGS, not failures: refusing to boot would turn a
+    # misconfiguration into an outage on a deployment that is otherwise
+    # serving correctly, and every one of these has a working (if less
+    # secure or less convenient) alternative. But each one is a setting
+    # an operator believes they configured, which the code quietly does
+    # not honour — the class of gap that is invisible until it matters.
+    if settings.WEBAUTHN_ORIGIN.startswith("http://") and not settings.is_dev():
+        logger.warning(
+            "WEBAUTHN_ORIGIN is http:// on a non-dev deployment. Browsers "
+            "require a secure context for WebAuthn, so passkey sign-in and "
+            "enrolment will fail. Set WEBAUTHN_ORIGIN to your https origin "
+            "once TLS is terminated in front of the app."
+        )
+    if not settings.WEBAUTHN_RP_ID:
+        logger.warning(
+            "WEBAUTHN_RP_ID is empty. It must be the registrable domain of "
+            "WEBAUTHN_ORIGIN (no scheme, no port) or passkey ceremonies fail."
+        )
+    elif _looks_like_ip_literal(settings.WEBAUTHN_RP_ID):
+        logger.warning(
+            "WEBAUTHN_RP_ID={} is a bare IP address. A WebAuthn relying-party ID "
+            "must be a registrable domain suffix; browsers reject a literal IP. "
+            "Firefox was observed refusing every ceremony with 'The operation is "
+            "insecure' when the RP ID was an IP. Passkeys will not work until "
+            "this is a hostname. Until then the app is password-only.",
+            settings.WEBAUTHN_RP_ID,
+        )
+    if settings.is_https_public() and not settings.WEBAUTHN_ORIGIN.startswith("https://"):
+        logger.warning(
+            "The deployment is declared HTTPS (PUBLIC_URL/APP_URL/TLS_TERMINATED) "
+            "but WEBAUTHN_ORIGIN is not. WebAuthn compares the browser's origin "
+            "against WEBAUTHN_ORIGIN exactly, so every ceremony will be rejected "
+            "with 'Registration/Authentication verification failed'."
+        )
+    if settings.TRUST_PROXY_HEADERS and not settings.TRUSTED_PROXY_IPS.strip():
+        logger.warning(
+            "TRUST_PROXY_HEADERS is enabled but TRUSTED_PROXY_IPS is empty, so "
+            "forwarded headers will not actually be trusted by the ASGI server. "
+            "Set TRUSTED_PROXY_IPS to the proxy's address."
+        )
+    if settings.TRUSTED_PROXY_IPS.strip() == "*":
+        logger.error(
+            "TRUSTED_PROXY_IPS='*' trusts X-Forwarded-* from ANY client. If the "
+            "app's socket is reachable without passing through your proxy, anyone "
+            "can spoof the scheme and host. Use a CIDR or a hop count instead."
+        )
+    if settings.TRUST_PROXY_HEADERS and not settings.is_https_public():
+        logger.warning(
+            "TRUST_PROXY_HEADERS is enabled but the public origin is not https. "
+            "The cookie Secure flag is decided by PUBLIC_URL/APP_URL/TLS_TERMINATED, "
+            "not by the forwarded header, so cookies will not be marked Secure."
+        )
 
     # Enable warning msg
     if settings.DEBUG:
@@ -251,14 +344,20 @@ async def security_headers(request: Request, call_next):
     """Add security headers to all responses."""
     response = await call_next(request)
     
-    # HSTS - only in production (non-dev)
-    if not settings.is_dev():
+    # HSTS — only when the deployment is actually declared HTTPS.
+    # Previously keyed on `not is_dev()`, which meant a production
+    # deployment that was still on plain HTTP (pre-TLS, during migration)
+    # advertised HSTS for a host it could not yet serve over https,
+    # which browsers treat as a signal to refuse http:// for the whole
+    # max-age. is_https_public() is the operator's declared truth and is
+    # the same input that decides the cookie Secure flag.
+    if settings.is_https_public():
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    
-    # CSP - allow ws: for WebSocket on HTTP connections, and allow eval/blob for module loading
+
+    # CSP — allow ws: for WebSocket on HTTP connections, and allow eval/blob for module loading
     # Check if we're likely behind HTTP (no TLS) - allow ws: for NiceGUI WebSocket
     # In production with TLS termination, HSTS will enforce HTTPS and wss: is sufficient
-    if settings.is_dev() or not getattr(settings, 'TLS_TERMINATED', False):
+    if not settings.is_https_public():
         csp = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://cdn.paddle.com; "

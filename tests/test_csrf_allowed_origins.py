@@ -22,7 +22,22 @@ from castor.app.http_security import BrowserOriginMiddleware
 
 
 def make(**kw):
-    base = {"FRONTEND_URL": "http://10.8.0.1:8080", "CSRF_ALLOWED_ORIGINS": []}
+    """Build a Settings with the allowlist inputs pinned.
+
+    `Settings` is a pydantic-settings model: any field not passed
+    explicitly is read from the ambient environment. A test module
+    imported earlier in the same process may have exported PUBLIC_URL
+    (the passkey ceremony tests do), and csrf_allowed_origins() consults
+    it — so these assertions would otherwise silently depend on pytest's
+    collection order. Pinning the fields that decide the outcome keeps
+    the test hermetic.
+    """
+    base = {
+        "FRONTEND_URL": "http://10.8.0.1:8080",
+        "CSRF_ALLOWED_ORIGINS": [],
+        "PUBLIC_URL": "",
+        "APP_URL": "",
+    }
     base.update(kw)
     return Settings(**base)
 
