@@ -87,7 +87,7 @@ async def _issue_challenge(challenge, ceremony, user, http_request, response):
         # A stable browser-session cookie supports concurrent tabs. Do not rotate
         # it per begin: each challenge is indexed independently in the database.
         response.set_cookie(BROWSER_COOKIE, browser, httponly=True,
-                            secure=settings.APP_URL.startswith("https://"),
+                            secure=settings.is_https_public(),
                             samesite="strict", path="/")
     ttl = min(max(settings.WEBAUTHN_TIMEOUT / 1000, 1), 300)
     await challenge_store.issue(challenge, ceremony, user.id, browser, ttl)
@@ -743,6 +743,66 @@ def _recovery_email_html(code: str) -> str:
 </body>
 </html>
 """
+
+
+@router.get("/recovery-email")
+async def get_recovery_email(
+    user: User = Depends(registration_user),
+):
+    """Read back the account's recovery-address state.
+
+    The /security page reads this on load to decide which of its two panels
+    to render (add-an-address vs. manage-the-one-you-have) and whether the
+    "Verify" button applies. Without this handler the page's
+    `GET /api/v1/webauthn/recovery-email` returned 405, so `recoveryEmail`
+    stayed null forever and a user who had already set and verified an
+    address was still shown "Add Recovery Email", with no way to see,
+    verify or remove it.
+
+    Returns the verified/stored address plus any PENDING one:
+
+        {
+          "recovery_email": str | null,          # set + verified
+          "recovery_email_verified": bool,
+          "pending_email": str | null,          # proposed, code sent, not yet verified
+        }
+
+    ``pending_email`` is the part that is not obvious. `user.recovery_email`
+    is only written when the 6-digit code is verified, so between "Add
+    Recovery Email" and pasting the code the stored field is still null.
+    A page that reads only the stored field therefore shows the empty
+    state and never renders the Verify button that completes the flow —
+    a dead end the user cannot get out of, since the code is already in
+    their inbox. The pending proposal lives in `recovery_email_challenge`,
+    so it is read from there.
+    """
+    from castor.app.db import RecoveryEmailChallenge as _Challenge
+
+    async with get_async_session_context() as session:
+        pending = (
+            await session.execute(
+                select(_Challenge.email)
+                .where(
+                    _Challenge.user_id == user.id,
+                    _Challenge.used.is_(False),
+                    _Challenge.expires_at
+                    > datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+                .order_by(_Challenge.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    return {
+        "recovery_email": user.recovery_email,
+        "recovery_email_verified": bool(
+            getattr(user, "recovery_email_verified", False)
+        ),
+        # Fall back to the pending proposal so the UI has something to
+        # attach the Verify action to. It is not a verified address and
+        # the response says so via the *_verified flag staying as-is.
+        "pending_email": pending,
+    }
 
 
 @router.post("/recovery-email")

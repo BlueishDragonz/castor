@@ -49,6 +49,7 @@ import { Calendar, AlertCircle, MoreVertical } from 'lucide-react';
 import { localISO } from '@/lib/dates';
 import { describePeriod } from '../../lib/period';
 import type { HabitPeriod } from '../../lib/period';
+import { backendOrigin } from '../../lib/auth';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -74,7 +75,7 @@ let loadError: 'not_found' | 'unauth' | 'failed' | null = null;
 
 try {
   const res = await fetch(
-    new URL(`/api/v1/habits/${habitId}`, import.meta.env.BACKEND_URL || 'http://localhost:8085'),
+    new URL(`/api/v1/habits/${habitId}`, backendOrigin()),
     {
       headers: {
         'Authorization': `Bearer ${Astro.locals.session.token}`,

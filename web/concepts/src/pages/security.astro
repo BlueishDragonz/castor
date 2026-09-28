@@ -11,6 +11,17 @@ import PageHeader from '../components/PageHeader.astro';
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
 }
+
+// The session email is needed by the client island to satisfy the backend's
+// self-binding check on passkey registration (`_self_binding`): both
+// /register/begin and /register/complete reject a `username` that is not the
+// signed-in account's own address, so the ceremony cannot be started from
+// /security without it.
+//
+// This is the account's own address, already present in the user's own
+// httpOnly-backed session cookie and rendered into their own page — not a
+// secret, and not the bearer token (F7 stands: no auth material is exposed).
+const sessionEmail = Astro.locals.session.email;
 ---
 
 <Layout title="Security">
@@ -31,6 +42,6 @@ if (!Astro.locals.session) {
   <main id="main" class="castor-page">
     <PageHeader title="Security" back="/habits">
     </PageHeader>
-    <SecurityContent client:load />
+    <SecurityContent client:load email={sessionEmail} />
   </main>
 </Layout>

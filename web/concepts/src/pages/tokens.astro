@@ -22,7 +22,7 @@
 import Layout from '../layouts/Layout.astro';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import PageHeader from '../components/PageHeader.astro';
-import { backendFetch, readSession } from '../lib/auth';
+import { backendFetch, backendOrigin, readSession } from '../lib/auth';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -35,7 +35,7 @@ let error: string | null = null;
 // BACKEND is only used below in the "How to use" curl example. The page
 // itself never calls the backend directly — it goes through the Astro BFF
 // at /api/v1/tokens (see src/pages/api/v1/tokens/{index,rotate}.ts).
-const BACKEND = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+const BACKEND = backendOrigin();;
 
 try {
   const r = await backendFetch(Astro.cookies, '/api/v1/tokens');

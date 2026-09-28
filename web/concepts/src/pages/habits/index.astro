@@ -20,7 +20,7 @@ import Layout from '../../layouts/Layout.astro';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import HabitGrid from '../../components/HabitGrid.astro';
 import PageHeader from '../../components/PageHeader.astro';
-import { clearStaleSession } from '../../lib/auth';
+import { backendOrigin, clearStaleSession } from '../../lib/auth';
 import type { HabitPeriod } from '../../lib/period';
 
 if (!Astro.locals.session) {
@@ -99,7 +99,7 @@ try {
   if (!token) {
     error = 'Not authenticated';
   } else {
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const origin = backendOrigin();;
     
     // Fetch habits list (with sort)
     const habitsQuery = orderBy === 'manual' ? '' : `?order_by=${orderBy}`;

@@ -16,6 +16,7 @@ import PageHeader from '../../../components/PageHeader.astro';
 import FormActions from '../../../components/FormActions.astro';
 import { PERIOD_TYPE_CODE, normalisePeriod } from '../../../lib/period';
 import type { HabitPeriod } from '../../../lib/period';
+import { backendOrigin } from '../../../lib/auth';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -49,7 +50,7 @@ if (Astro.request.method === 'POST') {
   if (!name) {
     error = 'Name is required';
   } else {
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const origin = backendOrigin();;
     const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
       method: 'PUT',
       headers: {
@@ -95,7 +96,7 @@ if (Astro.request.method === 'POST') {
 
 if (!success) {
   try {
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const origin = backendOrigin();;
     const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
       headers: { 'Authorization': `Bearer ${token}` },
     });

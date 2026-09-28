@@ -14,6 +14,7 @@
  */
 import type { APIRoute } from 'astro';
 import { readToken } from '../../../../../lib/auth';
+import { backendOrigin } from '../../../../../lib/auth';
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   const token = readToken(cookies);
@@ -57,7 +58,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     }
   }
 
-  const origin = process.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();
   const payload: Record<string, unknown> = { email };
   if (isRemove) {
     payload['remove'] = true;

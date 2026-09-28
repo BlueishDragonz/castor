@@ -217,11 +217,20 @@ def get_jwt_strategy() -> JWTStrategy:
 
 
 def get_cookie_settings() -> dict:
-    """Cookie settings for auth - Strict + Secure in production."""
+    """Cookie settings for auth - Strict + Secure in production.
+
+    The Secure decision comes from `settings.is_https_public()`, which reads
+    PUBLIC_URL first and falls back to the legacy APP_URL / TLS_TERMINATED
+    pair. It previously consulted only APP_URL and TLS_TERMINATED, so an
+    operator who configured the documented public origin (FRONTEND_URL /
+    PUBLIC_URL) as https but left the SaaS-era APP_URL empty shipped a
+    30-day session cookie without Secure. Behind a TLS-terminating reverse
+    proxy that is exactly the cookie most worth protecting.
+    """
     return {
         "httponly": True,
         "samesite": "strict",
-        "secure": settings.TLS_TERMINATED or settings.APP_URL.startswith("https://"),
+        "secure": settings.is_https_public(),
     }
 
 
