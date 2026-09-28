@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { backendOrigin } from '../../../../lib/auth';
 
 // GET /api/v1/habits/:id - Get habit details
 export const GET: APIRoute = async ({ params, cookies }) => {
@@ -12,7 +13,7 @@ export const GET: APIRoute = async ({ params, cookies }) => {
     });
   }
 
-  const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();;
   const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
     headers: { 'Authorization': `Bearer ${token}` },
   });
@@ -50,7 +51,7 @@ export const PUT: APIRoute = async ({ params, request, cookies }) => {
   }
 
   const body = await request.json();
-  const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();;
 
   const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
     method: 'PUT',
@@ -87,7 +88,7 @@ export const DELETE: APIRoute = async ({ params, cookies }) => {
     });
   }
 
-  const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();;
   const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
     method: 'DELETE',
     headers: { 'Authorization': `Bearer ${token}` },

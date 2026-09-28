@@ -19,6 +19,7 @@
  */
 import type { APIRoute } from 'astro';
 import { writeSession, mirrorWebAuthnBrowserCookie } from '../../../../../lib/auth';
+import { backendOrigin } from '../../../../../lib/auth';
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   let body: unknown;
@@ -28,7 +29,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     return jsonError(400, 'Invalid JSON body');
   }
 
-  const origin = process.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();
   const backendRes = await fetch(new URL('/auth/webauthn/login/complete', origin), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

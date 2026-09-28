@@ -20,7 +20,7 @@
  * server-side only (backendFetch) and intentionally not proxied.
  */
 import type { APIRoute } from 'astro';
-import { readToken } from '@/lib/auth';
+import { backendOrigin, readToken } from '@/lib/auth';
 
 export const POST: APIRoute = async ({ params, request, cookies }) => {
   const circleId = params.circleId;
@@ -39,7 +39,7 @@ export const POST: APIRoute = async ({ params, request, cookies }) => {
     });
   }
 
-  const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();;
   let body: string;
   try {
     body = JSON.stringify(await request.json());

@@ -18,7 +18,7 @@
  * idempotent without explicit conflict handling.
  */
 import type { APIRoute } from 'astro';
-import { readToken } from '@/lib/auth';
+import { backendOrigin, readToken } from '@/lib/auth';
 
 export const POST: APIRoute = async ({ params, request, cookies }) => {
   const habitId = params.id;
@@ -58,7 +58,7 @@ export const POST: APIRoute = async ({ params, request, cookies }) => {
   // Mirror the cap used by complete.astro (line 48): 4000 chars max.
   const safeText = String(text).slice(0, 4000);
 
-  const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();;
   const res = await fetch(new URL(`/api/v1/habits/${habitId}/completions`, origin), {
     method: 'POST',
     headers: {

@@ -88,17 +88,21 @@ RUN pnpm install --frozen-lockfile
 # installed from the committed lockfile.
 COPY web/concepts ./
 RUN rm -rf node_modules && pnpm install --frozen-lockfile
-# BACKEND_URL as a BUILD env (declared after the cached dependency
-# layers so changing it doesn't re-run pnpm install): Vite inlines
-# import.meta.env.* at build time (unlike process.env, read at
-# runtime). ~15 server files (pages/api/v1/habits*.ts,
-# habits/[id].astro, tokens.astro, ...) use
-# import.meta.env.BACKEND_URL and silently fell back to dev's
-# localhost:8085 in the built image — the habits BFF 500'd in the
-# Phase-4 Docker smoke until this was set. Value matches the
-# production-stage ENV and docker-compose BACKEND_URL.
-# Trade-off: changing the backend port now requires an image rebuild.
-ENV BACKEND_URL=http://127.0.0.1:8081
+
+# NOTE: no BACKEND_URL here, deliberately.
+#
+# This stage used to set `ENV BACKEND_URL=http://127.0.0.1:8081` to work
+# around ~15 server files reading `import.meta.env.BACKEND_URL`, which
+# Vite inlines at build time; without it the built image baked in dev's
+# localhost:8085 and the habits BFF 500'd until it was added. The
+# trade-off was that changing the backend port then required an image
+# rebuild, and the literal was frozen into the emitted SSR chunks.
+#
+# That trade-off is gone. Every call site now goes through
+# backendOrigin() in src/lib/auth.ts, which reads process.env at
+# runtime, so BACKEND_URL is supplied by the production-stage ENV and
+# docker-compose instead. Setting it here would reintroduce exactly the
+# build-time freezing this removed.
 
 # F13: Sentry source-map upload token.
 #
@@ -153,6 +157,15 @@ COPY --from=astro-builder /build/package.json /app/web/concepts/package.json
 # Backend listens on 8081 (internal only); Astro listens on 8080 (the
 # published port). BACKEND_URL points Astro at the local backend so
 # backendFetch() in Astro pages and BFF routes can talk to it.
+#
+# FRONTEND_URL is the operator-declared PUBLIC origin and is left unset
+# here on purpose. It is the value that decides the Secure cookie flag
+# and the CSRF Origin assertion, so a default baked into the image would
+# silently override whatever the deployment actually serves. Set it at
+# run time (docker-compose does: FRONTEND_URL=http://10.8.0.1:8080).
+# When it is absent the app falls back to the inbound request origin,
+# which is correct for local use and is what a future reverse proxy
+# deployment should set explicitly.
 ENV BACKEND_URL=http://127.0.0.1:8081 \
     HOST=0.0.0.0 \
     PORT=8080

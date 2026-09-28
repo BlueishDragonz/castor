@@ -47,6 +47,26 @@ trap shutdown TERM INT
 # The app persists habit data on SIGTERM via the lifespan shutdown hook in
 # castor/main.py. Give gunicorn the full window to drain before starting the
 # frontend, so a slow flush is not cut short.
+#
+# Proxy-header trust is OPT-IN and off by default. uvicorn only honours
+# X-Forwarded-Proto / X-Forwarded-Host for peers listed in
+# --forwarded-allow-ips; with the flag absent it ignores them entirely, which
+# is the correct default for a socket bound to loopback. An operator putting
+# Caddy (or anything else) in front sets TRUST_PROXY_HEADERS=true and
+# TRUSTED_PROXY_IPS to the proxy's address, and this line starts passing them
+# through. TRUSTED_PROXY_IPS='*' is deliberately NOT the default: it would let
+# any client that can reach the socket dictate the scheme and host.
+#
+# Note the app does not depend on these headers to function — its public
+# origin comes from PUBLIC_URL/FRONTEND_URL/WEBAUTHN_ORIGIN, which are
+# operator-declared settings rather than header-derived ones.
+if [ "${TRUST_PROXY_HEADERS:-false}" = "true" ] && [ -n "${TRUSTED_PROXY_IPS:-}" ]; then
+    echo "entrypoint: trusting X-Forwarded-* from [${TRUSTED_PROXY_IPS}]"
+    PROXY_ARGS="--proxy-headers --forwarded-allow-ips=${TRUSTED_PROXY_IPS}"
+else
+    PROXY_ARGS=""
+fi
+
 gunicorn castor.main:app \
     --bind 127.0.0.1:8081 \
     -w 1 \
@@ -54,7 +74,8 @@ gunicorn castor.main:app \
     --max-requests 10000 \
     --graceful-timeout 30 \
     --timeout 60 \
-    --log-level info &
+    --log-level info \
+    ${PROXY_ARGS} &
 BACKEND_PID=$!
 
 # Run the Astro server in the foreground. No `exec`: this shell must survive

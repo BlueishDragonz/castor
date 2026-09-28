@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { backendOrigin } from '../../../../../lib/auth';
 
 export const POST: APIRoute = async ({ params, cookies }) => {
   const habitId = params.id;
@@ -11,7 +12,7 @@ export const POST: APIRoute = async ({ params, cookies }) => {
     });
   }
 
-  const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();;
   
   // Fetch the habit to duplicate
   const habitRes = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {

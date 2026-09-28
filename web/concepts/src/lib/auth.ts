@@ -39,29 +39,31 @@ const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 /**
  * Read a server-side configuration value.
  *
- * Astro/Vite expose `.env` values through `import.meta.env`, NOT through
- * `process.env`. Reading process.env.FRONTEND_URL therefore returned
- * undefined even with the variable present in web/concepts/.env, which
- * made publicOrigin() return '' and left backendFetch sending no Origin
- * at all — the backend then rejected every state-changing BFF request
- * with 403 "Browser origin not allowed" and sign-in was impossible.
- * Verified directly:
- *   import.meta.env.FRONTEND_URL = http://localhost:4321
- *   process.env.FRONTEND_URL     = undefined
+ * This deliberately reads `process.env` ONLY.
  *
- * `import.meta.env` is statically replaced by Vite, so it is read
- * literally here rather than through a variable lookup. process.env is
- * still consulted first because that is what a container/CLI env
- * provides.
+ * The history matters, because the obvious fix is the wrong one. An
+ * earlier version consulted `import.meta.env` as a fallback, because
+ * `astro dev` loads `web/concepts/.env` into `import.meta.env` rather
+ * than into `process.env`, and without that fallback the dev origin was
+ * '' and every state-changing request was rejected with 403.
+ *
+ * That fallback is a production hazard, and it is subtle: Vite
+ * statically replaces an `import.meta.env` member expression at BUILD
+ * time and, in doing so, inlines the *entire* build-time env object into
+ * the emitted SSR chunk — including unrelated values. The built server
+ * bundle was observed containing the full env dump (USER, TERM, and
+ * every declared variable) as a literal. That both leaks build-time
+ * configuration into deployed code and freezes the value: the container
+ * sets these at start-up, long after the image was built, so a baked
+ * value silently wins over the real one.
+ *
+ * Both `astro dev` and the production container run in a real Node
+ * process, so `process.env` is authoritative in both. For dev, the value
+ * is exported by `scripts/dev-up.sh`, which is also the supported way to
+ * configure a local run.
  */
-function serverEnv(key: 'FRONTEND_URL' | 'PUBLIC_BACKEND_URL'): string {
-  const fromProcess = process.env[key];
-  if (fromProcess) return fromProcess;
-  if (key === 'FRONTEND_URL') {
-    // Vite statically replaces this member expression.
-    return import.meta.env.FRONTEND_URL ?? '';
-  }
-  return import.meta.env.PUBLIC_BACKEND_URL ?? '';
+function serverEnv(key: 'FRONTEND_URL' | 'PUBLIC_BACKEND_URL' | 'PUBLIC_URL'): string {
+  return process.env[key] ?? '';
 }
 
 /**
@@ -85,7 +87,10 @@ function serverEnv(key: 'FRONTEND_URL' | 'PUBLIC_BACKEND_URL'): string {
  * which reads the origin off the request actually being served.
  */
 function publicOrigin(): string {
-  const raw = serverEnv('FRONTEND_URL') || serverEnv('PUBLIC_BACKEND_URL');
+  const raw =
+    serverEnv('PUBLIC_URL') ||
+    serverEnv('FRONTEND_URL') ||
+    serverEnv('PUBLIC_BACKEND_URL');
   if (!raw) return '';
   try {
     const url = new URL(raw);
@@ -159,7 +164,6 @@ function isProd(): boolean {
   if (process.env.TLS_TERMINATED === 'true') return true;
   return false;
 }
-
 /**
  * Constrain a caller-supplied redirect target to a same-site path (F22).
  *
@@ -327,6 +331,33 @@ export function mirrorWebAuthnBrowserCookie(
 }
 
 /**
+ * Resolve the backend's base URL at RUNTIME.
+ *
+ * Why this exists: `import.meta.env.BACKEND_URL` is a *private* Vite
+ * variable, so Vite statically substitutes it at BUILD time and the
+ * literal lands in the emitted SSR chunks. In the container, BACKEND_URL
+ * is supplied by the environment at container start — long after the
+ * image was built — so every call site written that way silently shipped
+ * the build-time value. A production deployment that set BACKEND_URL
+ * correctly still talked to whatever host was baked in at image build.
+ *
+ * Only `process.env` is read here, and deliberately so. Mentioning
+ * `import.meta.env` anywhere in this file causes Vite to inline the
+ * *entire* build-time env object — including unrelated variables like
+ * USER — into the emitted chunk. Avoiding the member expression keeps
+ * the resolution genuinely runtime.
+ *
+ * `astro dev` and the container both run in a real Node process, so
+ * `process.env` is populated in both and no build-time fallback is
+ * needed. The default matches the in-container gunicorn port.
+ *
+ * Server-side only: it reads `process`, which the browser does not have.
+ */
+export function backendOrigin(): string {
+  return process.env.BACKEND_URL || 'http://127.0.0.1:8081';
+}
+
+/**
  * Forward an authenticated fetch to the backend. If the request has
  * a bearer cookie, attach it as `Authorization: Bearer *** Otherwise
  * the call is anonymous.
@@ -382,7 +413,8 @@ export async function backendFetch(
   // The /auth/* and /api/v1/* prefixes are proxied by Astro/Vite to the
   // backend in dev. In production, the same prefixes are forwarded by
   // the reverse proxy in front of both services.
-  const backendOrigin = process.env.BACKEND_URL || 'http://localhost:8085';
+  // Resolved at runtime, not build time — see backendOrigin().
+  const backendOrigin = process.env.BACKEND_URL || 'http://127.0.0.1:8081';
   const res = await fetch(new URL(path, backendOrigin), { ...init, headers });
   mirrorWebAuthnBrowserCookie(res, cookies);
   return res;
