@@ -168,19 +168,51 @@ export function SecurityContent() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-6 space-y-4 pb-24">
-        <div className="text-center text-muted-foreground">Loading...</div>
-      </div>
+      <div className="text-center text-muted-foreground py-6">Loading...</div>
     );
   }
 
   return (
-    <>
+    <div className="castor-stack">
       {/*
         Slice 22: removed the SecurityContent-local `<header>` (which
         duplicated the page title) and the inner `<main>` wrapper
         (the Astro page now provides one). Renders only the cards.
+
+        The wrapper that replaced it is `castor-stack`, the same
+        1.25rem vertical rhythm /stats and /settings use. Previously the
+        cards were bare siblings inside a fragment, so they became
+        direct children of <main> and rendered with **0px** between
+        them — the passkeys, recovery-email and 2FA cards shared an edge
+        and read as one merged block.
       */}
+
+      {/*
+        Two-factor authentication comes first.
+        It is the single answer to "is my account protected?", which is
+        the question a visitor to /security arrives with, and it is the
+        only panel here that states a verdict. The passkey list and the
+        recovery email are the configuration detail behind that verdict,
+        so they follow it. It was previously last, below two setup
+        panels a user has to read past to reach the summary.
+      */}
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle as="h2" className="text-base font-medium flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Two-Factor Authentication
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <Alert variant="default">
+            <Shield className="h-4 w-4" />
+            <AlertDescription className="text-sm">
+              Passkeys provide passwordless, phishing-resistant authentication.{' '}
+              When you have at least one passkey registered, 2FA is effectively enabled.
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
 
       {/* Passkeys Section */}
       <Card className="w-full">
@@ -258,6 +290,18 @@ export function SecurityContent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0 space-y-3">
+          {/*
+            The copy here used to be a single line — "Add a recovery
+            email to regain access if you lose your passkeys" — which
+            implied recovery email was off until you turned it on, and
+            said nothing about what happens to the address you already
+            have. Both were wrong in a way that matters at the moment
+            someone actually needs recovery: the default recovery
+            address IS the registration email, it is always in force, and
+            adding a second one does not replace it as the sign-in
+            address. So the panel now states the default first, then the
+            opt-in, then the warning.
+          */}
           {recoveryEmail ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between p-3 border border-border rounded-lg">
@@ -276,12 +320,30 @@ export function SecurityContent() {
                   </Button>
                 )}
               </div>
+              <Alert variant="default">
+                <AlertDescription className="text-sm">
+                  This is an additional address for recovery messages only.
+                  You still sign in with your registration email.
+                </AlertDescription>
+              </Alert>
             </div>
           ) : (
             <>
               <p className="text-sm text-muted-foreground">
-                Add a recovery email to regain access if you lose your passkeys.
+                Your recovery address is the email you registered with, and
+                it is already active — recovery messages go there by default.
               </p>
+              <p className="text-sm text-muted-foreground">
+                Add a different address below if you want recovery messages
+                to reach somewhere else as well.
+              </p>
+              <Alert variant="default">
+                <AlertDescription className="text-sm">
+                  This only changes where recovery messages are sent. You
+                  will still need your registration email to sign in, and
+                  your passkeys are unchanged.
+                </AlertDescription>
+              </Alert>
               <Button variant="outline" className="w-full" onClick={handleAddRecoveryEmail}>
                 Add Recovery Email
               </Button>
@@ -290,24 +352,6 @@ export function SecurityContent() {
         </CardContent>
       </Card>
 
-      {/* 2FA Status */}
-      <Card className="w-full">
-        <CardHeader className="pb-2">
-          <CardTitle as="h2" className="text-base font-medium flex items-center gap-2">
-            <Shield className="h-5 w-5" />
-            Two-Factor Authentication
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <Alert variant="default">
-            <Shield className="h-4 w-4" />
-            <AlertDescription className="text-sm">
-              Passkeys provide passwordless, phishing-resistant authentication. 
-              When you have at least one passkey registered, 2FA is effectively enabled.
-            </AlertDescription>
-          </Alert>
-        </CardContent>
-      </Card>
-    </>
+    </div>
   );
 }

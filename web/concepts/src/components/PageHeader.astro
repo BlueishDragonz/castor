@@ -112,17 +112,35 @@ const backClasses = buttonVariants({ variant: 'ghost', size: 'icon' });
   }
 
   /*
-   * The back button is nudged left so its 32px box optically aligns with
-   * the title's cap-height rather than sitting 10px inside it.
+   * The back button is nudged left so its box optically aligns with the
+   * title's cap-height rather than sitting 10px inside it.
+   *
+   * It also carries a larger arrow and a larger hit target. The glyph
+   * was `h-4 w-4` inside a 40px `size="icon"` button, so it rendered
+   * at 16px — the same visual weight as the small "From"/"To" labels
+   * sitting beside it, which made the one control that tells you where
+   * you came from read as the least important thing in the header.
+   * 20px matches the stroke weight and cap-height of the 28px page
+   * title, and 44px is the touch-target floor used by the habit tick
+   * boxes, so the two most important controls on a page now share a
+   * size. The rule below the SVG is why the markup no longer needs an
+   * `h-4 w-4` class on the icon itself.
    */
   .page-header__back {
     margin-left: -0.5rem;
     margin-top: 0.125rem;
     color: var(--muted-foreground);
+    width: 2.75rem;
+    height: 2.75rem;
   }
 
   .page-header__back:hover {
     color: var(--foreground);
+  }
+
+  .page-header__back :global(svg) {
+    width: 1.25rem;
+    height: 1.25rem;
   }
 
   .page-header__text {

@@ -225,7 +225,7 @@ function isTagSelected(tag: string): boolean {
       inside the same panel so there's no gap. */}
   <div class="habit-panel__head">
   <div class="habit-grid habit-grid--head"
-       style={`--day-count:${sortedDays.length}; --day-col:${DAY_COL}px; --streak-col:${showStreak ? BADGE_COL + 'px' : '0px'}; --total-col:${showTotal ? BADGE_COL + 'px' : '0px'}`}
+       style={`--day-count:${sortedDays.length}; --day-min:${DAY_COL}px; --streak-col:${showStreak ? BADGE_COL + 'px' : '0px'}; --total-col:${showTotal ? BADGE_COL + 'px' : '0px'}`}
        aria-hidden="true">
     {/* The habit-name column carries a real label now. Previously the
         top-left of the grid was an empty spacer, which is why the
@@ -266,7 +266,7 @@ function isTagSelected(tag: string): boolean {
       return (
         <>
           <article class="habit-row" role="listitem">
-          <div class="habit-grid" style={`--day-count:${sortedDays.length}; --day-col:${DAY_COL}px; --streak-col:${showStreak ? BADGE_COL + 'px' : '0px'}; --total-col:${showTotal ? BADGE_COL + 'px' : '0px'}`}>
+          <div class="habit-grid" style={`--day-count:${sortedDays.length}; --day-min:${DAY_COL}px; --streak-col:${showStreak ? BADGE_COL + 'px' : '0px'}; --total-col:${showTotal ? BADGE_COL + 'px' : '0px'}`}>
             {/* Habit name column — link to the detail page, with the
                 context sheet attached. The name is the widest column so
                 long habit names stay on one line; `minmax(0, 1fr)` on a
@@ -554,15 +554,21 @@ function isTagSelected(tag: string): boolean {
    */
   .habit-panel {
     /*
-     * Hug the grid rather than filling the page column, and centre it.
-     * The name track is capped at 22rem and the day tracks are fixed,
-     * so a full-width panel left a wide empty band on the right
-     * (measured: 211px of slack at 1440px), and a left-aligned
-     * fit-content panel then read as an accidental misalignment
-     * against the page's centred column. `margin-inline: auto` puts the
-     * grid's optical centre on the page's centre on every viewport.
+     * Fill the page column, edge to edge.
+     *
+     * This used to be `width: fit-content` + `margin-inline: auto`,
+     * chosen to avoid a wide empty band on the right. But a habit
+     * tracker is a *table* — a reader scanning down the rows wants
+     * the name column and the date columns to line up with the rest
+     * of the page, not to float in a narrower island inside it. The
+     * day tracks are now flexible (1fr) instead of a fixed px width,
+     * so filling the row adds breathing space between days rather
+     * than stretching the tick controls. The panel's outer edges line
+     * up with the page header's title and every card on /settings and
+     * /security, which is the whole point of the shared .castor-page
+     * column.
      */
-    width: fit-content;
+    width: 100%;
     max-width: 100%;
     margin-inline: auto;
     border: 1px solid var(--border);
@@ -578,15 +584,23 @@ function isTagSelected(tag: string): boolean {
 
   /*
    * ─── Grid ───────────────────────────────────────────────────────
-   * `--day-col` and `--badge-col` are set inline per grid so the header
+   * `--day-min` and `--badge-col` are set inline per grid so the header
    * strip and the rows are guaranteed to share identical track sizes —
    * the duplicated inline `grid-template-columns` string they replaced
    * had already drifted once, putting the date headers out of register
    * with the ticks below them.
    *
-   * The name column is capped at 22rem rather than `minmax(0, 1fr)`.
-   * With 1fr it absorbed all leftover width and pushed the day columns
-   * to the far right edge, leaving a large dead gap between each habit
+   * Inline styles beat stylesheet rules, so the inline value is the
+   * track's *minimum* (`--day-min`) rather than a finished `--day-col`.
+   * The desktop rule below composes it into a flexible
+   * `minmax(var(--day-min), 1fr)`; the mobile media query further down
+   * overrides `--day-col` outright with a fixed 44px, because on a
+   * phone the columns must not stretch — the row scrolls instead.
+   *
+   * The name column is `minmax(0, 1.6fr)`: a larger share of the row
+   * than the days, so long habit names stop truncating, while still
+   * shrinking before the day columns do. The earlier 22rem cap
+   * truncated names on a wide window and left a dead gap between each
    * name and its own dates.
    */
   /*
@@ -598,7 +612,24 @@ function isTagSelected(tag: string): boolean {
    * name-cell rule, which both the header and the rows use.
    */
   .habit-grid {
-    --name-col: minmax(0, 22rem);
+    /*
+     * Desktop tracks.
+     *
+     * The day columns are `minmax(--day-min, 1fr)` and the name takes a
+     * 4fr share, so the name always wins the leftover width and the day
+     * squares stay around 70px — wide enough for a comfortable tap
+     * target without becoming the dominant element.
+     *
+     * The 4fr:1fr ratio and the 0.375rem gap are tuned together. A first
+     * pass used 3fr with a 0.75rem gap, which put too much air between
+     * the dates (the columns read as separate cards rather than one
+     * calendar) and left the habit name the tightest thing on the row.
+     * Halving the gap to 0.375rem freed ~36px across the row, and
+     * raising the name's share from 3fr to 4fr moves that width into the
+     * name column instead of letting the day columns absorb it.
+     */
+    --name-col: minmax(0, 4fr);
+    --day-col: minmax(var(--day-min, 40px), 1fr);
     display: grid;
     grid-template-columns:
       var(--name-col)
@@ -606,6 +637,7 @@ function isTagSelected(tag: string): boolean {
       var(--streak-col, 0px)
       var(--total-col, 0px);
     align-items: center;
+    gap: 0.375rem;
   }
 
   .habit-grid__name {
@@ -629,6 +661,8 @@ function isTagSelected(tag: string): boolean {
     color: var(--foreground);
     text-decoration: none;
     min-width: 0;
+    /* The name outranks its tags for space (see .habit-grid__tags). */
+    flex-shrink: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -639,10 +673,22 @@ function isTagSelected(tag: string): boolean {
     text-underline-offset: 2px;
   }
 
+  /*
+   * Tags sit to the right of the habit name in the same cell. They
+   * must never take priority: this used to be `flex-shrink: 0` next to
+   * `min-width: 0`, and the two contradict each other — the tags
+   * refused to shrink, so a habit tagged "mindfulness" pushed its own
+   * name down to 46px and the name truncated to "Writ…" while the tag
+   * stayed fully readable (measured at a 212px name cell). The name is
+   * the primary identifier and is a link to the habit; a tag is
+   * secondary metadata. So the tag group is the thing that yields:
+   * shrinkable, and clipped by its own overflow, while the name link
+   * keeps the space it needs.
+   */
   .habit-grid__tags {
     display: flex;
     gap: 0.25rem;
-    flex-shrink: 0;
+    flex-shrink: 1;
     min-width: 0;
     overflow: hidden;
   }

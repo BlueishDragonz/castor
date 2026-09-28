@@ -174,19 +174,28 @@ try {
       subtitle={habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
     >
       <Fragment slot="actions">
-        <form method="get" class="habits-sort">
-          <label for="sort-select" class="habits-sort__label">Sort</label>
-          <select
-            id="sort-select"
-            name="order_by"
-            class="habits-sort__select"
-            onchange="window.location.search = this.value ? '?order_by=' + this.value : window.location.pathname"
-          >
-            <option value="manual" selected={orderBy === 'manual'}>Manual order</option>
-            <option value="name" selected={orderBy === 'name'}>Name</option>
-            <option value="category" selected={orderBy === 'category'}>Category</option>
-          </select>
-        </form>
+        {/*
+          Reordering lives behind a single icon, not a labelled
+          "Sort" dropdown. The dropdown conflated two different jobs —
+          picking a sort order, and reordering rows by hand — and the
+          only other sort orders (name, category) are a nicety that
+          costs a full control in the most-used screen's header. The
+          icon is the same LayoutGrid glyph the hamburger drawer uses
+          for "Reorder habits", so the two entry points match.
+        */}
+        <a
+          href="/habits/order"
+          aria-label="Reorder habits"
+          title="Reorder habits"
+          class="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border bg-background text-foreground transition-colors hover:bg-accent"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="h-4 w-4">
+            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+          </svg>
+        </a>
         <a
           href="/habits/new"
           class="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -250,45 +259,4 @@ try {
 </Layout>
 
 <style>
-  /*
-   * The sort control now lives in the page header beside the primary
-   * action instead of floating in its own right-aligned row above the
-   * grid, where it read as an unrelated control. Label + select are
-   * sized to match the 40px button beside them.
-   */
-  .habits-sort {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .habits-sort__label {
-    font-size: 0.875rem;
-    color: var(--muted-foreground);
-    white-space: nowrap;
-  }
-
-  .habits-sort__select {
-    height: 2.5rem;
-    border-radius: 0.375rem;
-    border: 1px solid var(--border);
-    background: var(--background);
-    padding: 0 0.5rem;
-    font-size: 0.875rem;
-    color: var(--foreground);
-  }
-
-  .habits-sort__select:hover {
-    background: var(--accent);
-  }
-
-  @media (max-width: 480px) {
-    .habits-sort {
-      width: 100%;
-    }
-
-    .habits-sort__select {
-      flex: 1;
-    }
-  }
 </style>

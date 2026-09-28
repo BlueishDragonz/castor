@@ -34,11 +34,18 @@ const { pathname, email = null } = Astro.props;
 
 // Primary destinations. Order matches the mobile MoreSheet so the two
 // surfaces teach the same mental model.
+//
+// Settings is deliberately NOT here. It is not a peer of the other
+// three: Habits, Stats and Circles are places you go to do something,
+// while Settings is the account/configuration drawer that the hamburger
+// menu exists to open. A Settings tab in the primary bar also left it
+// as a permanent item competing for space with the three that matter,
+// and it was the only nav item that rendered a page with no
+// destination of its own to return from.
 const NAV_ITEMS = [
   { href: '/habits', label: 'Habits' },
   { href: '/stats', label: 'Stats' },
   { href: '/circles', label: 'Circles' },
-  { href: '/settings', label: 'Settings' },
 ];
 
 // Exact match for top-level pages; prefix match for detail routes so

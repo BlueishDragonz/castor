@@ -101,6 +101,32 @@ MEASURE = """
     });
   }
 
+  // Habit-grid geometry. The track ratios (--name-col vs --day-col) and
+  // the column gap are tuned by eye, so they need a number to compare
+  // against after a tweak — and `namesTruncating` is the check that
+  // actually matters: it is the failure mode when the name loses its
+  // share of the row to the date columns or to the tag badges.
+  const grid = document.querySelector('.habit-row .habit-grid');
+  if (grid) {
+    const nameCell = document.querySelector('.habit-row .habit-grid__name');
+    // Row cells carry the tick control, not .habit-grid__day (that class
+    // is the header strip). Measure the cell that holds the switch.
+    const days = [...document.querySelectorAll('.habit-row [role="gridcell"]')];
+    const d0 = days[0] ? days[0].getBoundingClientRect() : null;
+    const d1 = days[1] ? days[1].getBoundingClientRect() : null;
+    const links = [...document.querySelectorAll('.habit-grid__link')];
+    out.habitGrid = {
+      gap: cs(grid).gap,
+      nameCol: cs(grid).getPropertyValue('--name-col').trim(),
+      nameCellW: nameCell ? px(nameCell.getBoundingClientRect().width) : null,
+      dayW: d0 ? px(d0.width) : null,
+      gapBetweenDays: (d0 && d1) ? px(d1.left - d0.right) : null,
+      namesTruncating: links
+        .filter(a => a.scrollWidth > a.clientWidth + 1)
+        .map(a => a.textContent.trim()),
+    };
+  }
+
   out.overflow = { scrollW: de.scrollWidth, clientW: de.clientWidth,
                    bleeds: de.scrollWidth > de.clientWidth + 1 };
   if (out.overflow.bleeds) {
