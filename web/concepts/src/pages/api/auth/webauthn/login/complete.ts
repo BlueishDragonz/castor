@@ -19,6 +19,7 @@
  */
 import type { APIRoute } from 'astro';
 import { writeSession, mirrorWebAuthnBrowserCookie } from '../../../../../lib/auth';
+import { backendOrigin } from '../../../../../lib/auth';
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   let body: unknown;
@@ -28,7 +29,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     return jsonError(400, 'Invalid JSON body');
   }
 
-  const origin = process.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();
   const backendRes = await fetch(new URL('/auth/webauthn/login/complete', origin), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -53,13 +54,28 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     return jsonError(500, 'Backend did not return access_token');
   }
 
-  // Extract username from the request body if present so we can write
-  // the email cookie for the UI greeting. The request body schema is
-  // { username, id, rawId, type, response } per the backend contract.
-  const username =
-    typeof body === 'object' && body !== null && 'username' in body
-      ? String((body as { username?: unknown }).username ?? '')
-      : '';
+  // F18: derive the display email from the VERIFIED token, never from the
+  // request body. The body is attacker-controlled on this unauthenticated
+  // route — the browser posts whatever it likes alongside the assertion — so
+  // trusting it let a caller choose the identity written into the session
+  // cookie. /users/me is bearer-authenticated, so whatever it returns is the
+  // principal the backend just proved the assertion belonged to.
+  // If the lookup fails we still write the session (the token is valid) and
+  // leave the email empty rather than storing an unverified value.
+  let username = '';
+  try {
+    const meRes = await fetch(new URL('/users/me', origin), {
+      headers: { Authorization: `Bearer ${data.access_token}` },
+    });
+    if (meRes.ok) {
+      const me = (await meRes.json()) as { email?: unknown };
+      if (typeof me.email === 'string' && me.email) {
+        username = me.email;
+      }
+    }
+  } catch {
+    // Non-fatal: the session is valid regardless of the display name.
+  }
 
   writeSession(cookies, data.access_token, username);
 

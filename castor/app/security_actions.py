@@ -8,6 +8,7 @@ via verified email recovery; a nonempty/random hash does not prove usability.
 from datetime import datetime, timezone
 from uuid import UUID
 import asyncio
+import secrets
 
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.exceptions import InvalidPasswordException
@@ -149,6 +150,143 @@ async def change_password(user_id, expected_version, current_password, new_passw
         raise SecurityActionUnavailable() from None
     await audit.record('password_change', user_id=user_id)
     return updated
+
+
+async def delete_account(user_id, expected_version, current_password) -> None:
+    """Irreversibly erase an account in ONE transaction after a fresh-password step-up.
+
+    Fixes audit F18 + F24.
+
+    F18: the caller-supplied account id is never trusted for authorization. The
+    password is verified against the hash of the account identified by
+    ``user_id`` — the same principal the session token resolved to — and the
+    mutation re-checks that identity, active state, version and hash inside the
+    deleting transaction. A second, attacker-writable channel (the non-httpOnly
+    ``castor_user`` cookie) can no longer select whose account is destroyed.
+
+    F24: every row removal and the tombstone update share a single
+    transaction, so a crash can no longer leave "personal data gone, account
+    still active". WebAuthn credentials, recovery challenges, reset codes and
+    circle rows are removed explicitly rather than relying on FK cascades,
+    which SQLite does not enforce unless ``foreign_keys=ON`` is set on the
+    connection.
+    """
+    user = await _authorize(user_id, expected_version, current_password)
+    # Evict the in-memory habit list BEFORE the row disappears, or a pending
+    # debounced flush can resurrect the JSON blob we are about to erase.
+    from castor.storage import get_user_dict_storage
+
+    await get_user_dict_storage().delete_user_habit_list(user)
+    archived_email = f"deleted+{user.id}@deleted.invalid"
+    try:
+        async with db.async_session_maker() as session:
+            manager = UserManager(SQLAlchemyUserDatabase(session, db.User))
+            random_hash = await asyncio.to_thread(
+                manager.password_helper.hash, secrets.token_urlsafe(48)
+            )
+            async with session.begin():
+                # Obtain a row/write lock on the still-matching user, held until
+                # the erasure commits. Serializes against password change and
+                # passkey removal on SQLite and PostgreSQL.
+                locked = await session.execute(
+                    update(db.User).where(*_guard(user)).values(
+                        token_version=db.User.token_version,
+                    ).execution_options(synchronize_session=False)
+                )
+                if locked.rowcount != 1:
+                    raise StaleAuthorizationError()
+
+                for model in (
+                    db.HabitListModel,
+                    db.UserConfigsModel,
+                    db.UserNoteImageModel,
+                    db.UserApiTokenModel,
+                    db.WebAuthnCredential,
+                ):
+                    await session.execute(
+                        delete(model)
+                        .where(model.user_id == user_id)
+                        .execution_options(synchronize_session=False)
+                    )
+                # Recovery/reset rows carry no ORM relationship to the user.
+                await session.execute(
+                    delete(db.RecoveryEmailChallenge).where(
+                        db.RecoveryEmailChallenge.user_id == user_id
+                    )
+                )
+                await session.execute(
+                    delete(db.PasswordResetCode).where(
+                        db.PasswordResetCode.user_id == user_id
+                    )
+                )
+                # Identity rows are keyed by email, not user id.
+                await session.execute(
+                    delete(db.UserIdentityModel).where(
+                        db.UserIdentityModel.email == user.email
+                    )
+                )
+
+                # Circles hold personal data (member lists, shared habit ids,
+                # invited addresses). Remove the user's memberships, shared
+                # habits and minted invites, then any circle they own together
+                # with its contents. Written out per table rather than looped:
+                # each model names a different owner column.
+                from castor.app.circles import Circle, CircleHabit, CircleInvite, CircleMember
+
+                owned_circle_ids = list(
+                    (
+                        await session.execute(
+                            select(Circle.id).where(Circle.owner_id == user_id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                await session.execute(
+                    delete(CircleMember).where(CircleMember.user_id == user_id)
+                )
+                await session.execute(
+                    delete(CircleHabit).where(CircleHabit.owner_user_id == user_id)
+                )
+                await session.execute(
+                    delete(CircleInvite).where(CircleInvite.invited_by == user_id)
+                )
+                for circle_id in owned_circle_ids:
+                    await session.execute(
+                        delete(CircleMember).where(CircleMember.circle_id == circle_id)
+                    )
+                    await session.execute(
+                        delete(CircleHabit).where(CircleHabit.circle_id == circle_id)
+                    )
+                    await session.execute(
+                        delete(CircleInvite).where(CircleInvite.circle_id == circle_id)
+                    )
+                    await session.execute(
+                        delete(Circle).where(Circle.id == circle_id)
+                    )
+
+                # Tombstone last, in the same transaction. Bumping token_version
+                # retires every outstanding JWT for the account.
+                archived = await session.execute(
+                    update(db.User).where(*_guard(user)).values(
+                        email=archived_email,
+                        hashed_password=random_hash,
+                        is_active=False,
+                        is_superuser=False,
+                        is_verified=False,
+                        token_version=db.User.token_version + 1,
+                        updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    ).execution_options(synchronize_session=False)
+                )
+                if archived.rowcount != 1:
+                    raise StaleAuthorizationError()
+    except SecurityActionError:
+        # Policy/status errors (e.g. rowcount CAS rejection) propagate
+        # unchanged; they are not DB failures and must never surface as 503.
+        raise
+    except SQLAlchemyError:
+        raise SecurityActionUnavailable() from None
+    await audit.record('account_delete', user_id=user_id)
 
 
 async def remove_passkey(user_id, expected_version, current_password, credential_id) -> bool:

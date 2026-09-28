@@ -17,6 +17,7 @@ import { HabitNoteRow } from './HabitNoteRow.tsx';
 import { Badge } from './ui/badge';
 import { cn } from '@/lib/utils';
 import { localISO } from '@/lib/dates';
+import type { HabitPeriod } from '../lib/period';
 
 interface Habit {
   id: string;
@@ -24,7 +25,7 @@ interface Habit {
   tags: string[];
   tickedDays: string[]; // ISO dates like '2025-01-15'
   notesByDate: Record<string, string>; // ISO date -> note text
-  period?: { frequency: number; interval: 'day' | 'week' | 'month' } | null;
+  period?: HabitPeriod | null;
   status: string;
 }
 
@@ -62,6 +63,19 @@ const {
 
 const today = new Date();
 today.setHours(0, 0, 0, 0);
+
+/*
+ * Column geometry, shared by the header strip and every row so the two
+ * can never drift apart. Exposed as CSS custom properties rather than
+ * an inline `grid-template-columns` string that was duplicated in two
+ * places (it had already drifted once).
+ *
+ * DAY_COL was 1.75rem (28px) — the bare minimum for a tap target on
+ * desktop and below the 44px comfortable size on touch. It is now
+ * 2.25rem (36px) desktop, widened further on coarse pointers.
+ */
+const DAY_COL = 36;
+const BADGE_COL = 44;
 
 // Sort days: most recent first (today first)
 const sortedDays = [...days].sort((a, b) => b.getTime() - a.getTime());
@@ -143,12 +157,6 @@ function isTagSelected(tag: string): boolean {
   return selectedTags.includes(tag);
 }
 
-// Weekday abbreviations based on firstDayOfWeek
-const baseWeekDayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const weekDayAbbr = baseWeekDayAbbr.map((_, i) => 
-  baseWeekDayAbbr[(i + firstDayOfWeek) % 7]
-);
-
 ---
 <!-- Pull-down Tag Filter (hidden by default, shown on scroll up) -->
 {enableTagFilter && allTags.length > 0 && (
@@ -212,39 +220,26 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
   strip on top, divider, row cards. The grid is sticky so it stays
   pinned on scroll.
 */}
-<div class="mt-4 rounded-lg border border-border bg-card overflow-hidden">
-  {/* Day-of-week header strip — sticky on scroll, sits flush above the
-      first habit row inside the same Card container so there's no gap.
-      Was previously a separate div with its own border + rounded-t-lg
-      and `mt-4`, leaving a visible gap above the first row. */}
-  <div class="sticky top-0 z-20 bg-card/95 backdrop-blur-sm border-b border-border px-2 pt-2 pb-3">
-  <div class="grid gap-x-1 px-2"
-       style={`grid-template-columns: minmax(0, 1fr) repeat(${sortedDays.length}, 1.75rem) ${showStreak ? '2.75rem' : '0'} ${showTotal ? '2.75rem' : '0'}`}
+<div class="habit-panel">
+  {/* Day-of-week header strip — sits flush above the first habit row
+      inside the same panel so there's no gap. */}
+  <div class="habit-panel__head">
+  <div class="habit-grid habit-grid--head"
+       style={`--day-count:${sortedDays.length}; --day-min:${DAY_COL}px; --streak-col:${showStreak ? BADGE_COL + 'px' : '0px'}; --total-col:${showTotal ? BADGE_COL + 'px' : '0px'}`}
        aria-hidden="true">
-    {/* Empty first cell — habit name lives in the row cards, no
-        subheader above it (the page heading already says "Habits"). */}
-    <div style="grid-column: 1">
-      {/* intentional spacer so the day cells align with the row cards' ticks */}
-    </div>
-    {/* Weekday + day number stacked, one column per day. Same horizontal
-        alignment as the row tick cells below (justify-center + items-center). */}
-    {sortedDays.map((day, i) => (
-      <div class="flex flex-col items-center justify-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider leading-tight"
-           style={{ gridColumn: `${i + 2}` }}>
-        <span>{weekDayAbbr[i]}</span>
-        <span class="text-[11px] font-semibold normal-case text-foreground/70">{day.getDate()}</span>
+    {/* The habit-name column carries a real label now. Previously the
+        top-left of the grid was an empty spacer, which is why the
+        panel read as "dates floating on the right" with no anchor. */}
+    <div class="habit-grid__name habit-grid__name--head">Habit</div>
+    {sortedDays.map((day) => (
+      <div class:list={['habit-grid__day', isToday(day) && 'is-today']}>
+        <span class="habit-grid__weekday">{day.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
+        <span class="habit-grid__daynum">{day.getDate()}</span>
+        {isToday(day) && <span class="castor-sr-only">(today)</span>}
       </div>
     ))}
-    {showStreak && (
-      <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '2.75rem', gridColumn: `${sortedDays.length + 2}` }}>
-        Stk
-      </div>
-    )}
-    {showTotal && (
-      <div class="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-wider" style={{ width: '2.75rem', gridColumn: `${sortedDays.length + (showStreak ? 3 : 2)}` }}>
-        Sum
-      </div>
-    )}
+    {showStreak && <div class="habit-grid__badge">Streak</div>}
+    {showTotal && <div class="habit-grid__badge">Total</div>}
   </div>
 </div>
 
@@ -253,21 +248,34 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
      opened above the header strip closes after the rows + add-habit
      button below. -->
   <div role="list" aria-label="Habits">
+    {/*
+      On a narrow viewport the seven date columns overflow the row and
+      the oldest ones scroll out of view. The hint below is the
+      non-decorative half of that affordance (the edge fade is the
+      decorative half) and it is hidden on desktop, where all seven
+      columns fit and the sentence would be noise.
+    */}
+    <p class="habit-panel__scroll-hint">
+      Showing the {sortedDays.length} most recent days — swipe the row to see
+      older dates.
+    </p>
     {filteredHabits.map(habit => {
       const streak = calculateStreak(habit);
       const total = calculateTotal(habit);
 
       return (
         <>
-          <article class="border-t border-border bg-card p-2" role="listitem">
-          <div class="grid items-center gap-x-1" style={`grid-template-columns: minmax(0, 1fr) repeat(${sortedDays.length}, 1.75rem) ${showStreak ? '2.75rem' : '0'} ${showTotal ? '2.75rem' : '0'}`}>
-            {/* Habit name column - link with drawsheet. min-w-0 + truncate so
-                long names ellipsise and the right-aligned tick icons keep
-                their place on the right edge of the row. */}
-            <div class="flex items-center gap-2 min-w-0 px-2 py-1" style="grid-column: 1">
+          <article class="habit-row" role="listitem">
+          <div class="habit-grid" style={`--day-count:${sortedDays.length}; --day-min:${DAY_COL}px; --streak-col:${showStreak ? BADGE_COL + 'px' : '0px'}; --total-col:${showTotal ? BADGE_COL + 'px' : '0px'}`}>
+            {/* Habit name column — link to the detail page, with the
+                context sheet attached. The name is the widest column so
+                long habit names stay on one line; `minmax(0, 1fr)` on a
+                fixed day-column track stops the day cells being squeezed
+                when a long name is present. */}
+            <div class="habit-grid__name">
               <a
                 href={`/habits/${habit.id}`}
-                class="font-medium truncate block hover:underline text-foreground"
+                class="habit-grid__link"
                 role="heading"
                 aria-level="3"
                 data-long-press-delay="150"
@@ -276,18 +284,19 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
                 {habit.name}
               </a>
               {habit.tags.length > 0 && (
-                <span class="flex flex-wrap gap-1 shrink-0" aria-label={`Tags: ${habit.tags.join(', ')}`}>
+                <span class="habit-grid__tags" aria-label={`Tags: ${habit.tags.join(', ')}`}>
                   {habit.tags.map(tag => (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 shrink-0">
-                      #{tag}
+                    <Badge variant="outline" className="habit-grid__tag">
+                      {tag}
                     </Badge>
                   ))}
                 </span>
               )}
             </div>
 
-            {/* Date columns — icon-only ticks, right-aligned to the
-                row's right edge. No cell borders, no checkbox squares. */}
+            {/* Date columns — one tick per day, aligned to the header
+                strip above. The cell is the hit target; the tick glyph
+                inside it is the state indicator. */}
             {sortedDays.map(day => {
               const isoDate = localISO(day);
               const done = habit.tickedDays.includes(isoDate);
@@ -295,10 +304,11 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
               const dayIsPast = isPast(day);
 
               return (
-                <div class="relative flex items-center justify-center py-1"
-                     role="gridcell"
-                     aria-label={`${dayIsToday ? 'Today' : day.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}: ${done ? 'Done' : 'Not done'}`}
-                     style={{ gridColumn: 'auto' }}>
+                <div
+                  class:list={['habit-grid__cell', dayIsToday && 'is-today']}
+                  role="gridcell"
+                  aria-label={`${dayIsToday ? 'Today' : day.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}: ${done ? 'Done' : 'Not done'}`}
+                >
                   <HabitCheckBox
                     habitId={habit.id}
                     habitName={habit.name}
@@ -313,7 +323,7 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 
             {/* Streak badge */}
             {showStreak && (
-              <div class="flex items-center justify-center" style={{ width: '2.75rem' }}>
+              <div class="habit-grid__badge-cell">
                 {habit.period ? (
                   <Badge variant="outline" className="w-full px-1.5 py-0.5 text-xs" aria-label={`Current streak: ${streak} days`}>
                     {streak > 0 ? streak : '—'}
@@ -328,7 +338,7 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 
             {/* Total badge */}
             {showTotal && (
-              <div class="flex items-center justify-center" style={{ width: '2.75rem' }}>
+              <div class="habit-grid__badge-cell">
                 <Badge variant="outline" className="w-full px-1.5 py-0.5 text-xs" aria-label={`Total completions in view: ${total}`}>
                   {total}
                 </Badge>
@@ -368,35 +378,18 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
   })}
 </div>
 
-<!-- "+ Add habit" sits below the last card instead of in the page header
-     so the calendar strip has breathing room and the row stays focused
-     on habit names + ticks. -->
-{filteredHabits.length > 0 && (
-  <div class="mt-6 flex justify-center">
-    {/*
-      Slice 22x: "+ Add habit" was rendered as a React <Button asChild>
-      wrapping a plain <a>, but inside a .astro file the Radix Slot
-      doesn't merge the Button's cva classes onto the <a> child, so
-      the link had no visible button styling. Use the same classes
-      inline as a plain <a> — the shadcn Button's "outline" variant
-      applies them via `buttonVariants`.
-    */}
-    <a
-      href="/habits/new"
-      class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium border border-border bg-background shadow-sm hover:bg-accent hover:text-accent-foreground transition-all h-10 px-4 py-2"
-    >
-      + Add habit
-    </a>
-  </div>
-)}
+{/*
+  The "+ Add habit" button that used to sit centred below the last row
+  is gone. It duplicated the "New habit" primary action in the page
+  header, and placing it after the list made creating a habit the last
+  thing a user would think of rather than the first. When the tag filter
+  is hiding every habit, the filter panel below is the right next step.
+*/}
 
 {filteredHabits.length === 0 && habits.length > 0 && (
-  <div class="text-center py-12 text-muted-foreground">
+  <div class="habit-panel__empty">
     <p>No habits match the current filter.</p>
-    <a
-      href={buildTagUrl(null, 'clear')}
-      class="inline-block mt-2 text-sm text-primary underline hover:no-underline"
-    >
+    <a href={buildTagUrl(null, 'clear')} class="habit-panel__clear">
       Clear filters
     </a>
   </div>
@@ -551,48 +544,351 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
   })();
 </script>
 
-<style is:global>
-  /* Mobile horizontal scroll with sticky habit name */
-  @media (max-width: 768px) {
-    article > div {
-      -webkit-overflow-scrolling: touch;
-      overflow-x: auto;
+<style>
+  /*
+   * ─── Panel ──────────────────────────────────────────────────────
+   * One bordered surface containing the header strip and every row.
+   * Rows are separated by hairlines rather than each being its own
+   * card, so the grid reads as a single table instead of a stack of
+   * unrelated panels.
+   */
+  .habit-panel {
+    /*
+     * Fill the page column, edge to edge.
+     *
+     * This used to be `width: fit-content` + `margin-inline: auto`,
+     * chosen to avoid a wide empty band on the right. But a habit
+     * tracker is a *table* — a reader scanning down the rows wants
+     * the name column and the date columns to line up with the rest
+     * of the page, not to float in a narrower island inside it. The
+     * day tracks are now flexible (1fr) instead of a fixed px width,
+     * so filling the row adds breathing space between days rather
+     * than stretching the tick controls. The panel's outer edges line
+     * up with the page header's title and every card on /settings and
+     * /security, which is the whole point of the shared .castor-page
+     * column.
+     */
+    width: 100%;
+    max-width: 100%;
+    margin-inline: auto;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--card);
+    overflow: hidden;
+  }
+
+  .habit-panel__head {
+    border-bottom: 1px solid var(--border);
+    background: var(--muted);
+  }
+
+  /*
+   * ─── Grid ───────────────────────────────────────────────────────
+   * `--day-min` and `--badge-col` are set inline per grid so the header
+   * strip and the rows are guaranteed to share identical track sizes —
+   * the duplicated inline `grid-template-columns` string they replaced
+   * had already drifted once, putting the date headers out of register
+   * with the ticks below them.
+   *
+   * Inline styles beat stylesheet rules, so the inline value is the
+   * track's *minimum* (`--day-min`) rather than a finished `--day-col`.
+   * The desktop rule below composes it into a flexible
+   * `minmax(var(--day-min), 1fr)`; the mobile media query further down
+   * overrides `--day-col` outright with a fixed 44px, because on a
+   * phone the columns must not stretch — the row scrolls instead.
+   *
+   * The name column is `minmax(0, 1.6fr)`: a larger share of the row
+   * than the days, so long habit names stop truncating, while still
+   * shrinking before the day columns do. The earlier 22rem cap
+   * truncated names on a wide window and left a dead gap between each
+   * name and its own dates.
+   */
+  /*
+   * The header strip and the rows must share one horizontal origin.
+   * They previously differed: the header grid carried `padding: 0
+   * 0.5rem` while the row grids did not, so every date header sat 8px
+   * to the right of the checkbox it labelled (measured: header day at
+   * x=721, row cell at x=713). The padding now lives on the shared
+   * name-cell rule, which both the header and the rows use.
+   */
+  .habit-grid {
+    /*
+     * Desktop tracks.
+     *
+     * The day columns are `minmax(--day-min, 1fr)` and the name takes a
+     * 4fr share, so the name always wins the leftover width and the day
+     * squares stay around 70px — wide enough for a comfortable tap
+     * target without becoming the dominant element.
+     *
+     * The 4fr:1fr ratio and the 0.375rem gap are tuned together. A first
+     * pass used 3fr with a 0.75rem gap, which put too much air between
+     * the dates (the columns read as separate cards rather than one
+     * calendar) and left the habit name the tightest thing on the row.
+     * Halving the gap to 0.375rem freed ~36px across the row, and
+     * raising the name's share from 3fr to 4fr moves that width into the
+     * name column instead of letting the day columns absorb it.
+     */
+    --name-col: minmax(0, 4fr);
+    --day-col: minmax(var(--day-min, 40px), 1fr);
+    display: grid;
+    grid-template-columns:
+      var(--name-col)
+      repeat(var(--day-count, 7), var(--day-col))
+      var(--streak-col, 0px)
+      var(--total-col, 0px);
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  .habit-grid__name {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.625rem 0.75rem;
+  }
+
+  .habit-grid__name--head {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .habit-grid__link {
+    font-weight: 500;
+    color: var(--foreground);
+    text-decoration: none;
+    min-width: 0;
+    /* The name outranks its tags for space (see .habit-grid__tags). */
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .habit-grid__link:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /*
+   * Tags sit to the right of the habit name in the same cell. They
+   * must never take priority: this used to be `flex-shrink: 0` next to
+   * `min-width: 0`, and the two contradict each other — the tags
+   * refused to shrink, so a habit tagged "mindfulness" pushed its own
+   * name down to 46px and the name truncated to "Writ…" while the tag
+   * stayed fully readable (measured at a 212px name cell). The name is
+   * the primary identifier and is a link to the habit; a tag is
+   * secondary metadata. So the tag group is the thing that yields:
+   * shrinkable, and clipped by its own overflow, while the name link
+   * keeps the space it needs.
+   */
+  .habit-grid__tags {
+    display: flex;
+    gap: 0.25rem;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .habit-grid__tag {
+    font-size: 0.6875rem;
+    padding: 0 0.375rem;
+    border-radius: 999px;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+  }
+
+  /*
+   * ─── Day columns ────────────────────────────────────────────────
+   */
+  .habit-grid__day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 0 0.375rem;
+    line-height: 1.15;
+  }
+
+  .habit-grid__weekday {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .habit-grid__daynum {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--foreground);
+  }
+
+  /*
+   * Today's column is marked by a tinted band AND a bolder day number,
+   * so the distinction survives for a user who cannot perceive the
+   * tint. The header cell carries "(today)" for screen readers.
+   */
+  .habit-grid__day.is-today,
+  .habit-grid__cell.is-today {
+    background: color-mix(in oklab, var(--primary) 7%, transparent);
+  }
+
+  .habit-grid__day.is-today .habit-grid__daynum {
+    color: var(--primary);
+  }
+
+  .habit-grid__cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.375rem 0;
+  }
+
+  .habit-grid__badge {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    text-align: center;
+    width: var(--badge-col);
+  }
+
+  .habit-grid__badge-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--badge-col);
+  }
+
+  .habit-row + .habit-row {
+    border-top: 1px solid var(--border);
+  }
+
+  /*
+   * ─── Narrow screens ─────────────────────────────────────────────
+   *
+   * A 7-day grid plus a readable habit name does not fit in 390px at
+   * desktop column sizes. Measured on the rendered page: the name
+   * column collapsed to 26px ("Walk 20 min" truncated to "W…"), the
+   * 7th date column ended at x=421 and was clipped off-screen, and the
+   * ticks stayed at 32px because the `pointer: coarse` rule below does
+   * not match a desktop browser resized to 390px.
+   *
+   * So on a narrow viewport we do three things:
+   *   1. Widen the day columns to a real 44px touch target.
+   *   2. Give the name enough room to read, and let the whole row
+   *      scroll horizontally as one unit with the name pinned left.
+   *   3. Move the tags onto their own line under the name instead of
+   *      stealing horizontal width from it.
+   *
+   * The row scrolls rather than compressing, because truncating the
+   * habit name — the one thing that identifies the row — is worse than
+   * requiring a horizontal swipe to reach the oldest date.
+   */
+  @media (max-width: 720px) {
+    .habit-grid {
+      --name-col: 11rem;
+      --day-col: 44px;
     }
-    
-    article > div > div:first-child {
+
+    .habit-row > .habit-grid,
+    .habit-panel__head > .habit-grid {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+  }
+
+  /*
+   * The oldest date column sits off-screen at 390px (measured: last
+   * cell right edge at x=445 in a 390px viewport). The row scrolls, but
+   * a row that silently hides two of seven days gives no hint that
+   * there is more — so the panel gets an explicit edge fade plus a
+   * caption naming what is off-screen. The fade is decorative; the
+   * caption is what actually communicates it.
+   */
+  @media (max-width: 720px) {
+    .habit-panel {
+      position: relative;
+    }
+
+    .habit-panel::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 2rem;
+      pointer-events: none;
+      background: linear-gradient(
+        to right,
+        transparent,
+        color-mix(in oklab, var(--card) 92%, transparent)
+      );
+    }
+  }
+
+  @media (max-width: 640px) {
+    /* The name cell pins to the left edge as the dates scroll under it. */
+    .habit-grid__name {
       position: sticky;
       left: 0;
-      z-index: 10;
+      z-index: 2;
+      background: var(--card);
+      box-shadow: 1px 0 0 var(--border);
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.125rem;
+      justify-content: center;
     }
-    
-    /* Reduce padding on mobile */
-    article {
-      padding: 0.75rem;
+
+    .habit-grid--head .habit-grid__name {
+      background: var(--muted);
+      font-size: 0.625rem;
     }
   }
-  
-  /* Today column highlight: rendered on the button itself via
-     `ring-2 ring-primary ring-offset-2` in HabitCheckBox. The gridcell
-     wrapper intentionally has no fill — keep it that way so the
-     `bg-primary` (and `bg-background`) classes on the button cascade
-     without an extra pale tint fighting them. */
 
-  /* Ensure habit cards have proper contrast.
-     NOTE: these rules previously used `hsl(var(--card))` etc., which
-     broke when --card migrated from a `H S L%` triple to a full
-     `oklch(...)` value in the Tailwind v4 token swap (D5). Use the
-     variable directly — it's already a valid CSS color. */
-  article {
-    background: var(--card);
-    border-color: var(--border);
+  /* Touch devices: widen the day columns to a comfortable tap size. */
+  @media (pointer: coarse) {
+    .habit-grid {
+      --day-col: 44px;
+    }
   }
 
-  article > div > div:first-child {
-    background: oklch(from var(--card) l c h / 0.95);
+  .habit-panel__empty {
+    padding: 3rem 1rem;
+    text-align: center;
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
   }
 
-  /* Sheet content styling */
-  [data-radix-dialog-content] {
-    background: var(--background);
+  /* Desktop-only no-op: the hint exists for the narrow-screen case. */
+  .habit-panel__scroll-hint {
+    display: none;
+  }
+
+  @media (max-width: 720px) {
+    .habit-panel__scroll-hint {
+      display: block;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--muted);
+      font-size: 0.6875rem;
+      color: var(--muted-foreground);
+    }
+  }
+
+  .habit-panel__clear {
+    display: inline-block;
+    margin-top: 0.5rem;
+    color: var(--primary);
+    font-weight: 500;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 </style>

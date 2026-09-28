@@ -1,12 +1,15 @@
 import asyncio
+import ipaddress
 import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from castor.app.app import init_auth_routes
-from castor.app.db import create_db_and_tables
+from castor.app.db import async_session_maker, create_db_and_tables
 from castor.app.reset_routes import router as reset_router
 from castor.configs import settings
 from castor.logger import logger
@@ -16,6 +19,26 @@ from castor.routes.metrics import init_metrics_routes
 from castor.scheduler import daily_backup_task
 
 logger.info("Starting Castor...")
+
+
+def _looks_like_ip_literal(host: str) -> bool:
+    """True when `host` is a bare IPv4/IPv6 literal rather than a name.
+
+    A WebAuthn relying-party ID must be a registrable domain suffix.
+    Browsers reject a literal IP outright, and the failure surfaces only
+    as an opaque "The operation is insecure" at the point of use, so it is
+    worth warning about at start-up instead. Verified directly: Firefox
+    refused `navigator.credentials.create` with rp.id="127.0.0.1" while
+    accepting rp.id="localhost" on the same page.
+    """
+    candidate = (host or "").strip().strip("[]")
+    if not candidate:
+        return False
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return False
+    return True
 
 
 @asynccontextmanager
@@ -33,6 +56,78 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("RESET_PASSWORD_TOKEN_SECRET must be set")
     if settings.NICEGUI_STORAGE_SECRET == "dev" or not settings.NICEGUI_STORAGE_SECRET:
         raise RuntimeError("NICEGUI_STORAGE_SECRET must be set to a strong random value (not 'dev')")
+
+    # ─── Derive the WebAuthn relying-party configuration ──────────────
+    #
+    # Must run BEFORE the consistency checks below, which read
+    # WEBAUTHN_ORIGIN / WEBAUTHN_RP_ID, and before any request is served.
+    # Fills a blank RP ID and origin from the declared public origin, so
+    # the relying party cannot drift away from the host the browser is
+    # actually on. An explicit setting is never overwritten.
+    settings.resolve_webauthn_settings()
+    # loguru uses {} placeholders, not %-style, and an unformatted
+    # logger.info would emit the raw template instead of the values.
+    logger.info(
+        "WebAuthn relying party: rpId={} origin={} (public origin={})",
+        settings.WEBAUTHN_RP_ID,
+        settings.WEBAUTHN_ORIGIN,
+        settings.public_origin() or "<undeclared>",
+    )
+
+    # ─── Deployment-boundary consistency checks ───────────────────────
+    #
+    # These are WARNINGS, not failures: refusing to boot would turn a
+    # misconfiguration into an outage on a deployment that is otherwise
+    # serving correctly, and every one of these has a working (if less
+    # secure or less convenient) alternative. But each one is a setting
+    # an operator believes they configured, which the code quietly does
+    # not honour — the class of gap that is invisible until it matters.
+    if settings.WEBAUTHN_ORIGIN.startswith("http://") and not settings.is_dev():
+        logger.warning(
+            "WEBAUTHN_ORIGIN is http:// on a non-dev deployment. Browsers "
+            "require a secure context for WebAuthn, so passkey sign-in and "
+            "enrolment will fail. Set WEBAUTHN_ORIGIN to your https origin "
+            "once TLS is terminated in front of the app."
+        )
+    if not settings.WEBAUTHN_RP_ID:
+        logger.warning(
+            "WEBAUTHN_RP_ID is empty. It must be the registrable domain of "
+            "WEBAUTHN_ORIGIN (no scheme, no port) or passkey ceremonies fail."
+        )
+    elif _looks_like_ip_literal(settings.WEBAUTHN_RP_ID):
+        logger.warning(
+            "WEBAUTHN_RP_ID={} is a bare IP address. A WebAuthn relying-party ID "
+            "must be a registrable domain suffix; browsers reject a literal IP. "
+            "Firefox was observed refusing every ceremony with 'The operation is "
+            "insecure' when the RP ID was an IP. Passkeys will not work until "
+            "this is a hostname. Until then the app is password-only.",
+            settings.WEBAUTHN_RP_ID,
+        )
+    if settings.is_https_public() and not settings.WEBAUTHN_ORIGIN.startswith("https://"):
+        logger.warning(
+            "The deployment is declared HTTPS (PUBLIC_URL/APP_URL/TLS_TERMINATED) "
+            "but WEBAUTHN_ORIGIN is not. WebAuthn compares the browser's origin "
+            "against WEBAUTHN_ORIGIN exactly, so every ceremony will be rejected "
+            "with 'Registration/Authentication verification failed'."
+        )
+    if settings.TRUST_PROXY_HEADERS and not settings.TRUSTED_PROXY_IPS.strip():
+        logger.warning(
+            "TRUST_PROXY_HEADERS is enabled but TRUSTED_PROXY_IPS is empty, so "
+            "forwarded headers will not actually be trusted by the ASGI server. "
+            "Set TRUSTED_PROXY_IPS to the proxy's address."
+        )
+    if settings.TRUSTED_PROXY_IPS.strip() == "*":
+        logger.error(
+            "TRUSTED_PROXY_IPS='*' trusts X-Forwarded-* from ANY client. If the "
+            "app's socket is reachable without passing through your proxy, anyone "
+            "can spoof the scheme and host. Use a CIDR or a hop count instead."
+        )
+    if settings.TRUST_PROXY_HEADERS and not settings.is_https_public():
+        logger.warning(
+            "TRUST_PROXY_HEADERS is enabled but the public origin is not https. "
+            "The cookie Secure flag is decided by PUBLIC_URL/APP_URL/TLS_TERMINATED, "
+            "not by the forwarded header, so cookies will not be marked Secure."
+        )
 
     # Enable warning msg
     if settings.DEBUG:
@@ -58,6 +153,26 @@ async def lifespan(_: FastAPI):
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        # F2: flush habit lists that are still sitting in the in-memory cache.
+        #
+        # Writes are acknowledged to the client as soon as the in-memory
+        # object is mutated, but reach SQLite on a debounce. On SIGTERM the
+        # process would otherwise exit with up to 5s of user-visible,
+        # already-confirmed writes still unpersisted — and nothing anywhere
+        # recorded that the loss happened.
+        #
+        # This runs in the lifespan `finally`, which uvicorn executes on
+        # graceful shutdown, so it only helps if gunicorn actually receives
+        # SIGTERM. The Dockerfile CMD was `exec node ...`, which discarded the
+        # shell's trap and got gunicorn SIGKILLed instead; docker/entrypoint.sh
+        # fixes that half.
+        try:
+            from castor.storage import get_user_dict_storage
+
+            await get_user_dict_storage().flush_all()
+            logger.info("Flushed pending habit-list writes on shutdown")
+        except Exception as exc:  # noqa: BLE001 - never block shutdown
+            logger.error(f"Failed to flush pending writes on shutdown: {exc}")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -65,8 +180,37 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health", response_class=PlainTextResponse, include_in_schema=False)
 async def health_check():
-    """Always-available health check endpoint for container health checks."""
-    return "OK"
+    """Readiness: asserts the dependency the service actually needs.
+
+    F8: this used to return a literal "OK" without touching anything, so it
+    reported healthy while gunicorn was dead, the SQLite file was corrupt or
+    locked, or the data volume had failed to mount. Because Docker's
+    `restart: unless-stopped` keys off this, that made every real outage
+    invisible and unmonitored.
+
+    A trivial `SELECT 1` is the cheapest possible proof that the database is
+    reachable and answering. It is deliberately not a deep integrity check —
+    that belongs on a schedule, not on a 30s poll.
+    """
+    try:
+        async with async_session_maker() as session:
+            await session.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        # Never leak connection strings or driver detail to the caller.
+        logger.error(f"Readiness check failed: {exc.__class__.__name__}")
+        return PlainTextResponse("UNAVAILABLE", status_code=503)
+    return PlainTextResponse("OK")
+
+
+@app.get("/live", response_class=PlainTextResponse, include_in_schema=False)
+async def liveness_check():
+    """Liveness: the process is running and can serve HTTP.
+
+    Deliberately static. A liveness probe that depends on the database would
+    restart the container during a transient database outage, turning a
+    recoverable blip into a crash-loop.
+    """
+    return PlainTextResponse("OK")
 
 
 if settings.is_dev():
@@ -110,14 +254,77 @@ app.include_router(admin_router)
 from castor.app.http_security import BrowserOriginMiddleware
 from castor.app.rate_limits import IPRateLimitMiddleware
 app.add_middleware(IPRateLimitMiddleware)
-app.add_middleware(BrowserOriginMiddleware, allowed_origins=settings.CSRF_ALLOWED_ORIGINS)
+app.add_middleware(
+    BrowserOriginMiddleware,
+    allowed_origins=settings.csrf_allowed_origins(),
+)
 
 
 if settings.SENTRY_DSN:
     logger.info("Setting up Sentry...")
-    import sentry_sdk
+    # F25: `sentry_sdk` is an OPTIONAL dependency but was imported inside this
+    # `if`, so a configured SENTRY_DSN on a venv without the package crashed
+    # the process at import time — a boot failure with no useful message,
+    # triggered by turning on error reporting. Optional integrations must fail
+    # soft and visibly, never take the app down.
+    #
+    # `send_default_pii=True` is also wrong for this app: it forwards request
+    # bodies, headers and user IPs to a third party, which conflicts with the
+    # privacy posture the audit recorded in F11 (no PII in logs). It is now
+    # opt-in, because enabling telemetry should not silently start exporting
+    # personal data.
+    try:
+        import sentry_sdk
+    except ImportError:
+        logger.error(
+            "SENTRY_DSN is set but the sentry-sdk package is not installed. "
+            "Install it with `uv sync --extra sentry` or add it to your "
+            "dependency group, or clear SENTRY_DSN to silence this. "
+            "Continuing WITHOUT error reporting."
+        )
+    else:
+        sentry_sdk.init(
+            settings.SENTRY_DSN,
+            # F11: default off. Habit data and emails are personal; sending
+            # them to a third party must be an explicit choice.
+            send_default_pii=settings.SENTRY_SEND_PII,
+        )
 
-    sentry_sdk.init(settings.SENTRY_DSN, send_default_pii=True)
+
+@app.middleware("http")
+async def durable_writes(request: Request, call_next):
+    """Make every acknowledged habit mutation durable before responding (F2).
+
+    F2 was that the API returned success as soon as the in-memory habit list
+    was mutated, while the write to SQLite happened on a debounce. A restart
+    inside that window silently discarded writes the user had already been
+    told were saved.
+
+    This is deliberately a single middleware choke point rather than an
+    explicit `await flush()` in each handler: a new mutating endpoint added
+    later would otherwise inherit the old, unsafe behaviour by omission. Every
+    non-GET request flushes here, and `flush()` is a no-op when nothing is
+    dirty, so reads and unrelated writes cost nothing.
+
+    A flush failure must NOT be reported as success — the user would again be
+    told a write was saved when it was not.
+    """
+    response = await call_next(request)
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return response
+
+    try:
+        from castor.storage import get_user_dict_storage
+
+        await get_user_dict_storage().flush_all()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Durability flush failed for {request.method} {request.url.path}: {exc}")
+        if response.status_code < 400:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Could not save your change. Please retry."},
+            )
+    return response
 
 
 @app.middleware("http")
@@ -137,14 +344,20 @@ async def security_headers(request: Request, call_next):
     """Add security headers to all responses."""
     response = await call_next(request)
     
-    # HSTS - only in production (non-dev)
-    if not settings.is_dev():
+    # HSTS — only when the deployment is actually declared HTTPS.
+    # Previously keyed on `not is_dev()`, which meant a production
+    # deployment that was still on plain HTTP (pre-TLS, during migration)
+    # advertised HSTS for a host it could not yet serve over https,
+    # which browsers treat as a signal to refuse http:// for the whole
+    # max-age. is_https_public() is the operator's declared truth and is
+    # the same input that decides the cookie Secure flag.
+    if settings.is_https_public():
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    
-    # CSP - allow ws: for WebSocket on HTTP connections, and allow eval/blob for module loading
+
+    # CSP — allow ws: for WebSocket on HTTP connections, and allow eval/blob for module loading
     # Check if we're likely behind HTTP (no TLS) - allow ws: for NiceGUI WebSocket
     # In production with TLS termination, HSTS will enforce HTTPS and wss: is sufficient
-    if settings.is_dev() or not getattr(settings, 'TLS_TERMINATED', False):
+    if not settings.is_https_public():
         csp = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://cdn.paddle.com; "

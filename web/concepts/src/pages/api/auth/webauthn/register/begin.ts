@@ -17,6 +17,7 @@
  */
 import type { APIRoute } from 'astro';
 import { readToken } from '../../../../../lib/auth';
+import { backendOrigin } from '../../../../../lib/auth';
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   const token = readToken(cookies);
@@ -35,7 +36,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   }
   const username = body.username ?? cookies.get('castor_user')?.value ?? '';
 
-  const origin = process.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();
   const backendRes = await fetch(new URL('/auth/webauthn/register/begin', origin), {
     method: 'POST',
     headers: {

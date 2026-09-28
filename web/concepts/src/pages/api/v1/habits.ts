@@ -4,7 +4,7 @@
  * Also accepts Authorization header for server-to-server calls.
  */
 import type { APIRoute } from 'astro';
-import { readToken } from '../../../lib/auth';
+import { backendOrigin, readToken } from '../../../lib/auth';
 
 function getToken(cookies: any, headers: Headers): string | null {
   // Check Authorization header first (for server-to-server calls)
@@ -25,7 +25,7 @@ export const GET: APIRoute = async ({ cookies, request }) => {
     });
   }
   
-  const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();;
   const res = await fetch(new URL('/api/v1/habits', origin), {
     headers: { 'Authorization': `Bearer ${token}` },
   });
@@ -67,7 +67,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   }
   
   const body = await request.json();
-  const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();;
   const res = await fetch(new URL('/api/v1/habits', origin), {
     method: 'POST',
     headers: { 

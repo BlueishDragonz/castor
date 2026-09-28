@@ -3,6 +3,37 @@ import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
 import node from '@astrojs/node';
 import tailwindcss from '@tailwindcss/vite';
+import sentry from '@sentry/astro';
+
+// F13: the audit found no monitoring at all — "no detection of any of the
+// above". Without this, an OOM kill or a boot failure after a deploy is found
+// out by a user, not by an operator.
+//
+// `authToken` is the SOURCE-MAP UPLOAD token, and is the only secret here.
+// Runtime error reporting needs only the public DSN and works without it.
+//
+// The integration is therefore ALWAYS registered. Gating it on the auth token
+// — the obvious reading of the setup guide — silently disables monitoring in
+// exactly the local and CI builds where you would want to catch a regression,
+// which is worse than not integrating at all, because the package appears
+// installed and nothing reports.
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
+
+const integrations = [
+  react(),
+  sentry({
+    project: 'castor-astro',
+    org: 'jr-w2',
+    // Without a token the integration still injects the client/server SDK and
+    // the SSR middleware; it just cannot upload source maps.
+    authToken: sentryAuthToken,
+    // Never leave sourcemaps in the shipped output: that would hand any
+    // visitor the full source of the application. The alternative to
+    // deleting them is to ship the app's source to the public.
+    sourcemaps: { filesToDeleteAfterUpload: ['./dist/**/*.map'] },
+    telemetry: false,
+  }),
+];
 
 // https://astro.build/config
 // - React integration: enables shadcn/ui (React) islands
@@ -27,7 +58,7 @@ export default defineConfig({
   output: 'server',
   adapter: node({ mode: 'standalone' }),
   server: { port: 4321, host: '0.0.0.0' },
-  integrations: [react()],
+  integrations,
   vite: {
     plugins: [tailwindcss()],
     server: {

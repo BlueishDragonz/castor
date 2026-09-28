@@ -1,20 +1,9 @@
 import type { APIRoute } from 'astro';
+import { backendOrigin } from '../../../../lib/auth';
 
 export const prerender = false;
 
-/**
- * POST /api/auth/webauthn/check
- *
- * Body: `{ username: string }`
- *
- * Probes whether a Castor's account has a registered passkey, and
- * whether the post-login "Set up a passkey?" offer has been dismissed.
- *
- * The endpoint is intentionally IDEMPOTENT and leak-free: a response
- * with `has_passkey: false` does NOT distinguish "user not registered"
- * from "user registered but no passkey". The frontend MUST treat both
- * shapes identically.
- */
+
 export const POST: APIRoute = async ({ request }) => {
   let body: { username?: string } | null = null;
   try {
@@ -33,10 +22,8 @@ export const POST: APIRoute = async ({ request }) => {
     );
   }
 
-  const origin =
-    import.meta.env.BACKEND_URL ||
-    import.meta.env.PUBLIC_BACKEND_URL ||
-    'http://localhost:8085';
+  // Resolved at runtime, not build time — see backendOrigin().
+  const origin = backendOrigin();
   try {
     const res = await fetch(new URL('/auth/webauthn/check', origin), {
       method: 'POST',

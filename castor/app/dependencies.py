@@ -2,7 +2,7 @@ from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security.utils import get_authorization_scheme_param
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_503_SERVICE_UNAVAILABLE
 
 from castor import views
 from castor.app.auth import (
@@ -79,7 +79,33 @@ async def current_active_user(
 async def current_admin_user(
     user: Annotated[User, Depends(current_active_user)],
 ) -> User:
-    if user.email != settings.ADMIN_EMAIL:
+    # F16: this compared `user.email != settings.ADMIN_EMAIL`. With
+    # ADMIN_EMAIL unset that is `user.email != ""`, which is True for every
+    # real account — so the admin surface was a permanent 401 with no way to
+    # recover except editing the environment and restarting. A latent lockout
+    # wearing the costume of a security control.
+    #
+    # It is now fail-CLOSED with an honest signal: an unset ADMIN_EMAIL means
+    # "no administrator is configured", which is a deployment error, not an
+    # authentication decision. It is logged loudly and the request is refused
+    # with 503 (not 401), because a 401 tells the operator to fix their
+    # credentials when the real problem is missing configuration.
+    #
+    # Comparing case-insensitively also avoids an admin being locked out by
+    # case differences between the env var and their address, which is exactly
+    # the kind of silent failure this is guarding against.
+    admin_email = (settings.ADMIN_EMAIL or "").strip()
+    if not admin_email:
+        logger.error(
+            "ADMIN_EMAIL is not configured, so no user can ever be an admin. "
+            "Set ADMIN_EMAIL to the address that should have admin access."
+        )
+        raise HTTPException(
+            status_code=HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin access is not configured on this server.",
+        )
+
+    if user.email.strip().lower() != admin_email.lower():
         logger.warning(
             f"User {user.email} tried to access admin endpoint without admin privileges."
         )

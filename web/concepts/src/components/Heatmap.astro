@@ -162,8 +162,24 @@ function getCellAriaLabel(date: Date): string {
 </div>
 <style is:global>
   /* Heatmap table styling */
+  /*
+   * Separate the day squares.
+   *
+   * The cells sat at `gap: 0` with a 20px square filling the whole <td>,
+   * so two adjacent completed days rendered as one continuous green bar
+   * — measured at exactly 0px between neighbours, which reads as a solid
+   * block rather than a calendar. GitHub's contribution graph separates
+   * its squares for the same reason: each day must read as one unit.
+   *
+   * The gap is created with `border-spacing` rather than cell padding,
+   * because a <td> with a background would otherwise grow the square and
+   * the row height. `border-spacing` adds space *between* cells and never
+   * inside them, so the 20px square stays 20px and the row stays 20px.
+   */
   table[role="grid"] {
     font-size: 0.625rem; /* 10px */
+    border-collapse: separate;
+    border-spacing: 2px;
   }
   
   table[role="grid"] th,

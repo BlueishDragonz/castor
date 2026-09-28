@@ -42,6 +42,8 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 import castor.main
 from castor import views
 from castor.app import db, reset_routes
+from castor.app.auth import user_from_token
+from sqlalchemy import select
 from castor.app.users import UserManager
 from castor.app.schemas import UserCreate
 from castor.app.app import init_auth_routes
@@ -366,10 +368,13 @@ class Slice5SecurityTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(before.status_code, 200, before.text)
 
-        # Delete account
-        r = await self.client.delete(
+        # Delete account. F18/F24: the password is mandatory and is verified
+        # against the account this bearer resolves to.
+        r = await self.client.request(
+            'DELETE',
             '/api/v1/account',
             headers={'Authorization': f'Bearer {token}'},
+            json={'password': PASSWORD},
         )
         self.assertEqual(r.status_code, 204, r.text)
 
@@ -391,6 +396,158 @@ class Slice5SecurityTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(r.status_code, 401, r.text)
 
+    async def test_delete_account_without_password_is_rejected(self):
+        """F18: a stolen session token alone must not destroy an account.
+
+        The password is the step-up proof. Omitting it (or sending an empty
+        one) must be rejected, and the account must survive untouched.
+        """
+        token = await self._login()
+
+        r = await self.client.delete(
+            '/api/v1/account',
+            headers={'Authorization': f'Bearer {token}'},
+        )
+        self.assertEqual(r.status_code, 422, r.text)
+
+        r = await self.client.request(
+            'DELETE',
+            '/api/v1/account',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'password': ''},
+        )
+        self.assertEqual(r.status_code, 422, r.text)
+
+        # The account is still fully alive and usable.
+        still_alive = await self.client.get(
+            '/api/v1/habits',
+            headers={'Authorization': f'Bearer {token}'},
+        )
+        self.assertEqual(still_alive.status_code, 200, still_alive.text)
+
+    async def test_delete_account_with_wrong_password_is_rejected(self):
+        """F18: a wrong password must not erase anything."""
+        token = await self._login()
+
+        r = await self.client.request(
+            'DELETE',
+            '/api/v1/account',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'password': 'not-the-right-password'},
+        )
+        self.assertEqual(r.status_code, 401, r.text)
+
+        still_alive = await self.client.get(
+            '/api/v1/habits',
+            headers={'Authorization': f'Bearer {token}'},
+        )
+        self.assertEqual(still_alive.status_code, 200, still_alive.text)
+
+    async def test_delete_account_erases_only_the_bearer_principal(self):
+        """F18 regression: an attacker's own password cannot destroy a victim.
+
+        This is the exact bypass from the audit. An attacker holds the
+        victim's castor_token, points the attacker-writable `castor_user`
+        cookie at an account they control, and submits THEIR OWN valid
+        password — which they know, and which is NOT the victim's password.
+
+        Pre-fix: the BFF verified that password against `castor_user`
+        (the attacker's own account, so it passed) and then deleted
+        `castor_token`'s account — the victim. The password prompt the
+        victim saw was never consulted against their account.
+
+        Post-fix: the backend resolves the principal from the bearer and
+        verifies the password against THAT account's hash, so the
+        attacker's password fails and the victim survives.
+        """
+        attacker_email = 'f18-attacker@victim.example'
+        attacker_password = 'attacker-only-password-9f3c'
+        reg = await self.client.post(
+            '/auth/register',
+            json={'email': attacker_email, 'password': attacker_password},
+        )
+        self.assertEqual(reg.status_code, 201, reg.text)
+        attacker_login = await self.client.post(
+            '/auth/login',
+            data={'username': attacker_email, 'password': attacker_password},
+            headers={'content-type': 'application/x-www-form-urlencoded'},
+        )
+        self.assertEqual(attacker_login.status_code, 200, attacker_login.text)
+        attacker_token = attacker_login.json()['access_token']
+
+        # The victim is this suite's fixture user, whose password is PASSWORD.
+        # The attacker does not know it.
+        self.assertNotEqual(attacker_password, PASSWORD)
+        victim_token = await self._login()
+        await self.client.get(
+            '/api/v1/habits', headers={'Authorization': f'Bearer {victim_token}'}
+        )
+
+        r = await self.client.request(
+            'DELETE',
+            '/api/v1/account',
+            headers={
+                'Authorization': f'Bearer {victim_token}',
+                # The attacker-supplied identity channel, pointing at an
+                # account they control.
+                'Cookie': f'castor_user={attacker_email}',
+            },
+            json={'password': attacker_password},
+        )
+        # The attacker's password is not the victim's, so the step-up fails
+        # and nothing is deleted.
+        self.assertEqual(r.status_code, 401, r.text)
+
+        # Victim survives, fully intact.
+        victim_habits = await self.client.get(
+            '/api/v1/habits', headers={'Authorization': f'Bearer {victim_token}'}
+        )
+        self.assertEqual(victim_habits.status_code, 200, victim_habits.text)
+
+        # Attacker is also untouched: the request must not have "succeeded"
+        # by deleting the wrong account. /users/me proves the account and its
+        # credentials are still live (a deleted account is archived and
+        # disabled, so its token stops authenticating).
+        attacker_me = await self.client.get(
+            '/users/me', headers={'Authorization': f'Bearer {attacker_token}'}
+        )
+        self.assertEqual(attacker_me.status_code, 200, attacker_me.text)
+
+    async def test_delete_account_removes_passkeys_explicitly(self):
+        """F24/F9: erasure covers every personal row, not just the habit list.
+
+        WebAuthn credentials are deleted explicitly rather than relying on FK
+        cascades, which SQLite does not enforce unless foreign_keys=ON.
+        """
+        token = await self._login()
+        user = await user_from_token(token)
+        assert user is not None
+        user_id = user.id
+
+        cred_id = b'\x01' * 32
+        async with db.async_session_maker() as session:
+            session.add(db.WebAuthnCredential(
+                id=cred_id,
+                user_id=user_id,
+                public_key=b'\x02' * 32,
+                transports=[],
+            ))
+            await session.commit()
+
+        r = await self.client.request(
+            'DELETE',
+            '/api/v1/account',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'password': PASSWORD},
+        )
+        self.assertEqual(r.status_code, 204, r.text)
+
+        async with db.async_session_maker() as session:
+            creds = (await session.execute(
+                select(db.WebAuthnCredential).where(db.WebAuthnCredential.id == cred_id)
+            )).scalars().all()
+            self.assertEqual(creds, [], 'passkeys must not survive account deletion')
+
     async def test_delete_account_blocks_relogin_with_same_email(self):
         """After account deletion, the email cannot be re-registered.
         Either 400 'already exists' or the registration just succeeds with
@@ -398,9 +555,11 @@ class Slice5SecurityTests(unittest.IsolatedAsyncioTestCase):
         The crucial property: the OLD data (habits, ticks) is gone."""
         token = await self._login()
 
-        await self.client.delete(
+        await self.client.request(
+            'DELETE',
             '/api/v1/account',
             headers={'Authorization': f'Bearer {token}'},
+            json={'password': PASSWORD},
         )
 
         # Try to register with same email

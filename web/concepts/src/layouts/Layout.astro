@@ -10,6 +10,7 @@
  */
 import '../styles/tokens.css';
 import BottomNav from '../components/BottomNav.astro';
+import AppHeader from '../components/AppHeader.astro';
 
 interface Props {
   title?: string;
@@ -23,6 +24,12 @@ const {
 
 // Theme defaults to "light" until /api/account/me reports otherwise.
 const theme = Astro.cookies.get('castor-theme')?.value ?? 'light';
+
+// Whether this page belongs to the signed-in app shell. The session is
+// populated by the middleware; a stale/absent session simply means the
+// page renders without navigation rather than redirecting here (the
+// individual pages own their own auth guards).
+const isAppShell = !!Astro.locals.session;
 
 // Umami analytics — ported from beaverhabits/frontend/layout.py:48-51.
 // Conditional: when PUBLIC_UMAMI_ANALYTICS_ID is set, inject the
@@ -61,7 +68,12 @@ const umamiEnabled = !!umamiId;
 
     <title>{title}</title>
   </head>
-  <body class="min-h-screen antialiased"><slot />{Astro.locals.session && (<>
-        <BottomNav />
-      </>)}</body>
+  <body class="min-h-screen antialiased">
+    {isAppShell && (<>
+      <a href="#main" class="castor-sr-only">Skip to main content</a>
+      <AppHeader pathname={Astro.url.pathname} email={Astro.locals.session?.email} />
+    </>)}
+    <slot />
+    {isAppShell && <BottomNav />}
+  </body>
 </html>

@@ -21,7 +21,14 @@ RUN sh /uv-installer.sh && rm /uv-installer.sh
 ENV PATH="/root/.local/bin/:$PATH"
 
 COPY uv.lock pyproject.toml ./
-RUN uv sync --frozen --no-install-project --no-dev -v
+# F25/F13: `--extra sentry` is required, not optional.
+#
+# Without it the production image has no sentry-sdk, and the app logs
+# "SENTRY_DSN is set but the sentry-sdk package is not installed" on every
+# boot — the graceful-degradation path working exactly as designed, while
+# silently providing no error reporting at all. That is the worst outcome:
+# a monitoring control that is installed, configured, and inert.
+RUN uv sync --frozen --no-install-project --no-dev --extra sentry -v
 
 # [Experimental] Remove unused nicegui libs
 ENV NICEGUI_LIB_PATH="$VENV_PATH/lib/python*/site-packages/nicegui/elements/lib"
@@ -48,7 +55,13 @@ done
 # Node 22.12.0 is the minimum required by @astrojs/node@^11 + astro@^7
 # per web/concepts/package.json engines.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22.12-bookworm-slim AS astro-builder
+# F20: was node:22.12-bookworm-slim, a December 2024 build. That binary is
+# copied verbatim into production and runs as PID 1 on the public port, so a
+# ~21-month-stale runtime meant missing every Node 22.x security release
+# accumulated since. Pinned to the current 22.x LTS line (Jod); staying on 22
+# rather than jumping to 24 keeps this a patch-level runtime change instead of
+# a major-version migration in the same deploy.
+FROM node:22.23-bookworm-slim AS astro-builder
 WORKDIR /build
 # Install pnpm directly via npm instead of corepack. node:22.12's
 # bundled corepack has a stale npm signing-key keyring and hard-fails
@@ -67,19 +80,52 @@ RUN npm install -g pnpm@12.5.1
 # Verified in a clean-dir repro before patching (2026-09-25).
 COPY web/concepts/package.json web/concepts/pnpm-lock.yaml web/concepts/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
+# F19: .dockerignore now excludes node_modules, but never rely on a single
+# ignore file for supply-chain integrity — a developer editing it, or a build
+# invoked with a different context, would silently ship an unverified
+# dependency tree. Delete any node_modules that arrived with the context before
+# building, so the only dependency tree in the image is the one pnpm just
+# installed from the committed lockfile.
 COPY web/concepts ./
-# BACKEND_URL as a BUILD env (declared after the cached dependency
-# layers so changing it doesn't re-run pnpm install): Vite inlines
-# import.meta.env.* at build time (unlike process.env, read at
-# runtime). ~15 server files (pages/api/v1/habits*.ts,
-# habits/[id].astro, tokens.astro, ...) use
-# import.meta.env.BACKEND_URL and silently fell back to dev's
-# localhost:8085 in the built image — the habits BFF 500'd in the
-# Phase-4 Docker smoke until this was set. Value matches the
-# production-stage ENV and docker-compose BACKEND_URL.
-# Trade-off: changing the backend port now requires an image rebuild.
-ENV BACKEND_URL=http://127.0.0.1:8081
-RUN pnpm exec astro build
+RUN rm -rf node_modules && pnpm install --frozen-lockfile
+
+# NOTE: no BACKEND_URL here, deliberately.
+#
+# This stage used to set `ENV BACKEND_URL=http://127.0.0.1:8081` to work
+# around ~15 server files reading `import.meta.env.BACKEND_URL`, which
+# Vite inlines at build time; without it the built image baked in dev's
+# localhost:8085 and the habits BFF 500'd until it was added. The
+# trade-off was that changing the backend port then required an image
+# rebuild, and the literal was frozen into the emitted SSR chunks.
+#
+# That trade-off is gone. Every call site now goes through
+# backendOrigin() in src/lib/auth.ts, which reads process.env at
+# runtime, so BACKEND_URL is supplied by the production-stage ENV and
+# docker-compose instead. Setting it here would reintroduce exactly the
+# build-time freezing this removed.
+
+# F13: Sentry source-map upload token.
+#
+# Passed via a BuildKit SECRET MOUNT, not ARG and not ENV.
+#
+# Two earlier approaches were wrong, and the reasons are worth recording:
+#
+#  - ARG alone: `docker build --build-arg` is accepted even when the Dockerfile
+#    declares no matching ARG, so the token is silently discarded. The build
+#    succeeds with no warning and no source maps are uploaded.
+#
+#  - Inline env var on the RUN: buildkit expands and echoes the RUN command
+#    line into the build log, so the token lands in plaintext in
+#    /tmp/deploy-build.log. It did exactly that on the first real build.
+#
+# A secret mount writes the token to a tmpfs at /run/secrets for the duration
+# of the RUN only. It is not in the layer, not in the image, not in the
+# build log, and not in `docker history`. Nothing to forget to clean up.
+#
+# The RUN references the value, never the secret itself.
+RUN --mount=type=secret,id=sentry_token \
+    SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_token)" \
+    pnpm exec astro build
 
 
 FROM python-base AS production
@@ -91,12 +137,14 @@ FROM python-base AS production
 # apt: libstdc++6 explicitly because slim images don't include it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libstdc++6 \
+        tini \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY --from=astro-builder /usr/local/bin/node /usr/local/bin/node
 EXPOSE 8080
 COPY --from=builder-base $PYSETUP_PATH $PYSETUP_PATH
 WORKDIR /app
 COPY start.sh .
+COPY docker/entrypoint.sh ./docker/entrypoint.sh
 COPY castor ./castor
 COPY healthcheck.py .
 
@@ -109,22 +157,67 @@ COPY --from=astro-builder /build/package.json /app/web/concepts/package.json
 # Backend listens on 8081 (internal only); Astro listens on 8080 (the
 # published port). BACKEND_URL points Astro at the local backend so
 # backendFetch() in Astro pages and BFF routes can talk to it.
+#
+# FRONTEND_URL is the operator-declared PUBLIC origin and is left unset
+# here on purpose. It is the value that decides the Secure cookie flag
+# and the CSRF Origin assertion, so a default baked into the image would
+# silently override whatever the deployment actually serves. Set it at
+# run time (docker-compose does: FRONTEND_URL=http://10.8.0.1:8080).
+# When it is absent the app falls back to the inbound request origin,
+# which is correct for local use and is what a future reverse proxy
+# deployment should set explicitly.
 ENV BACKEND_URL=http://127.0.0.1:8081 \
     HOST=0.0.0.0 \
     PORT=8080
 
 RUN chmod -R g+w /app && \
+    chmod +x /app/docker/entrypoint.sh && \
     chown -R nobody /app
 USER nobody
 
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+# timeout=3s was too tight on the 954 MB apollo host: the probe costs ~2s
+# (interpreter startup + one HTTP round trip), so a busy host reported the
+# container unhealthy while it was serving perfectly — a phantom outage that
+# sends an operator hunting a fault that does not exist.
+#
+# 10s is still well inside the 30s interval, so a genuinely dead container is
+# detected within one interval either way. The probe's own 2s socket timeout
+# means a hung service fails fast regardless.
+#
+# start-period is 90s because the app does not bind :8080 until after
+# create_db_and_tables, gunicorn fork and the demo seed — measured at ~70s from
+# container start on apollo, and 45s produced three spurious failures before
+# the first success. Failing checks during the start period do not count
+# towards the failure streak, so this removes a misleading "unhealthy" blip
+# from every single restart without masking a genuine later failure.
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=90s \
     CMD python healthcheck.py
 
-# Supervisor pattern: gunicorn (backend, internal :8081) in the
-# background, Astro (frontend, public :8080) on PID 1. trap forwards
-# SIGTERM to gunicorn so `docker stop` cleanly terminates both.
+# DRIFT-1 (audit 2026-09-26): the running image was built from a directory
+# that was not a git repository, so there was no reliable way to say which
+# commit was deployed — the correspondence was established by hand, by the
+# auditor, not by any build-time mechanism. Anything running this image can now
+# answer that question directly:
 #
-# `exec` on the Astro node process gives it PID 1 so it receives
-# signals directly; the gunicorn background process is tracked via
-# $BACKEND_PID for the trap.
-CMD ["sh", "-c", "gunicorn castor.main:app --bind 127.0.0.1:8081 -w 1 -k uvicorn_worker.UvicornWorker --max-requests 10000 --log-level info & BACKEND_PID=$!; trap 'kill $BACKEND_PID 2>/dev/null' EXIT INT TERM; exec node web/concepts/dist/server/entry.mjs"]
+#   docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' castor
+#
+# Defaults to "unknown" so a build that forgets to pass the SHA is visibly
+# unlabelled rather than silently mislabelled.
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.source="castor"
+
+# Supervisor: gunicorn (backend, internal :8081) and Astro (frontend, public
+# 8080) in one container.
+#
+# F2: this used to be an inline `sh -c "... & BACKEND_PID=$!; trap ...; exec
+# node ..."`. The `exec` replaced the shell, discarding the trap, so
+# `docker stop` never signalled gunicorn — it was SIGKILLed by the kernel and
+# the pending habit-list writes it held in memory were lost, after the API had
+# already acknowledged them. See docker/entrypoint.sh for the full rationale.
+#
+# tini is PID 1 (`-g` passes signals to the entrypoint's process group). A
+# shell as PID 1 cannot reap orphaned children, so a dead worker would
+# otherwise linger as a zombie and creep the container's process count up.
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["/app/docker/entrypoint.sh"]

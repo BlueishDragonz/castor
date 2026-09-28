@@ -5,12 +5,13 @@ import uuid
 from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 
 from castor.logger import logger
 
 from .db import (
     HabitListModel,
+    RegistrationCapacity,
     User,
     UserApiTokenModel,
     UserConfigsModel,
@@ -22,14 +23,68 @@ from .db import (
 get_async_session_context = contextlib.asynccontextmanager(get_async_session)
 
 
+def _email_ref(email: str | None) -> str:
+    """Log-safe reference to an email address.
+
+    F11: ad-hoc log lines were interpolating whole User objects and identity
+    rows, which put every customer email into unbounded, unrotated logs. The
+    audit trail (castor/app/audit.py) already refuses to record emails or IPs
+    by construction; that discipline was never carried into these lines. A
+    non-reversible digest is enough to correlate log lines with a row without
+    disclosing the address.
+    """
+    if not email:
+        return "-"
+    return hashlib.sha256(email.lower().encode()).hexdigest()[:12]
+
+
 def _hash_token(token: str) -> str:
     """Hash API token with SHA-256 for storage."""
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-async def update_user_habit_list(user: User, data: dict) -> None:
+class HabitListConflict(Exception):
+    """A concurrent writer committed first (optimistic-lock CAS failed)."""
+
+
+async def update_user_habit_list(
+    user: User, data: dict, expected_version: int | None = None
+) -> int:
+    """Persist a habit list, guarding against lost updates (F4).
+
+    Returns the version the row is now at.
+
+    ``expected_version`` makes the write a compare-and-swap: the UPDATE only
+    matches if nobody else has committed since the caller read the row. A zero
+    rowcount raises :class:`HabitListConflict` so the caller can re-read and
+    re-apply rather than silently discarding the other writer's changes.
+
+    ``expected_version=None`` means "unconditional" and is used only for the
+    initial insert path, where there is no prior version to protect.
+    """
     async with get_async_session_context() as session:
         assert data, "Habit list data cannot be empty"
+
+        if expected_version is not None:
+            # F4: conditional UPDATE — the compare-and-swap that makes
+            # concurrent writers detectable instead of silently overwriting.
+            result = await session.execute(
+                update(HabitListModel)
+                .where(
+                    HabitListModel.user_id == user.id,
+                    HabitListModel.version == expected_version,
+                )
+                .values(data=data, version=HabitListModel.version + 1)
+                .execution_options(synchronize_session=False)
+            )
+            if result.rowcount == 1:
+                await session.commit()
+                return expected_version + 1
+            # Either the row vanished or someone else moved the version on.
+            await session.rollback()
+            raise HabitListConflict(
+                f"habit list for user {user.id} changed since version {expected_version}"
+            )
 
         stmt = select(HabitListModel).where(HabitListModel.user_id == user.id)
         result = await session.execute(stmt)
@@ -42,15 +97,17 @@ async def update_user_habit_list(user: User, data: dict) -> None:
             )
             await session.commit()
             logger.info(f"[CRUD] User {user.id} habit list created")
-            return
+            return 0
 
         if habit_list.data == data:
-            logger.warning(f"[CRUD] User {user.id} habit list unchanged")
-            return
+            logger.info(f"[CRUD] User {user.id} habit list unchanged")
+            return habit_list.version
 
         habit_list.data = data
+        habit_list.version += 1
         await session.commit()
-        logger.info(f"[CRUD] User {user.id} habit list updated")
+        logger.info(f"[CRUD] User {user.id} habit list updated (v{habit_list.version})")
+        return habit_list.version
 
 
 async def get_user_habit_list(user: User) -> HabitListModel | None:
@@ -63,11 +120,82 @@ async def get_user_habit_list(user: User) -> HabitListModel | None:
 
 async def get_user_count() -> int:
     async with get_async_session_context() as session:
-        stmt = select(User)
-        result = await session.execute(stmt)
-        user_count = len(result.all())
+        # COUNT, not a full SELECT: this is a number, not rows. The old form
+        # materialised every user to call len() on the result, which is O(users)
+        # memory for a single integer.
+        result = await session.execute(select(func.count()).select_from(User))
+        user_count = int(result.scalar_one())
         logger.info(f"[CRUD] User count query: {user_count}")
         return user_count
+
+
+async def try_claim_registration_seat(limit: int) -> bool:
+    """Atomically claim one registration seat. True if granted (F17).
+
+    The check and the increment are a single conditional UPDATE, so two
+    concurrent registrations cannot both observe the same pre-count and both
+    proceed. Under SQLite the write lock serialises them and the loser's WHERE
+    clause is re-evaluated against the committed value.
+
+    Returns False when the instance is full. The caller must then release the
+    seat if the subsequent user creation fails, or the instance leaks capacity
+    and eventually refuses everyone.
+    """
+    if limit < 0:
+        return True  # documented "unlimited"
+
+    async with get_async_session_context() as session:
+        # Seed from the true count on first use, so an existing deployment
+        # starts at the right number rather than zero. Doing this inside the
+        # same transaction as the claim means the seed cannot itself race.
+        real_count = int(
+            (await session.execute(select(func.count()).select_from(User))).scalar_one()
+        )
+        existing = (
+            await session.execute(
+                select(RegistrationCapacity).where(RegistrationCapacity.id == 1)
+            )
+        ).scalar_one_or_none()
+
+        if existing is None:
+            session.add(RegistrationCapacity(id=1, seats_taken=real_count))
+            await session.flush()
+            await session.commit()
+            # Fall through to the same claim so seeding alone cannot bypass
+            # the limit when the instance is already at capacity.
+        elif existing.seats_taken < real_count:
+            # Somebody registered without the cap in force (limit was -1, or a
+            # row was added by an admin). Trust the larger of the two.
+            existing.seats_taken = real_count
+            await session.commit()
+
+        result = await session.execute(
+            update(RegistrationCapacity)
+            .where(RegistrationCapacity.id == 1, RegistrationCapacity.seats_taken < limit)
+            .values(seats_taken=RegistrationCapacity.seats_taken + 1)
+        )
+        claimed = result.rowcount == 1
+        await session.commit()
+        if claimed:
+            logger.info(f"[CRUD] Registration seat claimed (limit {limit})")
+        else:
+            logger.error(f"Registration seat refused: at capacity (limit {limit})")
+        return claimed
+
+
+async def release_registration_seat() -> None:
+    """Return a seat claimed by ``try_claim_registration_seat``.
+
+    Called when user creation fails after the seat was granted, so a transient
+    database error cannot permanently consume capacity.
+    """
+    async with get_async_session_context() as session:
+        await session.execute(
+            update(RegistrationCapacity)
+            .where(RegistrationCapacity.id == 1, RegistrationCapacity.seats_taken > 0)
+            .values(seats_taken=RegistrationCapacity.seats_taken - 1)
+        )
+        await session.commit()
 
 
 async def get_user_list() -> Sequence[User]:
@@ -85,7 +213,7 @@ async def get_customer_list() -> Sequence[UserIdentityModel]:
         stmt = select(UserIdentityModel).order_by(UserIdentityModel.updated_at.desc())
         result = await session.execute(stmt)
         customer_list = result.scalars().all()
-        logger.info(f"[CRUD] Customer list query: {customer_list}")
+        logger.info(f"[CRUD] Customer list query: {len(customer_list)} identities")
         return customer_list
 
 
@@ -94,7 +222,7 @@ async def get_user_identity(email: str) -> UserIdentityModel | None:
         stmt = select(UserIdentityModel).where(UserIdentityModel.email == email)
         result = await session.execute(stmt)
         user_identity = result.scalar()
-        logger.info(f"[CRUD] User identity query: {user_identity}")
+        logger.info(f"[CRUD] User identity query: {_email_ref(email)}")
         return user_identity
 
 
@@ -131,9 +259,9 @@ async def get_or_create_user_identity(
             )
             session.add(user_identity)
             await session.commit()
-            logger.info(f"[CRUD] User identity created: {user_identity}")
+            logger.info(f"[CRUD] User identity created: {_email_ref(email)}")
         else:
-            logger.info(f"[CRUD] User identity query: {user_identity}")
+            logger.info(f"[CRUD] User identity query: {_email_ref(email)}")
 
         return user_identity
 
@@ -151,7 +279,7 @@ async def update_user_identity(customer_id: str, data: dict, activate: bool) -> 
         user_identity.data = data
         user_identity.activated = activate
         await session.commit()
-        logger.info(f"[CRUD] User identity updated: {user_identity}")
+        logger.info(f"[CRUD] User identity updated: customer_id={customer_id}")
 
 
 async def delete_user_identity(email: str) -> None:
@@ -162,7 +290,7 @@ async def delete_user_identity(email: str) -> None:
         if user_identity:
             await session.delete(user_identity)
             await session.commit()
-            logger.info(f"[CRUD] User identity deleted: {email}")
+            logger.info(f"[CRUD] User identity deleted: {_email_ref(email)}")
 
 
 async def delete_user_owned_data(user: User) -> None:
@@ -211,7 +339,7 @@ async def save_user_image(user: User, image: bytes) -> UserNoteImageModel:
         )
         session.add(user_image)
         await session.commit()
-        logger.info(f"[CRUD] User {user} image saved: {user_image.unique_id}")
+        logger.info(f"[CRUD] User {user.id} image saved: {user_image.unique_id}")
         return user_image
 
 
@@ -223,9 +351,14 @@ async def get_user_image(uuid: UUID, user: User) -> UserNoteImageModel | None:
         result = await session.execute(stmt)
         user_image = result.scalar()
         if user_image:
-            logger.info(f"[CRUD] User {user} image retrieved: {user_image.unique_id}")
-        else:
-            logger.warning(f"[CRUD] User {user.id} image not found: {uuid}")
+            logger.info(f"[CRUD] User {user.id} image retrieved: {user_image.unique_id}")
+            return user_image
+
+        # F12: this branch used to fall off the end and implicitly return
+        # None for BOTH cases, so image retrieval was permanently broken
+        # while saving worked. Return the row explicitly and None otherwise.
+        logger.warning(f"[CRUD] User {user.id} image not found: {uuid}")
+        return None
 
 
 async def get_user_api_token(user: User) -> str | None:

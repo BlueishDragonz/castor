@@ -2,6 +2,7 @@
 // POST /api/v1/habits/reorder
 // Body: { habit_ids: string[] }
 import type { APIRoute } from 'astro';
+import { backendOrigin } from '../../../../lib/auth';
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   const token = cookies.get('castor_token')?.value;
@@ -23,7 +24,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       });
     }
 
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const origin = backendOrigin();;
     
     // Update each habit's position
     for (let i = 0; i < habit_ids.length; i++) {

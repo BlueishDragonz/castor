@@ -116,5 +116,22 @@ class UserDiskStorage(UserStorage[DictHabitList]):
         if persistent_dict is not None:
             await persistent_dict.delete()
             return
-
+        # No cache entry: remove the backing file directly.
         self._path_for(user).unlink(missing_ok=True)
+
+    async def flush_all(self) -> None:
+        """Rewrite every cached user file.
+
+        The disk backend is not used in production (HABITS_STORAGE=DATABASE),
+        but the storage factory returns this class for USER_DISK, so it must
+        honour the same durability contract as the database backend: a write is
+        only acknowledged once it is on its backing store.
+        """
+        for persistent_dict in list(self.user.values()):
+            if persistent_dict._deleted:
+                continue
+            content = json.dumps(persistent_dict, indent=persistent_dict.indent)
+            async with aiofiles.open(
+                persistent_dict.filepath, "w", encoding=persistent_dict.encoding
+            ) as f:
+                await f.write(content)

@@ -18,7 +18,8 @@ import {
 } from '../components/ui/card';
 import Heatmap from '../components/Heatmap.astro';
 import PageHeader from '../components/PageHeader.astro';
-import { DesktopMenu } from '../components/DesktopMenu.tsx';
+import { describePeriod } from '../lib/period';
+import type { HabitPeriod } from '../lib/period';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -38,7 +39,7 @@ interface Habit {
     };
   }>;
   status: string;
-  period?: { frequency: number; interval: 'day' | 'week' | 'month' } | null;
+  period?: HabitPeriod | null;
 }
 
 let habits: Habit[] = [];
@@ -166,22 +167,22 @@ const defaultStartIso = isoDate(defaultStart);
 // above): days[d*WEEKS+w] is the date for weekday d, week w. We label
 // each column by the most-recent day in it — the Sunday (weekday 6)
 // that closes the week.
+//
+// The previous version tracked `lastYear` but never assigned to it, so
+// the year branch fired on every week that shared a month with its
+// predecessor and the year label was pushed into a random column
+// (rendered as a stray "2026" between "Jun" and "Jul"). Month now wins
+// when both changed, which is the only case worth labelling.
 const heatmapHeaders: string[] = [];
 let lastMonth = -1;
-let lastYear = -1;
 for (let w = 0; w < WEEKS_TO_DISPLAY; w++) {
   const d = heatmapDays[(DAYS_IN_WEEK - 1) * WEEKS_TO_DISPLAY + w];
   if (d.getMonth() !== lastMonth) {
     heatmapHeaders.push(d.toLocaleDateString('en-GB', { month: 'short' }));
     lastMonth = d.getMonth();
-    continue;
+  } else {
+    heatmapHeaders.push('');
   }
-  if (d.getFullYear() !== lastYear) {
-    heatmapHeaders.push(d.getFullYear().toString());
-    lastYear = d.getFullYear();
-    continue;
-  }
-  heatmapHeaders.push('');
 }
 
 const baseWeekDayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -191,9 +192,18 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
 
 ---
 <Layout title="Stats — Castor">
-  <main class="mx-auto max-w-2xl px-6 py-12 space-y-8">
+  <main id="main" class="castor-page">
     <PageHeader title="Stats" back="/habits">
-      <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />
+      <Fragment slot="actions">
+        {rangeActive && (
+          <a
+            href="/stats"
+            class="inline-flex h-10 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+          >
+            Clear range
+          </a>
+        )}
+      </Fragment>
     </PageHeader>
 
     {loadError && (
@@ -205,7 +215,7 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
     {!loadError && habits.length === 0 && (
       <Card>
         <CardHeader>
-          <CardTitle>No stats yet</CardTitle>
+          <CardTitle as="h2">No stats yet</CardTitle>
           <CardDescription>
             Add a habit to start tracking stats.
           </CardDescription>
@@ -214,77 +224,116 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
     )}
 
     {!loadError && habits.length > 0 && (
-      <div class="space-y-4">
-        <div
-          class="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3 text-sm"
-          data-testid="date-range-picker"
-        >
-          <div class="flex flex-col gap-1">
-            <label for="preset-start" class="text-xs text-muted-foreground">Preset</label>
+      <div class="castor-stack">
+        {/*
+          A legend, because the heatmap encodes state purely as colour.
+          Without it a first-time reader cannot tell "not done" from
+          "outside the window" from "loading". The labels are text, so
+          the meaning does not depend on perceiving the swatches.
+        */}
+        <div class="stats-legend" aria-label="Heatmap key">
+          <span class="stats-legend__label">Key</span>
+          <span class="stats-legend__item">
+            <span class="stats-legend__swatch is-done" aria-hidden="true"></span>
+            Completed
+          </span>
+          <span class="stats-legend__item">
+            <span class="stats-legend__swatch is-missed" aria-hidden="true"></span>
+            Not completed
+          </span>
+          <span class="stats-legend__item">
+            <span class="stats-legend__swatch is-today" aria-hidden="true"></span>
+            Today
+          </span>
+        </div>
+        {/*
+          One <form> wrapping all three controls, so the range picker
+          submits as a single unit and the Preset select can carry the
+          start/end it computes instead of navigating on its own. The
+          previous markup nested a <form> inside a plain <div> that
+          itself sat inside the legend/panel, so the preset dropdown and
+          the date fields were two disconnected controls.
+        */}
+        <form method="get" class="stats-range" data-testid="date-range-picker">
+          <div class="stats-range__field">
+            <label for="preset-start" class="stats-range__label">Quick range</label>
             <select
               id="preset-start"
-              class="rounded-md border bg-background px-2 py-1 text-sm"
+              name="preset"
+              class="stats-range__control"
               onchange="
                 const v = this.value;
                 if (!v) return;
                 const today = new Date();
-                let start = new Date(today);
+                const start = new Date(today);
                 if (v === '3m') start.setMonth(today.getMonth() - 3);
                 else if (v === '6m') start.setMonth(today.getMonth() - 6);
                 else if (v === '12m') start.setMonth(today.getMonth() - 12);
                 else if (v === '24m') start.setFullYear(today.getFullYear() - 2);
                 else return;
-                const fmt = d => d.toISOString().split('T')[0];
-                window.location.search = `?start=${fmt(start)}&end=${fmt(today)}`;
+                // Local-date formatting. toISOString() converts to UTC,
+                // which shifts the day for anyone east or west of
+                // Greenwich and made the preset land a day off the one
+                // the user asked for.
+                const fmt = d =>
+                  d.getFullYear() + '-' +
+                  String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                  String(d.getDate()).padStart(2, '0');
+                this.form.start.value = fmt(start);
+                this.form.end.value = fmt(today);
+                this.form.submit();
               "
             >
-              <option value="">Pick a range…</option>
+              <option value="">Choose a range</option>
               <option value="3m">Last 3 months</option>
               <option value="6m">Last 6 months</option>
               <option value="12m">Last 12 months</option>
               <option value="24m">Last 24 months</option>
             </select>
           </div>
-          <form method="get" class="flex flex-wrap items-end gap-3">
-            <div class="flex flex-col gap-1">
-              <label for="start" class="text-xs text-muted-foreground">Start</label>
-              <input
-                type="date"
-                id="start"
-                name="start"
-                value={rawStart ?? ''}
-                max={rawEnd ?? todayIso}
-                class="rounded-md border bg-background px-2 py-1 text-sm"
-              />
-            </div>
-            <div class="flex flex-col gap-1">
-              <label for="end" class="text-xs text-muted-foreground">End</label>
-              <input
-                type="date"
-                id="end"
-                name="end"
-                value={rawEnd ?? ''}
-                min={rawStart ?? ''}
-                max={todayIso}
-                class="rounded-md border bg-background px-2 py-1 text-sm"
-              />
-            </div>
+
+          <div class="stats-range__field">
+            <label for="start" class="stats-range__label">From</label>
+            <input
+              type="date"
+              id="start"
+              name="start"
+              value={rawStart ?? ''}
+              max={rawEnd ?? todayIso}
+              class="stats-range__control"
+            />
+          </div>
+
+          <div class="stats-range__field">
+            <label for="end" class="stats-range__label">To</label>
+            <input
+              type="date"
+              id="end"
+              name="end"
+              value={rawEnd ?? ''}
+              min={rawStart ?? ''}
+              max={todayIso}
+              class="stats-range__control"
+            />
+          </div>
+
+          <div class="stats-range__actions">
             <button
               type="submit"
-              class="rounded-md bg-primary text-primary-foreground px-3 py-1 text-sm font-medium hover:opacity-90"
+              class="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
-              Apply
+              Apply range
             </button>
             {rangeActive && (
               <a
                 href="/stats"
-                class="rounded-md border px-3 py-1 text-sm hover:bg-accent"
+                class="inline-flex h-10 items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent"
               >
                 Clear
               </a>
             )}
-          </form>
-        </div>
+          </div>
+        </form>
         {rangeError && (
           <div
             class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
@@ -294,11 +343,22 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
           </div>
         )}
 
-        {habits.map((habit) => (
-          <Card key={habit.id} className="overflow-hidden">
-            <CardHeader className="pb-2">
-              <div class="flex items-center justify-between gap-4">
-                <CardTitle className="text-base">
+        {habits.map((habit) => {
+          /*
+           * The period used to be interpolated as
+           * `{habit.period.frequency}× per {habit.period.interval}`,
+           * but the backend sends period_type/period_count/target_count.
+           * Both properties were undefined, so the card header rendered a
+           * bare "× per " with nothing before or after it (verified in
+           * the DOM: <span>× per </span>). describePeriod() speaks the
+           * backend's shape.
+           */
+          const periodLabel = describePeriod(habit.period);
+          return (
+          <Card className="overflow-hidden">
+            <CardHeader className="pb-3">
+              <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <CardTitle as="h2" className="text-base">
                   <a
                     href={`/habits/${habit.id}`}
                     class="hover:underline text-foreground"
@@ -306,10 +366,9 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
                     {habit.name}
                   </a>
                 </CardTitle>
-                {habit.period && (
+                {periodLabel && (
                   <span class="text-xs text-muted-foreground whitespace-nowrap">
-                    {habit.period.frequency}× per {habit.period.interval}
-                    {habit.period.frequency > 1 ? 's' : ''}
+                    {periodLabel}
                   </span>
                 )}
               </div>
@@ -328,8 +387,132 @@ const weekDayAbbr = baseWeekDayAbbr.map((_, i) =>
               />
             </CardContent>
           </Card>
-        ))}
+          );
+        })}
       </div>
     )}
   </main>
 </Layout>
+
+<style>
+  .stats-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+  }
+
+  .stats-legend__label {
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .stats-legend__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  /* Swatches mirror the Heatmap component's own cell colours. */
+  .stats-legend__swatch {
+    width: 0.875rem;
+    height: 0.875rem;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+
+  .stats-legend__swatch.is-done {
+    background: color-mix(in oklab, var(--primary) 80%, transparent);
+    border-color: transparent;
+  }
+
+  .stats-legend__swatch.is-missed {
+    background: color-mix(in oklab, var(--muted) 100%, transparent);
+  }
+
+  .stats-legend__swatch.is-today {
+    background: transparent;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 1px var(--primary);
+  }
+
+  /*
+   * The range picker. The three controls are one logical group, so they
+   * sit on a single row that wraps at narrow widths, share one control
+   * height, and put their actions last.
+   */
+  .stats-range {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    padding: 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--muted);
+  }
+
+  /*
+   * The three range inputs share one width, and they are wide.
+   *
+   * Two problems this fixes. First, `margin-left: auto` on the actions
+   * pushed "Apply range" hard against the right edge, leaving a large
+   * dead gap between the To field and the button — the controls read
+   * as two unrelated clusters. Second, a date input is intrinsically
+   * about 150px, so at the old intrinsic size the labels ("From", "To")
+   * were wider than their own inputs and the three controls looked like
+   * different sizes. A `flex: 1` on a `9.5rem` basis gives them all the
+   * same width, wide enough to read a full date without truncation, and
+   * the leftover space is absorbed by the gap instead of a dead margin.
+   */
+  .stats-range__field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1 1 9.5rem;
+    min-width: 0;
+  }
+
+  .stats-range__label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+  }
+
+  .stats-range__control {
+    width: 100%;
+    height: 2.5rem;
+    padding-inline: 0.5rem;
+    border: 1px solid var(--control-border);
+    border-radius: 0.375rem;
+    background: var(--background);
+    color: var(--foreground);
+    font-size: 0.875rem;
+  }
+
+  .stats-range__actions {
+    display: flex;
+    gap: 0.5rem;
+    flex: 0 0 auto;
+    margin-left: 0;
+  }
+
+  @media (max-width: 560px) {
+    .stats-range__field,
+    .stats-range__control {
+      width: 100%;
+    }
+
+    .stats-range__actions {
+      width: 100%;
+      margin-left: 0;
+    }
+
+    .stats-range__actions > * {
+      flex: 1;
+    }
+  }
+</style>

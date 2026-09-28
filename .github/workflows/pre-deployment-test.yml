@@ -26,6 +26,17 @@ jobs:
         # these defaults; overriding them produces 23 spurious failures.
         # test_batch4_live.py probes a running production container and
         # is deliberately excluded from CI.
+        #
+        # JWT_SECRET / RESET_PASSWORD_TOKEN_SECRET / NICEGUI_STORAGE_SECRET:
+        # the app refuses to boot when any is missing or a known default
+        # (F11: a default secret makes every issued token forgeable). Those
+        # guards are correct and stay. CI supplies throwaway values that sign
+        # nothing real and pair with a throwaway database. tests/conftest.py
+        # sets the same values for local runs.
+        env:
+          JWT_SECRET: ci-throwaway-jwt-secret-0000000000000000
+          RESET_PASSWORD_TOKEN_SECRET: ci-throwaway-reset-secret-0000000000
+          NICEGUI_STORAGE_SECRET: ci-throwaway-storage-secret-000000000
         run: uv run pytest tests/ --ignore=tests/test_batch4_live.py
 
   astro-check:
@@ -41,7 +52,7 @@ jobs:
           version: 9
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.23.3
           cache: pnpm
           cache-dependency-path: web/concepts/pnpm-lock.yaml
       - name: Install dependencies
@@ -54,6 +65,13 @@ jobs:
         # Catches build-time errors that check misses (e.g. missing
         # static imports, invalid frontmatter at compile time).
         run: pnpm exec astro build
+      - name: Security regression — Sentry wired, and ships nothing (F13/F11)
+        # Run here, after the build, so the two dist-only assertions are real:
+        # no .map files shipped, and the DSN is actually present in the
+        # bundle. In the smoke job (astro dev, no dist/) the same script
+        # reports those two as skipped rather than passing vacuously.
+        run: |
+          node scripts/check-sentry-config.mjs
       - name: Security audit
         # Fails on any vulnerability with a known fix. The --prod flag
         # skips dev-only dependencies that aren't shipped.
@@ -75,11 +93,28 @@ jobs:
           version: 9
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.23.3
           cache: pnpm
           cache-dependency-path: web/concepts/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Start stub backend on :8085
+        # /api/v1/tokens calls backendFetch() *before* building its redirect.
+        # With nothing on 8085 that fetch throws, Astro returns 500, and there
+        # is no Location header — so the F22 open-redirect gate below could not
+        # run at all. It was failing with "no Location header" for that reason,
+        # not because the redirect check was broken.
+        #
+        # A 401 stub is enough: the route only needs the fetch to resolve. It
+        # then emits its 303 + Location, which is exactly what the gate
+        # asserts. No real backend and no real data.
+        run: |
+          python3 ../../scripts/ci_stub_backend.py 8085 &
+          for i in $(seq 1 20); do
+            curl -s -o /dev/null http://127.0.0.1:8085/ping && break
+            sleep 0.5
+          done
+          echo "stub backend listening on 8085"
       - name: Start dev server
         # Bind to 127.0.0.1 so the smoke test can reach it; Astro's dev
         # server doesn't need TLS in CI.
@@ -104,11 +139,131 @@ jobs:
           test "$CODE" = "302" -o "$CODE" = "303" || (echo "expected 302/303, got $CODE"; exit 1)
           # /terms and /privacy are public — should 200.
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/terms)" = "200"
+          # /privacy and /admin are public-rendering pages.
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/privacy)" = "200"
           # /admin requires ADMIN_EMAIL — without a session we expect
           # the page to 200 (the page itself handles 401 by rendering
           # 'Access denied').
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/admin)" = "200"
+
+      # Regression tests for the 2026-09-26 production-security audit.
+      #
+      # These assert the *absence* of the vulnerable behaviour, so they pass
+      # trivially if the feature is simply missing. That is the correct
+      # failure direction for a security gate: a re-introduced vulnerability
+      # fails the build, and removing the fix also fails it.
+      - name: Security regression — no session token exposed to client JS (F7)
+        run: |
+          # Comment-aware, so prose that documents the fix does not trip it.
+          # Verified to fail when the window global is re-introduced.
+          node scripts/check-no-client-token.mjs src
+
+          # SecurityContent must not build an Authorization header at all.
+          if grep -n "Bearer\|Authorization" src/components/SecurityContent.tsx; then
+            echo "::error::F7 regression: SecurityContent builds auth headers in client JS"
+            exit 1
+          fi
+
+      # F13 monitoring, and the F11 privacy posture it must not undo.
+      #
+      # Monitoring that quietly exports personal data is worse than no
+      # monitoring: it looks like a working control. These assert both that
+      # the SDK is actually wired into the build (not just installed) and that
+      # the redaction options are present.
+      - name: Security regression — Sentry wired, and leaks nothing (F13/F11)
+        # This is the job that builds, so the two dist-only assertions (no
+        # shipped .map, DSN actually present in the bundle) are genuinely
+        # exercised here rather than skipped. In the smoke job — which runs
+        # `astro dev` and never builds — the same script reports those two as
+        # skipped instead of passing vacuously.
+        run: |
+          node scripts/check-sentry-config.mjs
+
+      - name: Regression — weekday headers derive from their date
+        run: |
+          # Dogfooding 2026-09-27: /habits rendered "Mon 27 ... Sun 21" when
+          # 27 September was a Sunday, because the label came from a static
+          # Mon..Sun array indexed by column position while the columns are a
+          # rolling 7-day window ending today. Users recorded habits against
+          # the wrong day, and the aria-label on the same cell was already
+          # correct, so assistive tech and the visible UI disagreed.
+          node scripts/check-weekday-headers.mjs
+
+      - name: Security regression — open redirect is closed (F22)
+        run: |
+          # An off-site Location must be impossible from the token BFF.
+          #
+          # The Origin header is REQUIRED here. Astro's dev server has its own
+          # CSRF check that rejects a state-changing request with no Origin
+          # before the route handler ever runs, which would return 403 and make
+          # this gate pass vacuously — the exact "green but not testing
+          # anything" failure mode a security gate must not have.
+          #
+          # Each case asserts the Location is a same-site absolute path, which
+          # is a positive assertion: it fails both if the redirect is off-site
+          # AND if the route stops redirecting at all.
+          check_redirect() {
+            local path="$1" label="$2" redirect_value="$3"
+            local loc
+            loc=$(curl -s -o /dev/null -D - -X POST \
+              -H "Origin: http://127.0.0.1:4321" \
+              "http://127.0.0.1:4321${path}?redirect=${redirect_value}" \
+              | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
+
+            if [ -z "$loc" ]; then
+              echo "::error::F22 gate is not exercising the route (${path}, ${label}): no Location header"
+              exit 1
+            fi
+            case "$loc" in
+              /*)  echo "  ok  ${label}: ${loc}" ;;
+              *)   echo "::error::F22 regression: ${path} (${label}) redirected off-site to ${loc}"
+                   exit 1 ;;
+            esac
+          }
+
+          # Payload in the query string is the injectable path the audit found.
+          check_redirect "/api/v1/tokens"       "absolute-url"      'https://evil.tld'
+          check_redirect "/api/v1/tokens/rotate" "absolute-url"      'https://evil.tld'
+          # Protocol-relative: starts with /, so it passes a naive prefix check.
+          check_redirect "/api/v1/tokens"       "protocol-relative" '//evil.tld'
+          # Backslash: the WHATWG URL parser treats / and \ as equivalent when
+          # resolving an authority, so /\evil.tld leaves the origin.
+          check_redirect "/api/v1/tokens"       "backslash-authority" '/%5Cevil.tld'
+          # A non-path scheme must not survive either.
+          check_redirect "/api/v1/tokens"       "javascript-scheme" 'javascript:alert(1)'
+
+          # Control: a legitimate same-site redirect must still work, proving
+          # the fix did not simply break the feature.
+          check_redirect "/api/v1/tokens"       "legitimate-same-site" '/tokens'
+
+      - name: Security regression — unauthenticated BFF calls are rejected (F7)
+        run: |
+          # The new webauthn BFF routes must not serve data to an anonymous
+          # caller. They proxy to a backend that is not running in CI, so the
+          # only acceptable outcome for an authenticated-only route is a 401
+          # from the route's own session check, before any proxying happens.
+          #
+          # Method matters: change-password exports only POST, so a GET would
+          # 404 and this gate would pass for the wrong reason.
+          expect_401() {
+            local method="$1" path="$2"
+            local code
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X "$method" \
+              -H "Origin: http://127.0.0.1:4321" \
+              "http://127.0.0.1:4321${path}")
+            if [ "$code" != "401" ]; then
+              echo "::error::F7 regression: ${method} ${path} returned ${code} unauthenticated, expected 401"
+              exit 1
+            fi
+            echo "  ok  ${method} ${path} -> 401"
+          }
+
+          expect_401 GET  "/api/v1/webauthn/credentials"
+          expect_401 GET  "/api/v1/webauthn/recovery-email"
+          expect_401 POST "/api/v1/webauthn/recovery-email"
+          expect_401 POST "/api/v1/webauthn/recovery-email/verify"
+          expect_401 POST "/api/v1/webauthn/change-password"
+          expect_401 DELETE "/api/v1/webauthn/credentials/some-credential-id"
       - name: Stop server
         if: always()
         run: pkill -f "astro dev" || true

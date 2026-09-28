@@ -29,7 +29,7 @@
  * for symmetry with the slice-15 /api/v1 BFF work.
  */
 import { defineMiddleware } from 'astro:middleware';
-import { readSession } from './lib/auth';
+import { readSession, mirrorWebAuthnBrowserCookie } from './lib/auth';
 
 // Production-only proxy prefixes. In dev, the Vite proxy in
 // astro.config.mjs handles these (and middleware must NOT — that
@@ -93,17 +93,21 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
     // Mirror WebAuthn cookie: beaver_webauthn → castor_webauthn_browser
     // so middleware on subsequent requests can see it.
+    //
+    // F26: this used to re-implement the mirroring that lib/auth.ts already
+    // owns, with weaker attributes (httpOnly:false, secure:false, sameSite
+    // 'lax' vs the helper's httpOnly:true/'strict'). Because middleware runs
+    // on every proxied request, its weaker values overwrote the good ones.
+    // The one case the shared helper does not cover is a raw
+    // `headers.get('set-cookie')` string (the proxy path has no
+    // getSetCookie()), so mirror it through the helper by wrapping it in a
+    // Response and letting the helper do the parsing and attribute mapping.
     const setCookie = upstream.headers.get('set-cookie');
     if (setCookie && setCookie.startsWith('beaver_webauthn=')) {
-      const value = setCookie.split(';', 1)[0].split('=')[1];
-      if (value) {
-        context.cookies.set('castor_webauthn_browser', value, {
-          sameSite: 'lax',
-          path: '/',
-          httpOnly: false,
-          secure: false,
-        });
-      }
+      mirrorWebAuthnBrowserCookie(
+        new Response(null, { headers: { 'set-cookie': setCookie } }),
+        context.cookies,
+      );
     }
 
     return new Response(upstream.body, {

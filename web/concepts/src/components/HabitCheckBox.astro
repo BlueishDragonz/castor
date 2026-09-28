@@ -1,6 +1,7 @@
 ---
 /**
- * HabitCheckBox — a single grid cell that toggles completion for a habit on a given day.
+ * HabitCheckBox — a single grid cell that toggles completion for a
+ * habit on a given day.
  *
  * Submits a real <form action="/habits/{id}/complete" method="post">
  * with {date, done}. The server-side route forwards to
@@ -38,11 +39,17 @@ const y = date.getFullYear();
 const m = String(date.getMonth() + 1).padStart(2, '0');
 const d = String(date.getDate()).padStart(2, '0');
 const isoDate = `${y}-${m}-${d}`; // local YYYY-MM-DD
+const daysAgo = Math.floor(
+  (new Date().getTime() - date.getTime()) / (1000 * 60 * 60 * 24),
+);
+const daysAgoLabel = daysAgo === 1 ? '1 day ago' : `${daysAgo} days ago`;
 const ariaLabel = isToday
   ? `Today, ${habitName}`
   : isPast
-    ? `${Math.floor((new Date().getTime() - date.getTime()) / (1000 * 60 * 60 * 24))} days ago, ${habitName}`
+    ? `${daysAgoLabel}, ${habitName}`
     : `Future, ${habitName}`;
+
+const isDisabled = !isPast && !isToday;
 ---
 
 <form
@@ -58,49 +65,148 @@ const ariaLabel = isToday
     role="switch"
     aria-checked={done}
     aria-label={ariaLabel}
-    disabled={!isPast && !isToday}
+    disabled={isDisabled}
     data-done={done}
     data-habit-id={habitId}
     data-tick-date={isoDate}
     data-tick-done={done ? 'true' : 'false'}
+    data-tick-is-today={isToday ? 'true' : undefined}
     data-long-press-delay="200"
-    class={[
-      'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-      done
-        ? 'text-primary hover:text-primary/80'
-        : 'text-muted-foreground/60 hover:text-muted-foreground',
-      !isPast && !isToday ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
-    ].join(' ')}
+    class:list={['tick', done ? 'tick--done' : 'tick--todo', isDisabled && 'tick--future']}
     title={ariaLabel}
   >
-    {done ? (
-      <svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" aria-hidden="true" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 6L9 17l-5-5" />
-      </svg>
-    ) : (
-      <svg viewBox="0 0 24 24" fill="none" class="h-5 w-5 opacity-40" aria-hidden="true" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 6L9 17l-5-5" />
-      </svg>
-    )}
+    {/*
+      A rounded square that fills with a tick when the day is done.
+      Previously the un-ticked state was a bare check glyph at 40%
+      opacity inside 43%-alpha ink — measured on the rendered page as
+      roughly 17% effective alpha against the card, i.e. effectively
+      invisible. The control now always has a visible boundary, so
+      "not done" reads as an empty box rather than as absence, and the
+      tap target is unambiguous.
+    */}
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      class="tick__box"
+      aria-hidden="true"
+    >
+      <rect x="3.25" y="3.25" width="17.5" height="17.5" rx="5" class="tick__box-bg" />
+      <path
+        d="M7.5 12.5l3 3 6-6.5"
+        class="tick__mark"
+        stroke="currentColor"
+        stroke-width="2.4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
   </button>
 </form>
 
-<style is:global>
-  /* HabitCheckBox: icon-only toggle, no checkbox border.
-     A greyed-out tick when not done and a teal tick when done.
-     Matches the castor-main NiceGUI design (Material sym_o_check
-     with keep-color) but keeps the un-ticked state as a faint tick
-     rather than an X — Xs feel like a stream of errors when the user
-     is falling behind on their habits. */
-  [data-habit-checkbox] button[role="switch"] {
-    appearance: none;
-    -webkit-appearance: none;
-    transition: color 0.15s ease, opacity 0.15s ease;
+<style>
+  .tick {
+    display: grid;
+    place-items: center;
+    /*
+     * 32px fills a 36px day column on desktop with a little breathing
+     * room. On a touch pointer the column grows to 44px, so the button
+     * matches it — otherwise the extra column width would be dead space
+     * the user could tap and miss.
+     */
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    color: var(--muted-foreground);
+    transition: background-color 120ms ease, color 120ms ease;
   }
 
-  [data-habit-checkbox] button[role="switch"]:disabled {
-    opacity: 0.3;
+  @media (pointer: coarse) {
+    .tick {
+      width: 2.75rem;
+      height: 2.75rem;
+    }
+  }
+
+  @media (max-width: 720px) {
+    /* Mirrors the grid's own narrow-screen rule: a resized desktop
+       browser reports a fine pointer, so the coarse-pointer query
+       alone would leave these at 32px on a 390px viewport. */
+    .tick {
+      width: 2.75rem;
+      height: 2.75rem;
+    }
+  }
+
+  .tick:hover:not(:disabled) {
+    background: var(--accent);
+  }
+
+  .tick__box {
+    width: 1.375rem;
+    height: 1.375rem;
+  }
+
+  /*
+   * The empty state keeps a full-strength control outline so "not done"
+   * reads as an unchecked box rather than as absence. --control-border
+   * is 3.35:1 on the card — the WCAG minimum for a control boundary.
+   * (--border at 1.27:1 is right for a row divider but not for
+   * something the user is meant to click.)
+   */
+  .tick--todo .tick__box-bg {
+    fill: var(--background);
+    stroke: var(--control-border);
+    /*
+     * 1.5px on a 22px box is mostly antialiased away: sampled from the
+     * rendered page it composited down to rgb(165,169,171) = 2.37:1
+     * rather than the 3.35:1 the token resolves to. 2px puts enough
+     * solid pixels in the stroke to actually reach the token colour.
+     */
+    stroke-width: 2;
+  }
+
+  .tick--todo .tick__mark {
+    opacity: 0;
+  }
+
+  /*
+   * The done state is signalled by BOTH a fill and a visible tick, so
+   * it is not colour-only. The tick is white on the teal fill.
+   */
+  .tick--done {
+    color: var(--primary-foreground);
+  }
+
+  .tick--done .tick__box-bg {
+    fill: var(--primary);
+    stroke: var(--primary);
+    stroke-width: 1.5;
+  }
+
+  .tick--done .tick__mark {
+    opacity: 1;
+  }
+
+  /*
+   * Today gets a ring so the column a user is most likely to act on is
+   * findable at a glance, independent of the done/not-done state.
+   */
+  .tick[data-tick-is-today] {
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent);
+  }
+
+  /*
+   * Future days cannot be ticked (the form would be rejected). They
+   * are dimmed AND marked non-interactive, and the accessible name
+   * says "Future" so the reason is not colour-only.
+   */
+  .tick--future {
+    opacity: 0.45;
     cursor: not-allowed;
+  }
+
+  .tick--future .tick__box-bg {
+    fill: transparent;
+    stroke-dasharray: 3 3;
   }
 </style>

@@ -14,7 +14,7 @@ from fastapi import (
     status,
 )
 from loguru import logger
-from pydantic import BaseModel, StrictBool
+from pydantic import BaseModel, Field, StrictBool
 
 from castor import views
 from castor.app import crud
@@ -34,6 +34,7 @@ from castor.css_sanitizer import sanitize_css
 from castor.core.completions import CStatus, get_habit_date_completion
 from castor.events import HabitListChanged, publish
 from castor.realtime import manager
+from castor.storage import get_user_dict_storage
 from castor.storage.storage import (
     Habit,
     HabitFrequency,
@@ -50,10 +51,39 @@ from castor.configs import settings
 api_router = APIRouter(dependencies=[Depends(api_user_limit)])
 
 
+class AccountDeleteRequest(BaseModel):
+    """Step-up proof for irreversible account erasure.
+
+    F18: the identity erased is ALWAYS the principal the bearer token resolved
+    to. A separate, client-writable channel (the non-httpOnly ``castor_user``
+    cookie) can no longer choose whose account is destroyed, because the
+    backend never reads it. The password is verified against that principal's
+    own hash inside the erasing transaction.
+    """
+
+    password: str = Field(min_length=1, max_length=4096)
+
+
 @api_router.delete("/account", status_code=204, tags=["account"])
-async def delete_account(user: User = Depends(current_active_user)) -> Response:
-    """Remove personal data and archive an anonymous disabled account record."""
-    await views.delete_user_account(user)
+async def delete_account(
+    payload: AccountDeleteRequest,
+    user: User = Depends(current_active_user),
+) -> Response:
+    """Erase an account after fresh-password step-up, in a single transaction.
+
+    The password is mandatory: a stolen session token alone must never be
+    sufficient to destroy an account and all of its data.
+    """
+    from castor.app.security_actions import (
+        SecurityActionError,
+        delete_account as _delete_account,
+    )
+
+    try:
+        await _delete_account(user.id, user.token_version, payload.password)
+    except SecurityActionError as exc:
+        # Fixed, public-safe message; never leaks input or backend detail.
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
     return Response(status_code=204)
 
 
@@ -116,8 +146,26 @@ async def get_habits(
     return [{"id": x.id, "name": x.name} for x in habits]
 
 
+class HabitPeriodPayload(BaseModel):
+    """The period block shared by the create and update payloads."""
+
+    period_type: Literal["D", "W", "M", "Y"]
+    period_count: int
+    target_count: int
+
+
 class CreateHabit(BaseModel):
     name: str
+    # The web create form has always sent a period, tags and chips
+    # alongside the name, but this model accepted only `name`, so
+    # FastAPI silently dropped the rest and every newly created habit
+    # came back with period=null and no tags — the "How often" and
+    # "Tags" fields on the create form had no effect on the stored
+    # habit. All three are optional so existing native clients that
+    # only send a name keep working.
+    period: HabitPeriodPayload | None = None
+    tags: list[str] = Field(default_factory=list)
+    chips: list[str] = Field(default_factory=list)
 
 
 @api_router.post("/habits", tags=["habits"])
@@ -141,6 +189,23 @@ async def post_habits(
 
     id = await habit_list.add(habit.name)
     logger.info(f"Created new habit {id} for user {user.email}")
+
+    # Apply the period / tags / chips the client sent. Without this the
+    # create form's "How often" and "Tags" fields were accepted, echoed
+    # back in a redirect, and never stored. Mutating the stored object
+    # in place mirrors what put_habit does — no explicit save step.
+    created = await habit_list.get_habit_by(id)
+    if created is not None:
+        if habit.period is not None:
+            created.period = HabitFrequency(
+                period_type=habit.period.period_type,
+                period_count=habit.period.period_count,
+                target_count=habit.period.target_count,
+            )
+        if habit.tags:
+            created.tags = habit.tags
+        if habit.chips:
+            created.data["chips"] = habit.chips
 
     return {"id": id, "name": habit.name}
 
@@ -246,15 +311,10 @@ async def get_habit_detail(
 
 
 class UpdateHabit(BaseModel):
-    class UpdateHabitPeriod(BaseModel):
-        period_type: Literal["D", "W", "M", "Y"]
-        period_count: int
-        target_count: int
-
     name: str | None = None
     star: bool | None = None
     status: HabitStatus | None = None
-    period: UpdateHabitPeriod | None = None
+    period: HabitPeriodPayload | None = None
     tags: list[str] | None = None
 
 
@@ -508,8 +568,34 @@ async def sync_ws(websocket: WebSocket, token: str | None = Query(default=None))
                             "timestamp": record.timestamp,
                         }
                     )
+                    # F2: the HTTP durability middleware only covers HTTP
+                    # requests, so the WebSocket path would otherwise rely on
+                    # the 50ms debounce alone — and a tick acked here could
+                    # still be lost to a restart in that window. Flush before
+                    # acknowledging, so the ack means it is on disk.
+                    await get_user_dict_storage().flush_all()
                 except Exception as e:
-                    logger.warning(f"[ws] failed to tick habit for {user.email}: {e}")
+                    # F15: this used to `logger.warning` and continue. The
+                    # client had already sent a request_id and was waiting for
+                    # a tick_ack; on failure it got nothing, waited, and
+                    # concluded the tick had worked. A partial write with no
+                    # detection on either side.
+                    #
+                    # An explicit error frame closes that loop: the client can
+                    # distinguish "not applied" from "in flight". `raise` is
+                    # deliberately NOT used here — one malformed message must
+                    # not tear down an otherwise healthy connection — so the
+                    # handler owns the failure and reports it.
+                    logger.exception(
+                        f"[ws] failed to tick habit for user {user_id}: {e}"
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "tick_error",
+                            "request_id": msg.get("request_id"),
+                            "error": "Could not save the tick. Please retry.",
+                        }
+                    )
 
             elif msg_type == "push_habit_list":
                 logger.info(
@@ -534,8 +620,17 @@ async def sync_ws(websocket: WebSocket, token: str | None = Query(default=None))
                     }
                     publish(HabitListChanged(user_id=user_id, payload=payload))
                 except Exception as e:
-                    logger.warning(
-                        f"[ws] failed to apply habit list for {user.email}: {e}"
+                    # F15: same defect as push_tick above — a silent failure
+                    # left the client believing its habit list had synced.
+                    logger.exception(
+                        f"[ws] failed to apply habit list for user {user_id}: {e}"
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "habit_list_error",
+                            "request_id": msg.get("request_id"),
+                            "error": "Could not save your habits. Please retry.",
+                        }
                     )
 
     except WebSocketDisconnect:

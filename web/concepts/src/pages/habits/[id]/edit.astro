@@ -9,11 +9,14 @@
  *   - Tags
  */
 import Layout from '../../../layouts/Layout.astro';
-import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
-import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/card';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
+import PageHeader from '../../../components/PageHeader.astro';
+import FormActions from '../../../components/FormActions.astro';
+import { PERIOD_TYPE_CODE, normalisePeriod } from '../../../lib/period';
+import type { HabitPeriod } from '../../../lib/period';
+import { backendOrigin } from '../../../lib/auth';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -26,7 +29,7 @@ interface Habit {
   id: string;
   name: string;
   tags: string[];
-  period?: { frequency: number; interval: 'day' | 'week' | 'month' | 'year'; target_count?: number; period_count?: number } | null;
+  period?: HabitPeriod | null;
   chips?: string[];
 }
 
@@ -47,21 +50,30 @@ if (Astro.request.method === 'POST') {
   if (!name) {
     error = 'Name is required';
   } else {
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const origin = backendOrigin();;
     const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
-      method: 'PATCH',
+      method: 'PUT',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         name,
+        /*
+         * The backend's UpdateHabitPeriod model expects
+         * {period_type: 'D'|'W'|'M'|'Y', period_count, target_count}.
+         * The form used to send {frequency, interval, period_count},
+         * which the backend's pydantic model rejected — the extra keys
+         * were dropped and the required ones were missing, so the
+         * period could never be saved. `target_count` is how many times
+         * per period the habit should be done ("Times" in the form) and
+         * `period_count` is the length of the period ("Every N").
+         */
         period: {
-          frequency: targetCount,
-          interval: periodType,
+          period_type: PERIOD_TYPE_CODE[periodType] ?? 'D',
           period_count: periodCount,
+          target_count: targetCount,
         },
-        chips: chips ? chips.split(',').map(c => c.trim()).filter(Boolean) : undefined,
         tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [],
       }),
     });
@@ -84,7 +96,7 @@ if (Astro.request.method === 'POST') {
 
 if (!success) {
   try {
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const origin = backendOrigin();;
     const res = await fetch(new URL(`/api/v1/habits/${habitId}`, origin), {
       headers: { 'Authorization': `Bearer ${token}` },
     });
@@ -112,13 +124,23 @@ const PERIOD_LABELS: Record<string, string> = {
   year: 'Year',
 };
 
+/*
+ * The form's "Times / Every N / Interval" inputs are seeded from the
+ * habit's stored period. Reading `habit.period.interval` directly
+ * (as this page used to) always yielded undefined because the backend
+ * sends period_type/target_count/period_count — so the form silently
+ * showed 1/1/Day for every habit regardless of its real schedule.
+ */
+const period = habit ? normalisePeriod(habit.period) : null;
+
 ---
-<Layout title="Edit Habit — Castor">
-  <main class="mx-auto max-w-md px-4 py-12 space-y-6 pb-24">
-    <header class="flex items-center gap-4">
-      <a href={`/habits/${habitId}`} class="text-2xl hover:opacity-70">←</a>
-      <h1 class="text-xl font-semibold">Edit Habit</h1>
-    </header>
+<Layout title="Edit habit — Castor">
+  <main id="main" class="castor-page castor-page--narrow">
+    <PageHeader
+      title="Edit habit"
+      subtitle={habit ? habit.name : undefined}
+      back={`/habits/${habitId}`}
+    />
 
     {error && (
       <Alert variant="destructive">
@@ -127,125 +149,100 @@ const PERIOD_LABELS: Record<string, string> = {
     )}
 
     {success && (
-      <Alert variant="default">
-        <AlertDescription>Habit updated successfully. <a href={`/habits/${habitId}`} class="underline">View habit</a></AlertDescription>
+      <Alert>
+        <AlertDescription>
+          Habit updated. <a href={`/habits/${habitId}`} class="font-medium underline">Back to {habit?.name}</a>
+        </AlertDescription>
       </Alert>
     )}
 
     {habit && !error && !success && (
-      <form method="post" action={`/habits/${habitId}/edit`} class="space-y-6">
+      <form method="post" action={`/habits/${habitId}/edit`} id="castor-form" class="castor-stack">
         <input type="hidden" name="habitId" value={habitId} />
-        
-        <Card>
-          <CardHeader>
-            <CardTitle>Habit Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div class="space-y-2">
-              <Label htmlFor="name">Name</Label>
+
+        <div class="space-y-2">
+          <Label htmlFor="name">Name</Label>
+          <Input
+            id="name"
+            name="name"
+            value={habit.name}
+            required
+            maxLength={100}
+            placeholder="Habit name"
+            aria-describedby="name-hint"
+          />
+          <p id="name-hint" class="text-xs text-muted-foreground">
+            What you want to see each morning.
+          </p>
+        </div>
+
+        <fieldset class="space-y-3 border-t pt-5">
+          <legend class="text-sm font-semibold">How often</legend>
+          <div class="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
+            <div class="space-y-1.5">
+              <Label htmlFor="targetCount">Times</Label>
               <Input
-                id="name"
-                name="name"
-                value={habit.name}
+                id="targetCount"
+                name="targetCount"
+                type="number"
+                value={period?.targetCount ?? 1}
+                min={1}
+                max={366}
                 required
-                maxLength={100}
-                placeholder="Habit name"
+                className="w-full"
               />
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Period</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div class="grid grid-cols-3 gap-2 items-end">
-              <div class="space-y-2">
-                <Label htmlFor="targetCount">Times</Label>
-                <Input
-                  id="targetCount"
-                  name="targetCount"
-                  type="number"
-                  value={habit.period?.target_count || 1}
-                  min={1}
-                  max={366}
-                  required
-                  className="w-full"
-                />
-              </div>
-              <div class="flex items-center text-muted-foreground">/</div>
-              <div class="space-y-2">
-                <Label htmlFor="periodCount">Every</Label>
-                <Input
-                  id="periodCount"
-                  name="periodCount"
-                  type="number"
-                  value={habit.period?.period_count || 1}
-                  min={1}
-                  max={366}
-                  required
-                  className="w-full"
-                />
-              </div>
+            <span class="pb-3 text-muted-foreground" aria-hidden="true">/</span>
+            <div class="space-y-1.5">
+              <Label htmlFor="periodCount">Every</Label>
+              <Input
+                id="periodCount"
+                name="periodCount"
+                type="number"
+                value={period?.periodCount ?? 1}
+                min={1}
+                max={366}
+                required
+                className="w-full"
+              />
             </div>
-            <div class="space-y-2">
-              <Label htmlFor="periodType">Interval</Label>
-              <select
-                id="periodType"
-                name="periodType"
-                class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                value={habit.period?.interval || 'day'}
-              >
-                {PERIOD_TYPES.map(type => (
-                  <option value={type}>
-                    {PERIOD_LABELS[type]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+          <div class="space-y-1.5">
+            <Label htmlFor="periodType">Interval</Label>
+            <select
+              id="periodType"
+              name="periodType"
+              class="flex h-10 w-full items-center rounded-md border border-input bg-background px-3 py-2 text-sm"
+              aria-describedby="period-hint"
+            >
+              {PERIOD_TYPES.map(type => (
+                <option value={type} selected={(period?.interval ?? 'day') === type}>
+                  {PERIOD_LABELS[type]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p id="period-hint" class="text-xs text-muted-foreground">
+            1 time every 1 day means daily. 3 times every 1 week means three
+            times a week.
+          </p>
+        </fieldset>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Completion Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p class="text-sm text-muted-foreground mb-2">
-              Comma-separated values. Use "yes"/"no" for defaults or custom like "done:✓,skip:⊘".
-            </p>
-            <Input
-              name="chips"
-              value={habit.chips?.join(', ') || DEFAULT_CHIPS.join(', ')}
-              placeholder="yes, no"
-              className="font-mono text-sm"
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Tags</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p class="text-sm text-muted-foreground mb-2">
-              Comma-separated tags for filtering (e.g. "health, fitness").
-            </p>
-            <Input
-              name="tags"
-              value={habit.tags.join(', ')}
-              placeholder="health, fitness"
-            />
-          </CardContent>
-        </Card>
-
-        <div class="flex gap-2">
-          <Button type="button" variant="outline" onClick={() => window.location.href = `/habits/${habitId}`}>
-            Cancel
-          </Button>
-          <Button type="submit" className="flex-1">Save Changes</Button>
+        <div class="space-y-2 border-t pt-5">
+          <Label htmlFor="tags">Tags</Label>
+          <Input
+            id="tags"
+            name="tags"
+            value={habit.tags.join(', ')}
+            placeholder="health, fitness"
+            aria-describedby="tags-hint"
+          />
+          <p id="tags-hint" class="text-xs text-muted-foreground">
+            Comma-separated. Used to filter the grid on your habits page.
+          </p>
         </div>
+
+        <FormActions cancelHref={`/habits/${habitId}`} submitLabel="Save changes" />
       </form>
     )}
   </main>

@@ -29,15 +29,24 @@ const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 );
 CardHeader.displayName = 'CardHeader';
 
-const CardTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement>>(
-  ({ className, ...props }, ref) => (
-    <h3
-      ref={ref}
-      className={cn('font-semibold leading-none tracking-tight text-lg', className)}
-      {...props}
-    />
-  ),
-);
+/**
+ * CardTitle defaults to <h3>, which is right for a card nested inside
+ * an <h2> section but produced a skipped heading level (h1 → h3) on
+ * /stats, where the page h1 is followed directly by these card titles.
+ *
+ * Pass `as` to set the level explicitly when a card sits directly under
+ * the page heading; leave it as h3 for cards nested in a section.
+ */
+const CardTitle = React.forwardRef<
+  HTMLHeadingElement,
+  React.HTMLAttributes<HTMLHeadingElement> & { as?: 'h2' | 'h3' | 'h4' }
+>(({ className, as: Heading = 'h3', ...props }, ref) => (
+  <Heading
+    ref={ref}
+    className={cn('font-semibold leading-none tracking-tight text-lg', className)}
+    {...props}
+  />
+));
 CardTitle.displayName = 'CardTitle';
 
 const CardDescription = React.forwardRef<

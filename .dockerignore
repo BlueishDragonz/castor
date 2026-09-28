@@ -1,7 +1,43 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Node — CRITICAL (F19)
+# docker/Dockerfile runs `pnpm install --frozen-lockfile` and THEN
+# `COPY web/concepts ./`, which copies whatever node_modules happens to be in
+# the build context. Without these entries a developer's local 339 MB
+# node_modules silently overwrites the lockfile-verified install, so the image
+# ships a dependency tree `--frozen-lockfile` never checked. This is the defect
+# that made a reproducible build impossible.
+node_modules/
+**/node_modules/
+.npm/
+.pnpm-store/
+
+# Version control / VCS
+.git/
+.gitignore
+.gitmodules
+.github/
+.hg/
+.svn/
+
+# Build + test caches
+*.db
+*.db-wal
+*.db-shm
+test.db
+.nicegui
+.idea/
+.user/
+screenshots/
+tags
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hermes/
 
 # C extensions
 *.so
@@ -121,6 +157,14 @@ celerybeat.pid
 
 # Environments
 .env
+# F13: the Sentry source-map upload token reaches the build through a BuildKit
+# secret mount (`--secret id=sentry_token,src=...`), not through the build
+# context. So excluding it here is safe and correct: even if a copy lands in
+# the working tree, it cannot be COPYied into an image layer, which is the
+# failure mode that matters — a secret in a layer is not recoverable by
+# deleting the file afterwards.
+.sentry-token
+**/.sentry-token
 .venv*
 env/
 venv/

@@ -1,106 +1,48 @@
-// Import habits endpoint
-// POST /api/v1/habits/import
-// Body: { habits: Habit[] }
+// Import habits — POST /api/v1/habits/import
+//
+// Body: { habits: Habit[], order?: string[] }
+//
+// The implementation lives in `src/lib/import-habits.ts`, shared with
+// the /import page. That page used to call this route with a relative
+// fetch, which fails on the server ("Failed to parse URL"), so the
+// import never ran; sharing the module removes the HTTP hop entirely
+// rather than patching a URL around it.
+//
+// This route remains for API clients (native apps, scripts) that POST
+// JSON directly.
 import type { APIRoute } from 'astro';
+import { importHabits } from '../../../../lib/import-habits';
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   const token = cookies.get('castor_token')?.value;
   if (!token) {
-    return new Response(JSON.stringify({ detail: 'Not authenticated' }), { 
+    return new Response(JSON.stringify({ detail: 'Not authenticated' }), {
       status: 401,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
+  let body: { habits?: unknown; order?: unknown };
   try {
-    const body = await request.json();
-    const { habits } = body;
-    
-    if (!Array.isArray(habits)) {
-      return new Response(JSON.stringify({ detail: 'Expected habits array' }), { 
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
-    
-    // Import each habit
-    const results = [];
-    for (const habit of habits) {
-      // Create habit (POST only accepts {name}; tags/status/period/records
-      // must be set via PUT /habits/{id} after creation. The backend
-      // silently drops everything except name on POST.)
-      const createRes = await fetch(new URL('/api/v1/habits', origin), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ name: habit.name }),
-      });
-
-      if (!createRes.ok) {
-        const err = await createRes.json();
-        results.push({ name: habit.name, success: false, error: err.detail });
-        continue;
-      }
-
-      const created = await createRes.json();
-
-      // Apply tags / period / status via PUT. Skip the round-trip if all
-      // three are at their defaults (no PUT is cheaper than an empty PUT).
-      const hasMetadata =
-        (habit.tags && habit.tags.length > 0) ||
-        (habit.period) ||
-        (habit.status && habit.status !== 'active');
-      if (hasMetadata) {
-        const update: Record<string, unknown> = {};
-        if (habit.tags && habit.tags.length > 0) update.tags = habit.tags;
-        if (habit.period) update.period = habit.period;
-        if (habit.status) update.status = habit.status;
-        await fetch(new URL(`/api/v1/habits/${created.id}`, origin), {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(update),
-        });
-      }
-
-      // Import records. Records in the export are nested: {data: {day, done, ...}}
-      // (matches /habits/{id} canonical shape). Flatten them here.
-      const records = (habit.records || []).map((r: any) => r.data || r);
-      if (records.length > 0) {
-        for (const record of records) {
-          await fetch(new URL(`/api/v1/habits/${created.id}/completions`, origin), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'Authorization': `Bearer ${token}`
-            },
-            body: new URLSearchParams({
-              date: record.day,
-              date_fmt: '%Y-%m-%d',
-              done: record.done ? 'true' : 'false',
-              text: record.text || '',
-            }),
-          });
-        }
-      }
-      
-      results.push({ name: habit.name, success: true, id: created.id });
-    }
-
-    return new Response(JSON.stringify({ results }), { 
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  } catch (e: any) {
-    return new Response(JSON.stringify({ detail: e.message }), { 
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    body = await request.json();
+  } catch {
+    return new Response(
+      JSON.stringify({ detail: 'Body was not valid JSON.' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
   }
+
+  const outcome = await importHabits(cookies, {
+    habits: body?.habits,
+    order: body?.order,
+  });
+
+  // A malformed *request* is a client error. A failed *import* is
+  // still reported as 200, because the import ran and the per-habit
+  // `results` explain exactly what happened to each one.
+  const malformed = outcome.detail?.startsWith('Expected') ?? false;
+  return new Response(JSON.stringify(outcome), {
+    status: malformed ? 400 : 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };

@@ -17,11 +17,11 @@
  * - habit_enable_tag_filters, habit_tag_selection_mode
  */
 import Layout from '../../layouts/Layout.astro';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import HabitGrid from '../../components/HabitGrid.astro';
 import PageHeader from '../../components/PageHeader.astro';
-import { DesktopMenu } from '../../components/DesktopMenu.tsx';
-import { clearStaleSession } from '../../lib/auth';
+import { backendOrigin, clearStaleSession } from '../../lib/auth';
+import type { HabitPeriod } from '../../lib/period';
 
 if (!Astro.locals.session) {
   return Astro.redirect('/login');
@@ -87,7 +87,7 @@ interface Habit {
   tags: string[];
   tickedDays: string[];
   notesByDate: Record<string, string>;
-  period?: { frequency: number; interval: 'day' | 'week' | 'month' } | null;
+  period?: HabitPeriod | null;
   status: string;
 }
 
@@ -99,7 +99,7 @@ try {
   if (!token) {
     error = 'Not authenticated';
   } else {
-    const origin = import.meta.env.BACKEND_URL || 'http://localhost:8085';
+    const origin = backendOrigin();;
     
     // Fetch habits list (with sort)
     const habitsQuery = orderBy === 'manual' ? '' : `?order_by=${orderBy}`;
@@ -168,52 +168,74 @@ try {
 }
 ---
 <Layout title="Habits — Castor">
-  {/*
-    Slice 22 — widened the centered content area from max-w-2xl (672px)
-    to max-w-5xl (1024px). The dogfood walkthrough flagged the home
-    grid as feeling cramped with massive white space on desktop;
-    the habit row already lays out name + 7 day columns + optional
-    streak/total badges, and at 672px the day columns squeezed
-    the day numbers. 1024px keeps the row readable without going
-    edge-to-edge.
-  */}
-  <main class="mx-auto max-w-5xl px-4 py-12 pb-24">
+  <main id="main" class="castor-page">
     <PageHeader
       title="Habits"
       subtitle={habits.length === 0 ? 'No habits yet.' : `${habits.length} active habit${habits.length === 1 ? '' : 's'}.`}
     >
-      <DesktopMenu slot="actions" client:load email={Astro.locals.session.email} />
+      <Fragment slot="actions">
+        {/*
+          Reordering lives behind a single icon, not a labelled
+          "Sort" dropdown. The dropdown conflated two different jobs —
+          picking a sort order, and reordering rows by hand — and the
+          only other sort orders (name, category) are a nicety that
+          costs a full control in the most-used screen's header. The
+          icon is the same LayoutGrid glyph the hamburger drawer uses
+          for "Reorder habits", so the two entry points match.
+        */}
+        <a
+          href="/habits/order"
+          aria-label="Reorder habits"
+          title="Reorder habits"
+          class="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border bg-background text-foreground transition-colors hover:bg-accent"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="h-4 w-4">
+            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+          </svg>
+        </a>
+        <a
+          href="/habits/new"
+          class="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" class="h-4 w-4">
+            <path d="M12 5v14M5 12h14"></path>
+          </svg>
+          New habit
+        </a>
+      </Fragment>
     </PageHeader>
 
-    {/* Slice 10 — sort menu (parity row 2.10). Kept its own row so the
-        PageHeader doesn't have to host three controls; the actions
-        slot only carries the global DesktopMenu. */}
-    <div class="flex items-center justify-end gap-2 mb-4">
-      <label for="sort-select" class="text-xs text-muted-foreground">Sort by</label>
-      <select
-        id="sort-select"
-        class="rounded-md border bg-background px-2 py-1 text-sm"
-        onchange="window.location.search = this.value ? '?order_by=' + this.value : window.location.pathname"
-        aria-label="Sort habits"
-      >
-        <option value="manual" selected={orderBy === 'manual'}>Manually</option>
-        <option value="name" selected={orderBy === 'name'}>Name</option>
-        <option value="category" selected={orderBy === 'category'}>Category</option>
-      </select>
-    </div>
     {error && (
-      <Card className="border-destructive/50 mt-4">
+      <Card className="border-destructive/50">
         <CardContent className="text-destructive py-4">{error}</CardContent>
       </Card>
     )}
+
     {!error && habits.length === 0 && (
       <Card>
         <CardHeader>
-          <CardTitle>Welcome to Castor</CardTitle>
+          <CardTitle>Start with one habit</CardTitle>
+          <CardDescription>
+            Pick something small enough to do on a bad day — a glass of
+            water, a short walk. You can add more once this one is
+            running.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <p>Castor helps you keep small daily habits without the noise of social tracking.</p>
-          <p>Click <strong>+ Add habit</strong> to start. Each habit is private to your account and lives only on this server.</p>
+        <CardContent>
+          {/*
+            The page header already carries a "New habit" primary
+            button. This empty state deliberately does NOT repeat it:
+            the previous version rendered "+ Add your first habit" here
+            as well, giving the screen two competing primary calls to
+            action for the same job.
+          */}
+          <p class="text-sm text-muted-foreground">
+            Your habits are private to your account and stored only on
+            this server.
+          </p>
         </CardContent>
       </Card>
     )}
@@ -235,3 +257,6 @@ try {
     )}
   </main>
 </Layout>
+
+<style>
+</style>

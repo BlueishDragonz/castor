@@ -3,10 +3,15 @@
  * EmptyState — zero-data screen.
  *
  * Used by /circles, /habits (when no habits exist), and any future
- * "you haven't X yet" surface. Centres icon + title + optional
+ * "you haven't X yet" surface. Centres an icon + title + optional
  * description + optional CTA.
+ *
+ * The icon is a real inline SVG rather than the "○" text glyph it used
+ * to be: a circle character renders at a different size and weight in
+ * every fallback font and is announced as "white bullet" or nothing at
+ * all by a screen reader.
  */
-import { Button } from './ui/button';
+import { buttonVariants } from './ui/button';
 import { Card, CardContent } from './ui/card';
 
 interface Props {
@@ -14,22 +19,100 @@ interface Props {
   description?: string;
   ctaHref?: string;
   ctaLabel?: string;
+  /** Optional secondary action, rendered beside the primary. */
+  secondaryHref?: string;
+  secondaryLabel?: string;
+  icon?: 'circle' | 'habit' | 'chart' | 'lock';
 }
 
-const { title, description = '', ctaHref, ctaLabel } = Astro.props;
+const {
+  title,
+  description = '',
+  ctaHref,
+  ctaLabel,
+  secondaryHref,
+  secondaryLabel,
+  icon = 'circle',
+} = Astro.props;
+
+const ICONS: Record<string, string> = {
+  circle: '<path d="M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 20v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  habit: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>',
+  lock: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+};
 ---
 
-<Card className="max-w-md mx-auto">
-  <CardContent className="flex flex-col items-center text-center py-10">
-    <div class="text-muted-foreground mb-3 text-3xl" aria-hidden="true">○</div>
-    <p class="font-medium text-foreground">{title}</p>
+<Card className="w-full">
+  <CardContent className="flex flex-col items-center text-center px-6 py-12">
+    <span class="empty-state__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={ICONS[icon]}
+      />
+    </span>
+    <p class="empty-state__title">{title}</p>
     {description && (
-      <p class="text-sm text-muted-foreground mt-1 max-w-sm">{description}</p>
+      <p class="empty-state__body">{description}</p>
     )}
-    {ctaHref && ctaLabel && (
-      <Button asChild className="mt-5">
-        <a href={ctaHref}>{ctaLabel}</a>
-      </Button>
+    {(ctaHref && ctaLabel) && (
+      <a href={ctaHref} class:list={['empty-state__actions', buttonVariants()]}>
+        {ctaLabel}
+      </a>
+    )}
+    {secondaryHref && secondaryLabel && (
+      <a href={secondaryHref} class="empty-state__secondary">
+        {secondaryLabel}
+      </a>
     )}
   </CardContent>
 </Card>
+
+<style>
+  .empty-state__icon {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-bottom: 1rem;
+    border-radius: 0.75rem;
+    background: var(--muted);
+    color: var(--muted-foreground);
+  }
+
+  .empty-state__icon svg {
+    width: 1.375rem;
+    height: 1.375rem;
+  }
+
+  .empty-state__title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--foreground);
+  }
+
+  .empty-state__body {
+    margin-top: 0.375rem;
+    max-width: 46ch;
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+  }
+
+  .empty-state__actions {
+    margin-top: 1.25rem;
+  }
+
+  .empty-state__secondary {
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+</style>

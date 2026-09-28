@@ -1,19 +1,9 @@
 import type { APIRoute } from 'astro';
+import { backendOrigin } from '../../../../../lib/auth';
 
 export const prerender = false;
 
-/**
- * POST /api/auth/webauthn/offer/dismiss
- *
- * Body: `{ username: string }`
- *
- * Sets `users.passkey_offer_dismissed = true` for the named account.
- * After this fires the login flow never re-prompts the user to enrol a
- * passkey; enrolment remains available on the /security page.
- *
- * Idempotent. Always 200 — the response shape does not leak whether the
- * user exists (matches /api/auth/webauthn/check).
- */
+
 export const POST: APIRoute = async ({ request }) => {
   let body: { username?: string } | null = null;
   try {
@@ -32,10 +22,8 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
-  const origin =
-    import.meta.env.BACKEND_URL ||
-    import.meta.env.PUBLIC_BACKEND_URL ||
-    'http://localhost:8085';
+  // Resolved at runtime, not build time — see backendOrigin().
+  const origin = backendOrigin();
   try {
     const res = await fetch(new URL('/auth/webauthn/offer/dismiss', origin), {
       method: 'POST',

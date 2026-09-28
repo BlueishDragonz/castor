@@ -1,0 +1,65 @@
+# Off-host SQLite backup for Castor — audit F1
+#
+# Install on the HOST (apollo), not inside the container. The app must not own
+# its own backups: an OOM kill (F3) or a failed deploy would take the backup
+# job down along with the app, which is precisely the single-event loss F1
+# describes.
+#
+#   sudo install -m 0755 scripts/backup_habits_db.py /usr/local/sbin/
+#   sudo install -m 0644 deploy/castor-backup.service /etc/systemd/system/
+#   sudo install -m 0644 deploy/castor-backup.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now castor-backup.timer
+#
+# Verify it actually ran — a timer that has never fired looks identical to a
+# working one:
+#
+#   sudo systemctl start castor-backup.service
+#   sudo journalctl -u castor-backup -n 20 --no-pager
+#   sudo ls -la /var/backups/castor
+#
+# The `--db` path below is the Docker volume mountpoint. Confirm it with:
+#   docker volume inspect beaverhabits_beaver_data
+#
+# `--dest` is deliberately NOT inside that volume, so the snapshots survive
+# the loss of the volume they came from.
+
+[Unit]
+Description=Castor habit database backup (SQLite Online Backup API)
+Documentation=file:/opt/castor/docs/migration/audit-2026-09-26-production-security.md
+# The database lives in a Docker volume. The volume must exist before we try to
+# read from it, but we must not start the container to do so — this job is
+# independent of the app by design.
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/backup_habits_db.py \
+    --db /var/lib/docker/volumes/beaverhabits_beaver_data/_data/habits.db \
+    --dest /var/backups/castor \
+    --keep 14
+
+# The script must never take the database's own directory as its destination,
+# but guard against a bad edit reintroducing that mistake at the service level
+# too, by requiring the destination to pre-exist and be owned by root.
+ReadWritePaths=/var/backups/castor
+ReadOnlyPaths=/var/lib/docker/volumes/beaverhabits_beaver_data
+
+# Hardening. This job only reads one file and writes snapshots; it needs
+# nothing else.
+User=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

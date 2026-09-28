@@ -249,7 +249,14 @@ async def test_authenticated_user_can_delete_own_account(client: TestClient):
     token = login_response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    delete_response = client.delete("/api/v1/account", headers=headers)
+    # F18/F24: deletion requires a fresh-password step-up bound to the
+    # authenticated principal, not merely a valid bearer.
+    delete_response = client.request(
+        "DELETE",
+        "/api/v1/account",
+        headers=headers,
+        json={"password": PASSWORD},
+    )
     assert delete_response.status_code == 204
     assert delete_response.content == b""
 
@@ -810,13 +817,62 @@ async def test_admin_register_duplicate_email_fails(
 async def test_non_admin_cannot_register_user(
     auth_headers, admin_protected_client: TestClient
 ):
-    """Test that non-admin users cannot register new users when admin-only mode is enabled."""
-    response = admin_protected_client.post(
-        "/auth/register",
-        json={"email": "should_fail@test.com", "password": PASSWORD},
-        headers=auth_headers,
-    )
-    assert response.status_code == 401
+    """Test that non-admin users cannot register new users when admin-only mode is enabled.
+
+    F16: ADMIN_EMAIL must be set for this to be an *authorization* decision.
+    With it unset, `current_admin_user` now returns 503 (misconfiguration)
+    rather than 401, because 401 would tell the operator to fix their
+    credentials when the real fault is missing config. This test previously
+    passed only because the unconfigured case silently 401'd everyone —
+    including the account it meant to be an admin.
+    """
+    non_admin_email = f"should_fail_{datetime.now().timestamp()}@test.com"
+    original_admin_email = settings.ADMIN_EMAIL
+    # A real admin is configured, so the guard is a genuine authz check.
+    settings.ADMIN_EMAIL = f"the_actual_admin_{datetime.now().timestamp()}@test.com"
+    try:
+        response = admin_protected_client.post(
+            "/auth/register",
+            json={"email": non_admin_email, "password": PASSWORD},
+            headers=auth_headers,
+        )
+        assert response.status_code == 401
+    finally:
+        settings.ADMIN_EMAIL = original_admin_email
+
+
+async def test_admin_registration_refused_when_admin_email_unset(
+    admin_protected_client: TestClient,
+    auth_headers,
+):
+    """F16: no configured administrator => 503, not a 401 lockout.
+
+    This is the audit's actual finding. An unset ADMIN_EMAIL previously made
+    `user.email != ""` true for every account, permanently denying the admin
+    surface with a 401 that looked like an auth problem. It must now surface
+    as a configuration error instead.
+
+    `auth_headers` is required so the request clears the 401 that the auth
+    router raises for an anonymous caller *before* the admin dependency runs —
+    without it this would assert 401 for the wrong reason and pass trivially.
+    """
+    original_admin_email = settings.ADMIN_EMAIL
+    settings.ADMIN_EMAIL = ""
+    try:
+        response = admin_protected_client.post(
+            "/auth/register",
+            json={
+                "email": f"anyone_{datetime.now().timestamp()}@test.com",
+                "password": PASSWORD,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 503, (
+            "an unconfigured ADMIN_EMAIL must report misconfiguration (503), "
+            f"not an auth failure; got {response.status_code}"
+        )
+    finally:
+        settings.ADMIN_EMAIL = original_admin_email
 
 
 # ============================================================================

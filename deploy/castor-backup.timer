@@ -1,0 +1,24 @@
+# Daily Castor habit database backup — audit F1
+#
+# 04:17 rather than 04:00 on purpose. The app's own
+# `daily_backup_task` (disabled, ENABLE_DAILY_BACKUP=False) also targets
+# midnight, and a snapshot taken while another backup is mid-write competes for
+# the same SQLite page cache and the same disk I/O. Staggering avoids the
+# collision, and an off-round minute also keeps this off the same schedule as
+# whatever else runs at :00.
+
+[Unit]
+Description=Run the Castor habit database backup daily
+Documentation=file:/opt/castor/docs/migration/audit-2026-09-26-production-security.md
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+# A machine that is off at 04:17 still backs up on the next boot. Without this,
+# a nightly job silently skips any day the host was down or suspended.
+Persistent=true
+# Spread the load a little; harmless for a job this small.
+RandomizedDelaySec=300
+Unit=castor-backup.service
+
+[Install]
+WantedBy=timers.target

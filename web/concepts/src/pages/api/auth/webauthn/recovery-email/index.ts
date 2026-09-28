@@ -13,6 +13,7 @@
  */
 import type { APIRoute } from 'astro';
 import { readToken } from '../../../../../lib/auth';
+import { backendOrigin } from '../../../../../lib/auth';
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   const token = readToken(cookies);
@@ -41,7 +42,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     );
   }
 
-  const origin = process.env.BACKEND_URL || 'http://localhost:8085';
+  const origin = backendOrigin();
   const res = await fetch(new URL('/auth/webauthn/recovery-email', origin), {
     method: 'POST',
     headers: {

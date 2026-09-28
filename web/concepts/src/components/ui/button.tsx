@@ -37,6 +37,10 @@ const buttonVariants = cva(
         sm: 'h-9 rounded-md px-3',
         lg: 'h-11 rounded-md px-8',
         icon: 'h-10 w-10',
+        // For labels that can be long on a narrow screen (filenames,
+        // sentences). Keeps the button inside its container instead of
+        // pushing the page wider — whitespace-nowrap is the default.
+        wrap: 'h-auto min-h-10 whitespace-normal py-2 text-left',
       },
     },
     defaultVariants: {

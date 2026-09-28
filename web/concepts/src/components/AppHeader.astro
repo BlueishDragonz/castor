@@ -1,0 +1,211 @@
+---
+/**
+ * AppHeader — the persistent top navigation for signed-in surfaces.
+ *
+ * Why this exists
+ * ---------------
+ * Before this pass, desktop navigation was a single hamburger button
+ * buried in each page's header (verified: `nav.bottom-nav` computes to
+ * `display: none` at every width ≥641px, and the only other nav
+ * affordance was the DesktopMenu trigger). That meant the product's
+ * five primary destinations — Habits, Stats, Circles, Settings and the
+ * account menu — were invisible, and a user who landed on /stats by
+ * typing the URL had no on-screen way to reach anything else.
+ *
+ * It is server-rendered Astro with no client JavaScript: the current
+ * route is known at request time, so the active state is just a
+ * comparison. The account menu stays a client island (DesktopMenu)
+ * because it is a Radix sheet with a logout POST.
+ *
+ * Mobile (<641px) keeps the existing fixed BottomNav — a top bar plus
+ * a bottom bar on a phone would be redundant and eat vertical space.
+ * Below 641px this header renders only the wordmark, which the
+ * BottomNav does not provide.
+ */
+import { DesktopMenu } from './DesktopMenu.tsx';
+
+interface Props {
+  /** Current pathname, used to mark the active nav item. */
+  pathname: string;
+  email?: string | null;
+}
+
+const { pathname, email = null } = Astro.props;
+
+// Primary destinations. Order matches the mobile MoreSheet so the two
+// surfaces teach the same mental model.
+//
+// Settings is deliberately NOT here. It is not a peer of the other
+// three: Habits, Stats and Circles are places you go to do something,
+// while Settings is the account/configuration drawer that the hamburger
+// menu exists to open. A Settings tab in the primary bar also left it
+// as a permanent item competing for space with the three that matter,
+// and it was the only nav item that rendered a page with no
+// destination of its own to return from.
+const NAV_ITEMS = [
+  { href: '/habits', label: 'Habits' },
+  { href: '/stats', label: 'Stats' },
+  { href: '/circles', label: 'Circles' },
+];
+
+// Exact match for top-level pages; prefix match for detail routes so
+// that /habits/abc keeps "Habits" marked active.
+function isActive(href: string): boolean {
+  if (href === '/habits') {
+    return pathname === '/habits' || pathname.startsWith('/habits/');
+  }
+  if (href === '/circles') {
+    return pathname === '/circles' || pathname.startsWith('/circles/');
+  }
+  return pathname === href;
+}
+---
+
+<header class="app-header">
+  <div class="app-header__inner">
+    <a href="/habits" class="app-header__brand" aria-label="Castor — habits home">
+      <span class="app-header__mark" aria-hidden="true">C</span>
+      <span class="app-header__wordmark">Castor</span>
+    </a>
+
+    <nav class="app-header__nav" aria-label="Main">
+      <ul>
+        {NAV_ITEMS.map((item) => (
+          <li>
+            <a
+              href={item.href}
+              class="app-header__link"
+              aria-current={isActive(item.href) ? 'page' : undefined}
+            >
+              {item.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+
+    <div class="app-header__actions">
+      <DesktopMenu client:load email={email} />
+    </div>
+  </div>
+</header>
+
+<style>
+  /*
+   * Sticky rather than fixed: it participates in layout so page content
+   * flows underneath it without a hard-coded top offset. `backdrop-filter`
+   * lets scrolling content show through faintly, which keeps the page
+   * feeling continuous instead of cut in half.
+   */
+  .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: color-mix(in oklab, var(--background) 88%, transparent);
+    backdrop-filter: saturate(1.4) blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .app-header__inner {
+    max-width: var(--castor-content-width);
+    margin-inline: auto;
+    padding-inline: 1rem;
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  @media (min-width: 640px) {
+    .app-header__inner {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  .app-header__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--foreground);
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+
+  .app-header__mark {
+    display: grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 0.5rem;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 0.875rem;
+    font-weight: 700;
+  }
+
+  .app-header__wordmark {
+    font-size: 0.9375rem;
+  }
+
+  .app-header__nav {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .app-header__nav ul {
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  /*
+   * The active item is marked by background + weight, never by colour
+   * alone — `aria-current="page"` carries the same information to
+   * assistive tech, and the pill shape is a non-colour cue.
+   */
+  .app-header__link {
+    display: inline-block;
+    padding: 0.375rem 0.625rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  .app-header__link:hover {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+
+  .app-header__link[aria-current='page'] {
+    background: var(--secondary);
+    color: var(--secondary-foreground);
+    font-weight: 600;
+  }
+
+  .app-header__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  /*
+   * Phones: hide the wordmark and the primary links (the fixed
+   * BottomNav owns navigation below 641px) so the bar is just a compact
+   * identity row plus the account menu.
+   */
+  @media (max-width: 640px) {
+    .app-header__nav {
+      display: none;
+    }
+  }
+</style>

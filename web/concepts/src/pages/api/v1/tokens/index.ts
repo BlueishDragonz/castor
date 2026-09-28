@@ -22,10 +22,16 @@
  * Backend contract (slice 7): tests/test_slice7_tokens.py.
  */
 import type { APIRoute } from 'astro';
-import { backendFetch } from '../../../../lib/auth';
+import { backendFetch, safeRedirectTarget } from '../../../../lib/auth';
 
 function redirectBack(url: URL, fallback: string, action?: string): Response {
-  const target = url.searchParams.get('redirect') || fallback;
+  // F22: `redirect` was copied straight into the Location header, so
+  // POST /api/v1/tokens?redirect=https://evil.tld issued a 303 to an
+  // attacker-controlled origin from a trusted page — and the 303 was emitted
+  // regardless of whether the token action succeeded, so it needed no valid
+  // session to be useful as a phishing link. safeRedirectTarget() restricts
+  // the value to a same-site path.
+  const target = safeRedirectTarget(url.searchParams.get('redirect'), fallback);
   const sep = target.includes('?') ? '&' : '?';
   const finalAction = action ?? url.searchParams.get('action') ?? 'updated';
   return new Response(null, {

@@ -2,11 +2,12 @@ import uuid
 from typing import Optional
 import base64
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin, exceptions
 from fastapi_users.jwt import decode_jwt, generate_jwt
 import jwt
 from sqlalchemy import select
+from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -19,6 +20,7 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from castor.configs import settings
 from castor.logger import logger
 
+from . import crud
 from .db import User, WebAuthnCredential, get_user_db
 from .audit import record
 
@@ -55,6 +57,59 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         await record("register", user_id=user.id)
+
+    async def create(
+        self,
+        user_create,
+        safe: bool = False,
+        request: Optional[Request] = None,
+    ) -> User:
+        """F17: enforce MAX_USER_COUNT, without a check-then-act race.
+
+        This setting was declared in `configs.py` and never read anywhere, so
+        an operator who set it to cap registrations would see no effect at all
+        — a configuration knob that silently does nothing is worse than no
+        knob, because it is trusted.
+
+        The check is in `create` (not `on_after_register`) so the cap is
+        enforced BEFORE a row is written; enforcing it afterwards would leave
+        an over-cap account that must then be deleted by hand.
+
+        -1 is the documented "unlimited" default and skips the database work
+        entirely, so the default deployment pays nothing for this.
+
+        The claim is a single conditional UPDATE (see
+        `crud.try_claim_registration_seat`) rather than a count followed by an
+        insert. The earlier version did `SELECT COUNT(*)` and then inserted,
+        which two simultaneous registrations could both pass — exactly the
+        first burst of traffic a cap exists to regulate. The conditional
+        UPDATE cannot be passed by two callers at once.
+
+        A claimed seat is released if the user creation then fails, so a
+        transient error cannot permanently consume capacity.
+        """
+        claimed = await crud.try_claim_registration_seat(settings.MAX_USER_COUNT)
+        if not claimed:
+            # Deliberately NOT `exceptions.UserAlreadyExists`: that maps to a
+            # 400 "email already registered", which would tell a prospective
+            # user their address is taken. The truth is that the instance is
+            # full. A 429 with Retry-After is the accurate signal, and it stops
+            # a signup bot from hammering a closed door.
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "This instance is at capacity and is not accepting "
+                    "new registrations."
+                ),
+                headers={"Retry-After": "3600"},
+            )
+        try:
+            return await super().create(user_create, safe=safe, request=request)
+        except Exception:
+            # The seat was granted but the user was not created. Give it back,
+            # or a run of failed signups permanently shrinks the instance.
+            await crud.release_registration_seat()
+            raise
 
     async def on_after_forgot_password(
         self, user: User, token: str, request: Optional[Request] = None
@@ -162,11 +217,20 @@ def get_jwt_strategy() -> JWTStrategy:
 
 
 def get_cookie_settings() -> dict:
-    """Cookie settings for auth - Strict + Secure in production."""
+    """Cookie settings for auth - Strict + Secure in production.
+
+    The Secure decision comes from `settings.is_https_public()`, which reads
+    PUBLIC_URL first and falls back to the legacy APP_URL / TLS_TERMINATED
+    pair. It previously consulted only APP_URL and TLS_TERMINATED, so an
+    operator who configured the documented public origin (FRONTEND_URL /
+    PUBLIC_URL) as https but left the SaaS-era APP_URL empty shipped a
+    30-day session cookie without Secure. Behind a TLS-terminating reverse
+    proxy that is exactly the cookie most worth protecting.
+    """
     return {
         "httponly": True,
         "samesite": "strict",
-        "secure": settings.TLS_TERMINATED or settings.APP_URL.startswith("https://"),
+        "secure": settings.is_https_public(),
     }
 
 

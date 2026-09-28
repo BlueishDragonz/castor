@@ -37,15 +37,187 @@ const BACKEND_WEBAUTHN_COOKIE = 'beaver_webauthn';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 /**
+ * Read a server-side configuration value.
+ *
+ * This deliberately reads `process.env` ONLY.
+ *
+ * The history matters, because the obvious fix is the wrong one. An
+ * earlier version consulted `import.meta.env` as a fallback, because
+ * `astro dev` loads `web/concepts/.env` into `import.meta.env` rather
+ * than into `process.env`, and without that fallback the dev origin was
+ * '' and every state-changing request was rejected with 403.
+ *
+ * That fallback is a production hazard, and it is subtle: Vite
+ * statically replaces an `import.meta.env` member expression at BUILD
+ * time and, in doing so, inlines the *entire* build-time env object into
+ * the emitted SSR chunk — including unrelated values. The built server
+ * bundle was observed containing the full env dump (USER, TERM, and
+ * every declared variable) as a literal. That both leaks build-time
+ * configuration into deployed code and freezes the value: the container
+ * sets these at start-up, long after the image was built, so a baked
+ * value silently wins over the real one.
+ *
+ * Both `astro dev` and the production container run in a real Node
+ * process, so `process.env` is authoritative in both. For dev, the value
+ * is exported by `scripts/dev-up.sh`, which is also the supported way to
+ * configure a local run.
+ */
+function serverEnv(key: 'FRONTEND_URL' | 'PUBLIC_BACKEND_URL' | 'PUBLIC_URL'): string {
+  return process.env[key] ?? '';
+}
+
+/**
+ * The public origin the browser uses to reach this app (scheme://host[:port]).
+ *
+ * Single source of truth for both `isProd()` and the F21 `Origin` header, so
+ * the cookie's `Secure` decision and the CSRF origin assertion can never
+ * disagree about which origin is public.
+ *
+ * BACKEND_URL is deliberately NOT consulted here. In dev the Vite proxy
+ * rewrites Host/Origin to the backend, so BACKEND_URL resolved to
+ * http://127.0.0.1:8085 and this function returned the *backend's own
+ * address* as the browser's origin. The backend's BrowserOriginMiddleware
+ * then compared http://127.0.0.1:8085 against an allowlist of frontend
+ * origins, found no match, and rejected every state-changing BFF request
+ * with 403 "Browser origin not allowed" — so sign-in was impossible in a
+ * default checkout. Observed directly via instrumenting the middleware:
+ *   [origin-probe] path=/auth/login origin='http://127.0.0.1:8085' rejected=True
+ *
+ * Returning '' is safe: backendFetch then falls back to inboundOrigin(),
+ * which reads the origin off the request actually being served.
+ */
+function publicOrigin(): string {
+  const raw =
+    serverEnv('PUBLIC_URL') ||
+    serverEnv('FRONTEND_URL') ||
+    serverEnv('PUBLIC_BACKEND_URL');
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    return url.origin;
+  } catch {
+    // A malformed URL must not become an `Origin: undefined` header.
+    return '';
+  }
+}
+
+/**
+ * The origin the *inbound browser request* came from, as seen by this
+ * server-side BFF.
+ *
+ * Used when FRONTEND_URL is not configured. Reading it off the request
+ * being served is authoritative — the origin of the request is by
+ * definition the origin being acted for — whereas deriving it from
+ * BACKEND_URL is wrong: in dev the Vite proxy rewrites Host/Origin to
+ * the backend, so the BFF was asserting http://127.0.0.1:8085 as the
+ * browser's origin. The backend's BrowserOriginMiddleware then compared
+ * that against a list of frontend origins, found no match, and rejected
+ * every state-changing request with 403 "Browser origin not allowed",
+ * so sign-in was impossible in a default checkout. Confirmed by
+ * instrumenting the middleware:
+ *   [origin-probe] path=/auth/login origin='http://127.0.0.1:8085' rejected=True
+ *
+ * The backend still decides whether the origin is allowed; this only
+ * makes the assertion possible.
+ */
+function inboundOrigin(): string {
+  const astro = (globalThis as {
+    Astro?: { request?: Request; url?: URL };
+  }).Astro;
+  // Astro.url is derived from the inbound request's Host header, so it
+  // reflects the origin the browser actually used.
+  const url = astro?.url;
+  if (url) return url.origin;
+  const header =
+    astro?.request?.headers.get('origin') ??
+    astro?.request?.headers.get('referer');
+  if (!header) return '';
+  try {
+    return new URL(header).origin;
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Detect production from env. Two flags accepted so both Astro-native
  * (PUBLIC_BACKEND_URL) and Docker-compose-style (TLS_TERMINATED) deploys
  * work without coordination.
+ *
+ * F6: this must reflect the PUBLIC origin the browser actually uses, not the
+ * internal backend address. Production runs the backend on
+ * BACKEND_URL=http://127.0.0.1:8081 (plain HTTP, loopback-only) while the
+ * browser reaches the app over VPN at FRONTEND_URL=http://10.8.0.1:8080.
+ * Deriving `Secure` from BACKEND_URL therefore made isProd() false in
+ * production and shipped a 30-day session cookie without the Secure flag —
+ * the code's stated intent ("Strict + Secure in production") was not what ran.
+ * FRONTEND_URL is the operator-declared public origin, so it is the correct
+ * input. BACKEND_URL is no longer consulted at all: it is an internal address
+ * that says nothing about where the browser is, and using it here previously
+ * both shipped a non-Secure production cookie (F6) and made the CSRF
+ * Origin assertion name the backend instead of the frontend. A dev deploy
+ * with neither var set is correctly treated as non-production.
  */
 function isProd(): boolean {
-  const backendUrl = process.env.PUBLIC_BACKEND_URL ?? process.env.BACKEND_URL ?? '';
-  if (backendUrl.startsWith('https://')) return true;
+  const origin = publicOrigin();
+  if (origin.startsWith('https://')) return true;
   if (process.env.TLS_TERMINATED === 'true') return true;
   return false;
+}
+/**
+ * Constrain a caller-supplied redirect target to a same-site path (F22).
+ *
+ * Returns `fallback` unless the value is a path that stays on this origin.
+ * Rejected:
+ *   - absolute URLs (`https://evil.tld`, `//evil.tld` protocol-relative)
+ *   - backslash variants the browser normalises to authority
+ *     (`/\evil.tld`, `\\evil.tld`) — these are the bypasses that make a naive
+ *     "must start with /" check fail
+ *   - control characters, which enable header splitting
+ *
+ * This is the same check `login.astro` already used correctly; it is now
+ * shared so the token BFF and login cannot drift apart.
+ */
+export function safeRedirectTarget(
+  value: string | null | undefined,
+  fallback = '/',
+): string {
+  if (typeof value !== 'string' || value === '') return fallback;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(value)) return fallback;
+  // Must be an absolute path, but not protocol-relative (`//host`).
+  if (!value.startsWith('/')) return fallback;
+  if (value.startsWith('//')) return fallback;
+  // `\` and `/` are equivalent to the WHATWG URL parser for authority
+  // detection, so normalise before the check above's sibling test.
+  if (value.startsWith('/\\') || value.startsWith('\\\\')) return fallback;
+  return value;
+}
+
+/**
+ * Reject an unauthenticated BFF request with a 401.
+ *
+ * Returns the session when the request is authenticated, or `null` when it is
+ * not. Kept as a helper so every BFF route fails the same way instead of each
+ * inventing its own check.
+ */
+export function requireSession(cookies: AstroCookies): Session | null {
+  if (!readToken(cookies)) return null;
+  return readSession(cookies);
+}
+
+/**
+ * Relay a backend JSON response verbatim (status + body + content type).
+ *
+ * The Authorization header is deliberately NOT copied back: it would leak the
+ * backend's auth material into a response the browser can read, which is the
+ * exact class of problem F7 is about.
+ */
+export function jsonProxy(res: Response): Response {
+  return new Response(res.body, {
+    status: res.status,
+    headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' },
+  });
 }
 
 /** Read the bearer token from the request cookie, or null if absent. */
@@ -79,7 +251,14 @@ export function writeSession(
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
   cookies.set(USERNAME_COOKIE, email, {
-    httpOnly: false, // visible to client for UI greeting
+    // F18: httpOnly. This cookie is a display/greeting convenience only — it is
+    // never an authorization input. It was previously readable and writable by
+    // page JavaScript, which is what let an attacker with a stolen session
+    // token redirect the account-deletion step-up check onto an account they
+    // controlled. Nothing in the client bundle reads it (grep-verified: the
+    // only document.cookie readers touch habit_* display prefs), and the UI
+    // greeting is served from Astro.locals.session, so this costs no function.
+    httpOnly: true,
     sameSite: 'lax',
     secure,
     path: '/',
@@ -152,9 +331,59 @@ export function mirrorWebAuthnBrowserCookie(
 }
 
 /**
+ * Resolve the backend's base URL at RUNTIME.
+ *
+ * Why this exists: `import.meta.env.BACKEND_URL` is a *private* Vite
+ * variable, so Vite statically substitutes it at BUILD time and the
+ * literal lands in the emitted SSR chunks. In the container, BACKEND_URL
+ * is supplied by the environment at container start — long after the
+ * image was built — so every call site written that way silently shipped
+ * the build-time value. A production deployment that set BACKEND_URL
+ * correctly still talked to whatever host was baked in at image build.
+ *
+ * Only `process.env` is read here, and deliberately so. Mentioning
+ * `import.meta.env` anywhere in this file causes Vite to inline the
+ * *entire* build-time env object — including unrelated variables like
+ * USER — into the emitted chunk. Avoiding the member expression keeps
+ * the resolution genuinely runtime.
+ *
+ * `astro dev` and the container both run in a real Node process, so
+ * `process.env` is populated in both and no build-time fallback is
+ * needed. The default matches the in-container gunicorn port.
+ *
+ * Server-side only: it reads `process`, which the browser does not have.
+ */
+export function backendOrigin(): string {
+  return process.env.BACKEND_URL || 'http://127.0.0.1:8081';
+}
+
+/**
  * Forward an authenticated fetch to the backend. If the request has
  * a bearer cookie, attach it as `Authorization: Bearer *** Otherwise
  * the call is anonymous.
+ *
+ * F21 — this function re-activates the backend's CSRF gate, which was
+ * silently inert for all BFF traffic.
+ *
+ * `BrowserOriginMiddleware` (castor/app/http_security.py) decides on
+ * `Origin`/`Referer`, and this helper previously built its headers from
+ * scratch and forwarded neither. The middleware therefore saw no Origin AND
+ * no Cookie, fell through to the "no evidence" branch, and allowed every
+ * request unconditionally — the CSRF layer did nothing on exactly the path it
+ * was written to protect, leaving only `SameSite=Lax`.
+ *
+ * The value forwarded is the *public frontend origin* the BFF is acting on
+ * behalf of, taken from FRONTEND_URL. That is the same origin the browser
+ * sends, and the one `ALLOWED_ORIGINS` is configured with. Deriving it here
+ * — at the single choke point every BFF route already goes through — means a
+ * new endpoint added later cannot reintroduce F21 by forgetting to pass
+ * anything. It is deliberately not derived from BACKEND_URL: the backend
+ * talks to itself over loopback, so that address says nothing about where the
+ * browser is, and asserting it would compare the wrong tuple against the
+ * allowlist.
+ *
+ * An explicit `origin` (the real inbound header) takes precedence, for the
+ * cases where the caller genuinely has the request in hand.
  *
  * Side effect: if the response carries a `beaver_webauthn` Set-Cookie
  * header, mirror it onto `castor_webauthn_browser` so subsequent
@@ -164,17 +393,29 @@ export async function backendFetch(
   cookies: AstroCookies,
   path: string,
   init: RequestInit = {},
+  origin?: string | null,
 ): Promise<Response> {
   const token = readToken(cookies);
   const headers = new Headers(init.headers);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
+  const effectiveOrigin = origin ?? publicOrigin() ?? inboundOrigin();
+  if (effectiveOrigin) {
+    // F21: the backend's origin allowlist can only be evaluated against a
+    // real same-origin value. Also send Referer as a fallback for the
+    // middleware's `origin if origin is not None else referer` lookup.
+    headers.set('Origin', effectiveOrigin);
+    if (!headers.has('Referer')) {
+      headers.set('Referer', effectiveOrigin);
+    }
+  }
   // The /auth/* and /api/v1/* prefixes are proxied by Astro/Vite to the
   // backend in dev. In production, the same prefixes are forwarded by
   // the reverse proxy in front of both services.
-  const origin = process.env.BACKEND_URL || 'http://localhost:8085';
-  const res = await fetch(new URL(path, origin), { ...init, headers });
+  // Resolved at runtime, not build time — see backendOrigin().
+  const backendOrigin = process.env.BACKEND_URL || 'http://127.0.0.1:8081';
+  const res = await fetch(new URL(path, backendOrigin), { ...init, headers });
   mirrorWebAuthnBrowserCookie(res, cookies);
   return res;
 }

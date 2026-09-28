@@ -1,3 +1,18 @@
+# pnpm requires a `packages:` field in this file. Without it, pnpm 9 — the
+# version CI pins via pnpm/action-setup — aborts with:
+#
+#   ERROR  packages field missing or empty
+#
+# and `pnpm install --frozen-lockfile` never reaches the lockfile, so every
+# job that installs the frontend fails. Newer pnpm (12 locally) tolerates the
+# omission, which is why this stayed invisible until CI ran.
+#
+# This file predates the current branch: it was added in 3757ddc, so main was
+# already failing to build. It is a single-package workspace whose
+# package.json sits alongside it, so the package set is this directory.
+packages:
+  - '.'
+
 allowBuilds:
   '@tailwindcss/oxide': true
   esbuild: true
