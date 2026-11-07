@@ -70,16 +70,21 @@ export default defineConfig({
   // forbidden" -- which breaks sign-in, not just form posts.
   //
   // Listing the public host lets Astro trust X-Forwarded-Proto and rebuild
-  // the request origin as https. The protocol is deliberately left
-  // unspecified: the origin is also probed directly over http by the
-  // local health check, and omitting it keeps the real client IP
-  // (X-Forwarded-For) trusted for the direct path as well.
+  // the request origin as https.
+  //
+  // The protocol is pinned, not left open: only "https" is accepted as a
+  // forwarded scheme, so a request that claims X-Forwarded-Proto: http is
+  // not silently trusted. The hostname is likewise pinned to the one
+  // public name, so no other Host value can borrow this trust.
   //
   // This does NOT weaken the CSRF check: a cross-site POST still carries
-  // Origin: https://evil.example and is still rejected. Only the
+  // Origin: https://evil.example, which matches neither the request
+  // origin nor the allow-list, and is still rejected. Only the
   // scheme/host reconstruction is affected.
   security: {
-    allowedDomains: [{ hostname: 'castor.blueishdragon.co.uk' }],
+    allowedDomains: [
+      { hostname: 'castor.blueishdragon.co.uk', protocol: 'https' },
+    ],
   },
   server: { port: 4321, host: '0.0.0.0' },
   integrations,
