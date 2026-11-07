@@ -57,6 +57,30 @@ const backend = process.env.BACKEND_URL || 'http://localhost:8085';
 export default defineConfig({
   output: 'server',
   adapter: node({ mode: 'standalone' }),
+  // ─── Reverse-proxy boundary ───────────────────────────────────────
+  //
+  // Cloudflare terminates TLS in front of this app, so the browser's
+  // Origin is "https://castor.blueishdragon.co.uk" while the request that
+  // reaches Astro is plain HTTP from the tunnel connector.
+  //
+  // Without an allow-list, Astro computes the request origin from the raw
+  // Host header plus the socket scheme (http), so its built-in CSRF check
+  // compares "https://castor..." against "http://castor..." and rejects
+  // EVERY browser form POST with "Cross-site POST form submissions are
+  // forbidden" -- which breaks sign-in, not just form posts.
+  //
+  // Listing the public host lets Astro trust X-Forwarded-Proto and rebuild
+  // the request origin as https. The protocol is deliberately left
+  // unspecified: the origin is also probed directly over http by the
+  // local health check, and omitting it keeps the real client IP
+  // (X-Forwarded-For) trusted for the direct path as well.
+  //
+  // This does NOT weaken the CSRF check: a cross-site POST still carries
+  // Origin: https://evil.example and is still rejected. Only the
+  // scheme/host reconstruction is affected.
+  security: {
+    allowedDomains: [{ hostname: 'castor.blueishdragon.co.uk' }],
+  },
   server: { port: 4321, host: '0.0.0.0' },
   integrations,
   vite: {
