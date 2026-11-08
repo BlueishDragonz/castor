@@ -74,13 +74,32 @@ export default defineConfig({
   //
   // The protocol is pinned, not left open: only "https" is accepted as a
   // forwarded scheme, so a request that claims X-Forwarded-Proto: http is
-  // not silently trusted. The hostname is likewise pinned to the one
-  // public name, so no other Host value can borrow this trust.
+  // not silently trusted as if the client had arrived over https.
   //
-  // This does NOT weaken the CSRF check: a cross-site POST still carries
-  // Origin: https://evil.example, which matches neither the request
-  // origin nor the allow-list, and is still rejected. Only the
-  // scheme/host reconstruction is affected.
+  // What the hostname entry does and does not do, measured against the
+  // built bundle rather than assumed:
+  //
+  //  - It does NOT gate the forwarded scheme. Astro builds the request
+  //    origin from the RAW Host header and takes only the scheme from
+  //    X-Forwarded-Proto, so a request whose Host is forged still gets
+  //    its scheme rewritten. The scheme is gated by the protocol pin
+  //    above, not by the hostname.
+  //  - It DOES gate X-Forwarded-For, i.e. whether the request's client
+  //    IP is believed. On the plain-HTTP hop from the tunnel connector
+  //    the socket scheme is "http", which never matches the pinned
+  //    "https", so the connector's own address is reported instead of
+  //    the real client IP. The backend cannot see the client IP either
+  //    way (it is reached over loopback, and TRUST_PROXY_HEADERS is
+  //    off), so nothing downstream depends on it.
+  //
+  // CSRF is still enforced, and that is what this list is for: Astro
+  // rejects a state-changing request whose Origin header differs from
+  // the request origin. A browser always sends Host = the host it is
+  // talking to, so a cross-site form POST arrives with
+  // Origin: https://evil.example against a request origin of
+  // https://castor.blueishdragon.co.uk, and is refused. Verified
+  // against the built bundle: CF-shaped request 200, evil Origin 403,
+  // same request without X-Forwarded-Proto 403.
   security: {
     allowedDomains: [
       { hostname: 'castor.blueishdragon.co.uk', protocol: 'https' },
